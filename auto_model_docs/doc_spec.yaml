@@ -1,0 +1,48 @@
+# Document Specification for Auto Model Documentation
+# This YAML file defines the structure and sections of the generated document.
+
+title: "Machine Learning Model Documentation"
+authors: "Data Science Team"
+
+# Sections to include in the document
+# Use "Section Name: per_model" to create separate subsections for each registered model
+sections:
+  - Executive Summary
+  - Data Overview
+  - Feature Engineering
+  - Model Architecture
+  - Training Pipeline
+  - "Model Performance: per_model"
+  - Validation Results
+  - Deployment Considerations
+  - Appendix
+
+# Optional hints to guide content generation for specific sections
+hints:
+  "Executive Summary": >
+    Focus on business impact, key metrics, and high-level model capabilities.
+    Keep it suitable for non-technical stakeholders.
+
+  "Data Overview": >
+    Describe data sources, volume, quality considerations, and any data
+    preprocessing steps applied before feature engineering.
+
+  "Feature Engineering": >
+    Document feature transformations, encoding methods, scaling approaches,
+    and feature selection rationale.
+
+  "Model Architecture": >
+    Include model type, hyperparameters, training configuration,
+    and architectural decisions.
+
+  "Model Performance": >
+    Present key metrics (accuracy, AUC, F1, etc.), confusion matrix
+    insights, and performance analysis across different segments.
+
+  "Validation Results": >
+    Cover cross-validation results, holdout set performance,
+    and any bias/fairness analysis performed.
+
+  "Deployment Considerations": >
+    Address inference latency, resource requirements, monitoring strategy,
+    and model refresh cadence.
