@@ -105,6 +105,16 @@ console = Console()
     type=int,
     help="Number of parallel workers for content generation",
 )
+@click.option(
+    "--notebook",
+    is_flag=True,
+    help="Also generate editable Jupyter notebook",
+)
+@click.option(
+    "--notebook-only",
+    is_flag=True,
+    help="Regenerate notebook from cached results (skips full pipeline)",
+)
 def main(
     spec: str,
     output: str | None,
@@ -118,6 +128,8 @@ def main(
     verbose: bool,
     max_files: int,
     workers: int,
+    notebook: bool,
+    notebook_only: bool,
 ) -> None:
     """Generate model documentation from ML codebases.
 
@@ -166,6 +178,11 @@ def main(
         output_dir = settings.output_dir if settings.output_dir.exists() else _get_default_output_dir()
         code_dir = settings.code_root if settings.code_root.exists() else _get_default_code_root()
 
+        # Handle --notebook-only mode (regenerate from cache)
+        if notebook_only:
+            _regenerate_notebook_only(output_dir, verbose)
+            return
+
         # Load document spec
         console.print(f"\n[bold blue]Loading specification:[/] {spec}")
         doc_spec = DocumentSpec.from_yaml(spec)
@@ -179,6 +196,7 @@ def main(
             console.print(f"[dim]Model:[/] {settings.get_model_name()}")
             console.print(f"[dim]Max files:[/] {settings.max_files}")
             console.print(f"[dim]Workers:[/] {settings.parallel_workers}")
+            console.print(f"[dim]Notebook:[/] {notebook}")
             console.print(f"[dim]Max retries:[/] {settings.llm_max_retries}")
             console.print(f"[dim]Initial backoff:[/] {settings.llm_initial_backoff}")
             console.print(f"[dim]Max backoff:[/] {settings.llm_max_backoff}")
@@ -210,6 +228,7 @@ def main(
             output_dir=output_dir,
             parallel_workers=settings.parallel_workers,
             max_files=settings.max_files,
+            generate_notebook=notebook,
         )
 
         # Run generation with progress
@@ -234,7 +253,11 @@ def main(
 
         # Success!
         console.print(f"\n[bold green]Success![/] Document generated:")
-        console.print(f"  [cyan]{output_path}[/]\n")
+        console.print(f"  [cyan]{output_path}[/]")
+        if notebook:
+            notebook_path = output_dir / "model_docs_notebook.ipynb"
+            console.print(f"  [cyan]{notebook_path}[/]")
+        console.print()
 
     except FileNotFoundError as e:
         console.print(f"\n[bold red]Error:[/] File not found: {e}", style="red")
@@ -250,6 +273,51 @@ def main(
         if verbose:
             console.print_exception()
         sys.exit(1)
+
+
+def _regenerate_notebook_only(output_dir: Path, verbose: bool) -> None:
+    """Regenerate notebook from cached results without running full pipeline."""
+    from autodoc.generation import NotebookBuilder
+
+    console.print("\n[bold blue]Regenerating notebook from cache...[/]\n")
+
+    cache_path = output_dir / ".autodoc_cache.json"
+    if not cache_path.exists():
+        console.print(
+            f"[bold red]Error:[/] No cached results found at {cache_path}",
+            style="red",
+        )
+        console.print("[dim]Run full generation first with --notebook flag[/]")
+        sys.exit(1)
+
+    # Create a minimal orchestrator just for notebook regeneration
+    # We don't need LLM client for this
+    from autodoc.orchestrator import Orchestrator
+
+    # Create orchestrator with dummy values (won't be used)
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    orchestrator.output_dir = output_dir
+    orchestrator.notebook_builder = NotebookBuilder(output_dir=output_dir)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(bar_width=40),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task("Regenerating notebook...", total=100)
+
+        def on_progress(phase: str, pct: float) -> None:
+            completed = pct * 100
+            progress.update(task_id, completed=completed, description=f"{phase}...")
+
+        # Regenerate notebook from cache
+        notebook_path = asyncio.run(orchestrator.regenerate_notebook(on_progress))
+
+    console.print(f"\n[bold green]Success![/] Notebook regenerated:")
+    console.print(f"  [cyan]{notebook_path}[/]")
+    console.print()
 
 
 def _get_default_output_dir() -> Path:

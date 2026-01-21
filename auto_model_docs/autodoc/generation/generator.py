@@ -193,7 +193,11 @@ class ContentGenerator:
         return GeneratedContent(
             block_type=ContentType.CHART,
             content=image_bytes,
-            metadata={"title": data.get("title", ""), "chart_type": chart_type},
+            metadata={
+                "title": data.get("title", ""),
+                "chart_type": chart_type,
+                "chart_data": data,  # Store raw data for notebook serialization
+            },
         )
 
     def _render_chart(self, data: Dict[str, Any], chart_type: str) -> bytes:

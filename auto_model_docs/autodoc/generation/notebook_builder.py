@@ -1,0 +1,484 @@
+"""Jupyter notebook builder for editable documentation."""
+
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
+
+import nbformat
+from nbclient import NotebookClient
+from nbformat.v4 import new_code_cell, new_markdown_cell, new_notebook
+
+from autodoc.core.exceptions import BuilderError
+from autodoc.core.models import (
+    ContentType,
+    DocumentSpec,
+    GeneratedContent,
+    SectionResult,
+)
+
+# Regex pattern to match emojis and other problematic unicode
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F680-\U0001F6FF"  # transport & map symbols
+    "\U0001F1E0-\U0001F1FF"  # flags
+    "\U00002702-\U000027B0"  # dingbats
+    "\U000024C2-\U0001F251"  # enclosed characters
+    "\U0001F900-\U0001F9FF"  # supplemental symbols
+    "\U0001FA00-\U0001FA6F"  # chess symbols
+    "\U0001FA70-\U0001FAFF"  # symbols and pictographs extended-A
+    "\U00002600-\U000026FF"  # misc symbols
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+class NotebookBuilder:
+    """Builds Jupyter notebooks from generated content.
+
+    Creates editable notebooks that can be modified in Jupyter/Domino
+    and then exported back to Word documents.
+    """
+
+    def __init__(self, output_dir: Path = Path("/mnt/artifacts")):
+        """Initialize the notebook builder.
+
+        Args:
+            output_dir: Directory to save generated notebooks.
+        """
+        self.output_dir = output_dir
+
+    def _sanitize_for_notebook(self, text: str) -> str:
+        """Remove emojis and problematic unicode from text.
+
+        Jupyter notebooks can have issues serializing certain unicode
+        characters (especially emojis) which causes UnicodeEncodeError.
+
+        Args:
+            text: Input text that may contain emojis.
+
+        Returns:
+            Sanitized text with emojis removed.
+        """
+        return EMOJI_PATTERN.sub("", text)
+
+    def _sanitize_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Recursively sanitize all strings in a dictionary.
+
+        Args:
+            data: Dictionary that may contain strings with emojis.
+
+        Returns:
+            Dictionary with all strings sanitized.
+        """
+        result = {}
+        for key, value in data.items():
+            if isinstance(value, str):
+                result[key] = self._sanitize_for_notebook(value)
+            elif isinstance(value, dict):
+                result[key] = self._sanitize_dict(value)
+            elif isinstance(value, list):
+                result[key] = self._sanitize_list(value)
+            else:
+                result[key] = value
+        return result
+
+    def _sanitize_list(self, data: List[Any]) -> List[Any]:
+        """Recursively sanitize all strings in a list.
+
+        Args:
+            data: List that may contain strings with emojis.
+
+        Returns:
+            List with all strings sanitized.
+        """
+        result = []
+        for item in data:
+            if isinstance(item, str):
+                result.append(self._sanitize_for_notebook(item))
+            elif isinstance(item, dict):
+                result.append(self._sanitize_dict(item))
+            elif isinstance(item, list):
+                result.append(self._sanitize_list(item))
+            else:
+                result.append(item)
+        return result
+
+    async def build(
+        self,
+        spec: DocumentSpec,
+        results: List[SectionResult],
+    ) -> Path:
+        """Build a Jupyter notebook from generated content.
+
+        Args:
+            spec: Document specification.
+            results: List of generated section results.
+
+        Returns:
+            Path to the generated notebook.
+
+        Raises:
+            BuilderError: If notebook building fails.
+        """
+        try:
+            # Create new notebook with Python 3 kernel
+            nb = new_notebook()
+            nb.metadata.kernelspec = {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3",
+            }
+            nb.metadata.language_info = {
+                "name": "python",
+                "version": "3.10",
+            }
+
+            # Add setup cell
+            nb.cells.append(self._create_setup_cell(spec))
+
+            # Add title cell
+            nb.cells.append(self._create_title_cell(spec))
+
+            # Add section cells
+            for result in results:
+                self._add_section_cells(nb, result)
+
+            # Add export section
+            nb.cells.append(self._create_export_instructions_cell())
+            nb.cells.append(self._create_export_cell())
+
+            # Execute all cells except the export cell to generate outputs
+            nb = self._execute_notebook(nb)
+
+            # Save notebook with outputs
+            output_path = self._save_notebook(nb)
+
+            return output_path
+
+        except Exception as e:
+            raise BuilderError(f"Notebook building failed: {e}") from e
+
+    def _execute_notebook(
+        self, nb: nbformat.NotebookNode
+    ) -> nbformat.NotebookNode:
+        """Execute notebook cells to generate outputs.
+
+        Executes all cells except the export cell at the end.
+
+        Args:
+            nb: The notebook to execute.
+
+        Returns:
+            The executed notebook with outputs.
+        """
+        # Mark the export cell to skip execution by adding a tag
+        # The export cell is the last code cell
+        export_cell_index = len(nb.cells) - 1
+
+        # Create a client to execute the notebook
+        client = NotebookClient(
+            nb,
+            timeout=120,  # 2 minute timeout per cell
+            kernel_name="python3",
+            resources={"metadata": {"path": str(self.output_dir)}},
+        )
+
+        try:
+            # Execute cells one by one, skipping the export cell
+            client.km, client.kc = client.create_kernel_manager()
+            client.start_new_kernel()
+            client.start_new_kernel_client()
+
+            for index, cell in enumerate(nb.cells):
+                # Skip markdown cells and the export cell
+                if cell.cell_type != "code":
+                    continue
+                if index == export_cell_index:
+                    continue
+
+                try:
+                    client.execute_cell(cell, index)
+                except Exception as cell_error:
+                    # Add error output to cell but continue
+                    cell.outputs = [{
+                        "output_type": "error",
+                        "ename": "ExecutionError",
+                        "evalue": str(cell_error),
+                        "traceback": [str(cell_error)],
+                    }]
+
+            client.stop_kernel()
+        except Exception as e:
+            # If kernel fails to start, return notebook without outputs
+            pass
+
+        return nb
+
+    def _create_setup_cell(self, spec: DocumentSpec) -> nbformat.NotebookNode:
+        """Create the setup cell with imports and configuration."""
+        code = f'''# Document Configuration
+# Edit these values as needed
+
+DOCUMENT_TITLE = "{spec.title}"
+DOCUMENT_AUTHORS = "{spec.authors}"
+
+# Imports
+import matplotlib
+matplotlib.use('module://matplotlib_inline.backend_inline')
+import matplotlib.pyplot as plt
+import pandas as pd
+from pathlib import Path
+
+# Enable inline plotting for Jupyter
+%matplotlib inline
+
+# Plot styling
+plt.rcParams['figure.figsize'] = (10, 6)
+plt.rcParams['font.size'] = 12
+plt.rcParams['axes.titlesize'] = 14
+plt.rcParams['axes.labelsize'] = 12
+
+print(f"Document: {{DOCUMENT_TITLE}}")
+print(f"Authors: {{DOCUMENT_AUTHORS}}")
+print("Setup complete!")'''
+        return new_code_cell(source=code)
+
+    def _create_title_cell(self, spec: DocumentSpec) -> nbformat.NotebookNode:
+        """Create the title markdown cell."""
+        date_str = datetime.now().strftime("%B %d, %Y")
+        content = f"""# {spec.title}
+
+**Authors:** {spec.authors}
+
+**Date:** {date_str}
+
+---
+
+*This notebook contains editable documentation. Modify charts, tables, and text as needed, then run the export cell at the bottom to generate an updated Word document.*"""
+        return new_markdown_cell(source=content)
+
+    def _add_section_cells(
+        self, nb: nbformat.NotebookNode, result: SectionResult
+    ) -> None:
+        """Add cells for a section."""
+        # Section header
+        header_content = f"## {result.plan.number}. {result.plan.title}"
+        nb.cells.append(new_markdown_cell(source=header_content))
+
+        # Content cells
+        for content in result.contents:
+            cell = self._create_content_cell(content)
+            if cell:
+                nb.cells.append(cell)
+
+        # Add error notes if any
+        if result.errors:
+            error_content = "**Note:** Some content could not be generated:\n"
+            for error in result.errors:
+                error_content += f"- {error}\n"
+            nb.cells.append(new_markdown_cell(source=error_content))
+
+    def _create_content_cell(
+        self, content: GeneratedContent
+    ) -> nbformat.NotebookNode | None:
+        """Create a cell for a content block."""
+        if content.block_type == ContentType.NARRATIVE:
+            return self._create_narrative_cell(content.content)
+
+        elif content.block_type == ContentType.TABLE:
+            return self._create_table_cell(content.content)
+
+        elif content.block_type == ContentType.CHART:
+            return self._create_chart_cell(content.metadata)
+
+        elif content.block_type in (ContentType.BULLET_LIST, ContentType.NUMBERED_LIST):
+            return self._create_list_cell(content.content, content.block_type)
+
+        return None
+
+    def _create_narrative_cell(self, text: str) -> nbformat.NotebookNode:
+        """Create a markdown cell for narrative text."""
+        return new_markdown_cell(source=self._sanitize_for_notebook(text))
+
+    def _create_table_cell(self, data: Dict[str, Any]) -> nbformat.NotebookNode:
+        """Create a code cell for table display using pandas."""
+        # Sanitize all data to remove emojis
+        data = self._sanitize_dict(data)
+
+        caption = data.get("caption", "Table")
+        columns = data.get("columns", [])
+        rows = data.get("rows", [])
+
+        # Generate code to create and display DataFrame
+        rows_repr = json.dumps(rows, indent=4, ensure_ascii=True)
+        columns_repr = json.dumps(columns, ensure_ascii=True)
+
+        code = f'''# {caption}
+# Edit the data below to modify the table
+
+table_data = {rows_repr}
+
+columns = {columns_repr}
+
+df = pd.DataFrame(table_data)
+if columns:
+    df = df[columns]  # Reorder columns
+
+print("{caption}")
+df'''
+        return new_code_cell(source=code)
+
+    def _create_chart_cell(self, metadata: Dict[str, Any]) -> nbformat.NotebookNode:
+        """Create a code cell for chart visualization."""
+        chart_data = metadata.get("chart_data", {})
+        chart_type = metadata.get("chart_type", "bar")
+        title = metadata.get("title", "Chart")
+
+        return new_code_cell(source=self._serialize_chart(chart_data, chart_type))
+
+    def _serialize_chart(self, data: Dict[str, Any], chart_type: str) -> str:
+        """Serialize chart data to executable matplotlib code.
+
+        Args:
+            data: Chart data dictionary with labels, values, title, etc.
+            chart_type: Type of chart (bar, line, scatter).
+
+        Returns:
+            Python code string for creating the chart.
+        """
+        # Sanitize data to remove emojis
+        data = self._sanitize_dict(data)
+
+        title = data.get("title", "Chart")
+        labels = data.get("labels", [])
+        values = data.get("values", [])
+        xlabel = data.get("xlabel", "")
+        ylabel = data.get("ylabel", "")
+
+        # Generate the data dictionary representation
+        data_repr = json.dumps(
+            {
+                "labels": labels,
+                "values": values,
+                "title": title,
+                "xlabel": xlabel,
+                "ylabel": ylabel,
+            },
+            indent=4,
+            ensure_ascii=True,
+        )
+
+        # Generate chart-specific plotting code
+        if chart_type == "line":
+            plot_code = self._serialize_line_chart()
+        elif chart_type == "scatter":
+            plot_code = self._serialize_scatter_chart()
+        else:  # Default to bar
+            plot_code = self._serialize_bar_chart()
+
+        return f'''# {title}
+# Edit the data or styling below, then run this cell to preview
+
+chart_data = {data_repr}
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+{plot_code}
+
+ax.set_title(chart_data["title"], fontsize=14, fontweight="bold")
+ax.set_xlabel(chart_data["xlabel"])
+ax.set_ylabel(chart_data["ylabel"])
+plt.xticks(rotation=45, ha="right")
+plt.tight_layout()
+plt.show()'''
+
+    def _serialize_bar_chart(self) -> str:
+        """Generate bar chart plotting code."""
+        return '''ax.bar(chart_data["labels"], chart_data["values"], color="#4361ee")'''
+
+    def _serialize_line_chart(self) -> str:
+        """Generate line chart plotting code."""
+        return '''ax.plot(chart_data["labels"], chart_data["values"], marker="o", color="#4361ee", linewidth=2)'''
+
+    def _serialize_scatter_chart(self) -> str:
+        """Generate scatter chart plotting code."""
+        return '''x = list(range(len(chart_data["values"])))
+ax.scatter(x, chart_data["values"], color="#4361ee", s=100)
+ax.set_xticks(x)
+ax.set_xticklabels(chart_data["labels"])'''
+
+    def _create_list_cell(
+        self, items: List[str], list_type: ContentType
+    ) -> nbformat.NotebookNode:
+        """Create a markdown cell for a list."""
+        if not items:
+            return new_markdown_cell(source="")
+
+        # Sanitize items to remove emojis
+        items = [self._sanitize_for_notebook(item) for item in items]
+
+        if list_type == ContentType.NUMBERED_LIST:
+            lines = [f"{i+1}. {item}" for i, item in enumerate(items)]
+        else:
+            lines = [f"- {item}" for item in items]
+
+        return new_markdown_cell(source="\n".join(lines))
+
+    def _create_export_instructions_cell(self) -> nbformat.NotebookNode:
+        """Create markdown cell with export instructions."""
+        content = """---
+
+## Export to Word Document
+
+After making your edits above, run the cell below to export this notebook to a Word document.
+
+**Instructions:**
+1. Save this notebook (Ctrl+S or Cmd+S)
+2. Run all cells to ensure charts are up to date
+3. Run the export cell below
+4. Find your Word document in the output directory"""
+        return new_markdown_cell(source=content)
+
+    def _create_export_cell(self) -> nbformat.NotebookNode:
+        """Create the export code cell with embedded paths."""
+        # Get absolute path to auto_model_docs directory (where autodoc package lives)
+        auto_model_docs_dir = Path(__file__).parent.parent.parent.resolve()
+        output_dir = self.output_dir.resolve()
+
+        code = f'''# Export to Word Document
+import sys
+sys.path.insert(0, "{auto_model_docs_dir}")  # Embedded at generation time
+
+from autodoc.generation.notebook_exporter import NotebookExporter
+from pathlib import Path
+
+output_dir = Path("{output_dir}")  # Embedded at generation time
+notebook_path = output_dir / "model_docs_notebook.ipynb"
+
+exporter = NotebookExporter(output_dir=output_dir)
+output_path = exporter.export_to_word(
+    notebook_path=notebook_path,
+    title=DOCUMENT_TITLE,
+    authors=DOCUMENT_AUTHORS,
+)
+print(f"Exported to: {{output_path}}")'''
+        return new_code_cell(source=code)
+
+    def _save_notebook(self, nb: nbformat.NotebookNode) -> Path:
+        """Save the notebook to the output directory."""
+        # Ensure output directory exists
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename
+        filename = "model_docs_notebook.ipynb"
+        output_path = self.output_dir / filename
+
+        # Write notebook
+        with open(output_path, "w", encoding="utf-8") as f:
+            nbformat.write(nb, f)
+
+        return output_path
