@@ -48,6 +48,7 @@ class Orchestrator:
         max_files: int = 50,
         max_file_size: int = 50000,
         generate_notebook: bool = False,
+        notebook_path: Optional[Path] = None,
     ):
         """Initialize the orchestrator.
 
@@ -61,12 +62,15 @@ class Orchestrator:
             max_files: Maximum files to scan.
             max_file_size: Maximum file size in characters.
             generate_notebook: Whether to also generate an editable Jupyter notebook.
+            notebook_path: Custom path for the generated notebook. If not provided,
+                uses <output_dir>/model_docs_notebook.ipynb.
         """
         self.llm = llm
         self.sanitizer = sanitizer
         self.code_root = code_root
         self.output_dir = output_dir
         self.generate_notebook = generate_notebook
+        self.notebook_path = notebook_path
 
         # Initialize components
         self.code_scanner = CodeScanner(
@@ -85,7 +89,10 @@ class Orchestrator:
 
         # Optional notebook builder
         if generate_notebook:
-            self.notebook_builder = NotebookBuilder(output_dir=output_dir)
+            self.notebook_builder = NotebookBuilder(
+                output_dir=output_dir,
+                notebook_path=notebook_path,
+            )
 
         # Semaphore for limiting concurrent LLM calls
         self.semaphore = asyncio.Semaphore(parallel_workers)
@@ -150,7 +157,7 @@ class Orchestrator:
         if self.generate_notebook:
             await self.notebook_builder.build(spec, results)
 
-        # Save results to cache for --notebook-only rebuilds
+        # Save results to cache for --notebook-from-cache rebuilds
         self._save_results_cache(spec, results)
 
         if on_progress:
@@ -187,7 +194,10 @@ class Orchestrator:
             on_progress("Building notebook", 0.0)
 
         if not hasattr(self, "notebook_builder"):
-            self.notebook_builder = NotebookBuilder(output_dir=self.output_dir)
+            self.notebook_builder = NotebookBuilder(
+                output_dir=self.output_dir,
+                notebook_path=self.notebook_path if hasattr(self, "notebook_path") else None,
+            )
 
         notebook_path = await self.notebook_builder.build(spec, results)
 

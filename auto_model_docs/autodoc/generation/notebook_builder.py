@@ -43,13 +43,29 @@ class NotebookBuilder:
     and then exported back to Word documents.
     """
 
-    def __init__(self, output_dir: Path = Path("/mnt/artifacts")):
+    # Default dependencies required for generated notebooks
+    DEFAULT_DEPENDENCIES: List[str] = ["matplotlib", "pandas"]
+
+    def __init__(
+        self,
+        output_dir: Path = Path("/mnt/artifacts"),
+        dependencies: List[str] | None = None,
+        notebook_path: Path | None = None,
+    ):
         """Initialize the notebook builder.
 
         Args:
             output_dir: Directory to save generated notebooks.
+            dependencies: List of package names to check/install. Defaults to
+                DEFAULT_DEPENDENCIES if not provided.
+            notebook_path: Custom path for the generated notebook. If not provided,
+                uses <output_dir>/model_docs_notebook.ipynb.
         """
         self.output_dir = output_dir
+        self.dependencies = (
+            dependencies if dependencies is not None else self.DEFAULT_DEPENDENCIES.copy()
+        )
+        self.notebook_path = notebook_path
 
     def _sanitize_for_notebook(self, text: str) -> str:
         """Remove emojis and problematic unicode from text.
@@ -136,6 +152,9 @@ class NotebookBuilder:
                 "name": "python",
                 "version": "3.10",
             }
+
+            # Add dependency check cell (runs first)
+            nb.cells.append(self._create_dependency_cell())
 
             # Add setup cell
             nb.cells.append(self._create_setup_cell(spec))
@@ -245,6 +264,34 @@ plt.rcParams['axes.labelsize'] = 12
 print(f"Document: {{DOCUMENT_TITLE}}")
 print(f"Authors: {{DOCUMENT_AUTHORS}}")
 print("Setup complete!")'''
+        return new_code_cell(source=code)
+
+    def _create_dependency_cell(self) -> nbformat.NotebookNode:
+        """Create a cell that checks and installs required dependencies."""
+        packages_repr = repr(self.dependencies)
+        code = f'''# Dependency Check
+import subprocess
+import sys
+from importlib.util import find_spec
+
+REQUIRED_PACKAGES = {packages_repr}
+
+def check_and_install_packages(packages):
+    missing = []
+    for package in packages:
+        import_name = package.replace("-", "_")
+        if find_spec(import_name) is None:
+            missing.append(package)
+
+    if missing:
+        print(f"Installing missing packages: {{', '.join(missing)}}")
+        for package in missing:
+            subprocess.run([sys.executable, "-m", "pip", "install", package, "-q"], check=True)
+        print("All packages installed!")
+    else:
+        print("All required packages are already installed.")
+
+check_and_install_packages(REQUIRED_PACKAGES)'''
         return new_code_cell(source=code)
 
     def _create_title_cell(self, spec: DocumentSpec) -> nbformat.NotebookNode:
@@ -449,6 +496,12 @@ After making your edits above, run the cell below to export this notebook to a W
         auto_model_docs_dir = Path(__file__).parent.parent.parent.resolve()
         output_dir = self.output_dir.resolve()
 
+        # Determine the notebook path
+        if self.notebook_path:
+            notebook_path_str = str(self.notebook_path.resolve())
+        else:
+            notebook_path_str = str(output_dir / "model_docs_notebook.ipynb")
+
         code = f'''# Export to Word Document
 import sys
 sys.path.insert(0, "{auto_model_docs_dir}")  # Embedded at generation time
@@ -457,7 +510,7 @@ from autodoc.generation.notebook_exporter import NotebookExporter
 from pathlib import Path
 
 output_dir = Path("{output_dir}")  # Embedded at generation time
-notebook_path = output_dir / "model_docs_notebook.ipynb"
+notebook_path = Path("{notebook_path_str}")  # Embedded at generation time
 
 exporter = NotebookExporter(output_dir=output_dir)
 output_path = exporter.export_to_word(
@@ -469,13 +522,15 @@ print(f"Exported to: {{output_path}}")'''
         return new_code_cell(source=code)
 
     def _save_notebook(self, nb: nbformat.NotebookNode) -> Path:
-        """Save the notebook to the output directory."""
-        # Ensure output directory exists
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Generate filename
-        filename = "model_docs_notebook.ipynb"
-        output_path = self.output_dir / filename
+        """Save the notebook to the output directory or custom path."""
+        if self.notebook_path:
+            output_path = self.notebook_path
+            # Ensure parent directory exists
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            # Ensure output directory exists
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = self.output_dir / "model_docs_notebook.ipynb"
 
         # Write notebook
         with open(output_path, "w", encoding="utf-8") as f:

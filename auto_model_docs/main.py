@@ -111,9 +111,14 @@ console = Console()
     help="Also generate editable Jupyter notebook",
 )
 @click.option(
-    "--notebook-only",
+    "--notebook-from-cache",
     is_flag=True,
     help="Regenerate notebook from cached results (skips full pipeline)",
+)
+@click.option(
+    "--notebook-path",
+    type=click.Path(),
+    help="Custom path for the generated notebook (default: <output>/model_docs_notebook.ipynb)",
 )
 def main(
     spec: str,
@@ -129,7 +134,8 @@ def main(
     max_files: int,
     workers: int,
     notebook: bool,
-    notebook_only: bool,
+    notebook_from_cache: bool,
+    notebook_path: str | None,
 ) -> None:
     """Generate model documentation from ML codebases.
 
@@ -178,9 +184,13 @@ def main(
         output_dir = settings.output_dir if settings.output_dir.exists() else _get_default_output_dir()
         code_dir = settings.code_root if settings.code_root.exists() else _get_default_code_root()
 
-        # Handle --notebook-only mode (regenerate from cache)
-        if notebook_only:
-            _regenerate_notebook_only(output_dir, verbose)
+        # Handle --notebook-from-cache mode (regenerate from cache)
+        if notebook_from_cache:
+            _regenerate_notebook_from_cache(
+                output_dir,
+                verbose,
+                Path(notebook_path) if notebook_path else None,
+            )
             return
 
         # Load document spec
@@ -228,7 +238,8 @@ def main(
             output_dir=output_dir,
             parallel_workers=settings.parallel_workers,
             max_files=settings.max_files,
-            generate_notebook=notebook,
+            generate_notebook=notebook or bool(notebook_path),
+            notebook_path=Path(notebook_path) if notebook_path else None,
         )
 
         # Run generation with progress
@@ -254,9 +265,9 @@ def main(
         # Success!
         console.print(f"\n[bold green]Success![/] Document generated:")
         console.print(f"  [cyan]{output_path}[/]")
-        if notebook:
-            notebook_path = output_dir / "model_docs_notebook.ipynb"
-            console.print(f"  [cyan]{notebook_path}[/]")
+        if notebook or notebook_path:
+            actual_notebook_path = Path(notebook_path) if notebook_path else output_dir / "model_docs_notebook.ipynb"
+            console.print(f"  [cyan]{actual_notebook_path}[/]")
         console.print()
 
     except FileNotFoundError as e:
@@ -275,7 +286,11 @@ def main(
         sys.exit(1)
 
 
-def _regenerate_notebook_only(output_dir: Path, verbose: bool) -> None:
+def _regenerate_notebook_from_cache(
+    output_dir: Path,
+    verbose: bool,
+    notebook_path: Path | None = None,
+) -> None:
     """Regenerate notebook from cached results without running full pipeline."""
     from autodoc.generation import NotebookBuilder
 
@@ -297,7 +312,11 @@ def _regenerate_notebook_only(output_dir: Path, verbose: bool) -> None:
     # Create orchestrator with dummy values (won't be used)
     orchestrator = Orchestrator.__new__(Orchestrator)
     orchestrator.output_dir = output_dir
-    orchestrator.notebook_builder = NotebookBuilder(output_dir=output_dir)
+    orchestrator.notebook_path = notebook_path
+    orchestrator.notebook_builder = NotebookBuilder(
+        output_dir=output_dir,
+        notebook_path=notebook_path,
+    )
 
     with Progress(
         SpinnerColumn(),
@@ -313,10 +332,10 @@ def _regenerate_notebook_only(output_dir: Path, verbose: bool) -> None:
             progress.update(task_id, completed=completed, description=f"{phase}...")
 
         # Regenerate notebook from cache
-        notebook_path = asyncio.run(orchestrator.regenerate_notebook(on_progress))
+        result_notebook_path = asyncio.run(orchestrator.regenerate_notebook(on_progress))
 
     console.print(f"\n[bold green]Success![/] Notebook regenerated:")
-    console.print(f"  [cyan]{notebook_path}[/]")
+    console.print(f"  [cyan]{result_notebook_path}[/]")
     console.print()
 
 
