@@ -44,7 +44,16 @@ class NotebookBuilder:
     """
 
     # Default dependencies required for generated notebooks
-    DEFAULT_DEPENDENCIES: List[str] = ["matplotlib", "pandas"]
+    DEFAULT_DEPENDENCIES: List[str] = [
+        "matplotlib>=3.7.0",
+        "pandas>=2.0.0",
+        "pydantic>=2.0.0",
+        "pydantic-settings>=2.0.0",
+        "pyyaml>=6.0",
+        "python-docx>=1.0.0",
+        "nbformat>=5.9.0",
+        "nbclient>=0.8.0",
+    ]
 
     def __init__(
         self,
@@ -279,7 +288,9 @@ REQUIRED_PACKAGES = {packages_repr}
 def check_and_install_packages(packages):
     missing = []
     for package in packages:
-        import_name = package.replace("-", "_")
+        # Extract base package name (remove version specifier)
+        base_package = package.split('>=')[0].split('==')[0].split('<')[0].split('>')[0]
+        import_name = base_package.replace("-", "_")
         if find_spec(import_name) is None:
             missing.append(package)
 

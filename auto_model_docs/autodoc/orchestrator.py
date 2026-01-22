@@ -3,8 +3,11 @@
 import asyncio
 import base64
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from autodoc.core.models import (
     ArtifactContext,
@@ -49,6 +52,10 @@ class Orchestrator:
         max_file_size: int = 50000,
         generate_notebook: bool = False,
         notebook_path: Optional[Path] = None,
+        experiment_names: Optional[List[str]] = None,
+        model_names: Optional[List[str]] = None,
+        latest_only: bool = False,
+        disable_project_filtering: bool = False,
     ):
         """Initialize the orchestrator.
 
@@ -64,6 +71,10 @@ class Orchestrator:
             generate_notebook: Whether to also generate an editable Jupyter notebook.
             notebook_path: Custom path for the generated notebook. If not provided,
                 uses <output_dir>/model_docs_notebook.ipynb.
+            experiment_names: List of experiment names to include.
+            model_names: List of specific model names to include.
+            latest_only: Only include the latest version of each model.
+            disable_project_filtering: Disable automatic Domino project filtering.
         """
         self.llm = llm
         self.sanitizer = sanitizer
@@ -82,6 +93,10 @@ class Orchestrator:
         )
         self.artifact_scanner = ArtifactScanner(
             tracking_uri=mlflow_tracking_uri,
+            experiment_names=experiment_names,
+            model_names=model_names,
+            latest_only=latest_only,
+            disable_project_filtering=disable_project_filtering,
         )
         self.planner = SectionPlanner(llm=llm, sanitizer=sanitizer)
         self.generator = ContentGenerator(llm=llm)
@@ -365,7 +380,18 @@ class Orchestrator:
         """Plan all sections in the document."""
         plans: List[SectionPlan] = []
         section_num = 1
-        total_sections = len(spec.sections)
+        
+        # Calculate total number of planning operations for accurate progress
+        total_planning_operations = 0
+        for section in spec.sections:
+            if section.per_model:
+                models = artifact_ctx.models or []
+                total_planning_operations += max(1, len(models))  # At least 1 for generic section
+            else:
+                total_planning_operations += 1
+        
+        logger.info(f"Planning {total_planning_operations} sections/subsections across {len(spec.sections)} document sections")
+        completed_operations = 0
 
         for i, section in enumerate(spec.sections):
             if section.per_model:
@@ -383,6 +409,7 @@ class Orchestrator:
                     plan = await self.planner.plan_section(section, context)
                     plan.number = str(section_num)
                     plans.append(plan)
+                    completed_operations += 1
                 else:
                     for j, model in enumerate(models, 1):
                         context = GenerationContext(
@@ -395,6 +422,12 @@ class Orchestrator:
                         plan = await self.planner.plan_section(section, context)
                         plan.number = f"{section_num}.{j}"
                         plans.append(plan)
+                        completed_operations += 1
+                        
+                        # Update progress after each model subsection
+                        if on_progress:
+                            progress = completed_operations / total_planning_operations
+                            on_progress("Planning", progress)
             else:
                 # Regular section
                 context = GenerationContext(
@@ -406,13 +439,14 @@ class Orchestrator:
                 plan = await self.planner.plan_section(section, context)
                 plan.number = str(section_num)
                 plans.append(plan)
+                completed_operations += 1
+                
+                # Update progress after each regular section
+                if on_progress:
+                    progress = completed_operations / total_planning_operations
+                    on_progress("Planning", progress)
 
             section_num += 1
-
-            # Update progress
-            if on_progress:
-                progress = (i + 1) / total_sections
-                on_progress("Planning", progress)
 
         return plans
 

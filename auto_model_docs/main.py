@@ -2,6 +2,7 @@
 """CLI entry point for Auto Model Documentation."""
 
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -120,6 +121,32 @@ console = Console()
     type=click.Path(),
     help="Custom path for the generated notebook (default: <output>/model_docs_notebook.ipynb)",
 )
+@click.option(
+    "--timeout",
+    default=120.0,
+    type=float,
+    help="Timeout for individual LLM API calls in seconds (default: 120)",
+)
+@click.option(
+    "--experiments",
+    type=str,
+    help="Comma-separated list of experiment names/patterns to include. Supports wildcards: * (any) and ? (single char). Example: customer_churn*,fraud_detection",
+)
+@click.option(
+    "--models", 
+    type=str,
+    help="Comma-separated list of model names/patterns to include. Supports wildcards: * (any) and ? (single char). Example: churn*,fraud_detector",
+)
+@click.option(
+    "--latest-only",
+    is_flag=True,
+    help="Only include the latest version of each model",
+)
+@click.option(
+    "--disable-project-filtering",
+    is_flag=True,
+    help="Disable automatic Domino project filtering (scan all projects)",
+)
 def main(
     spec: str,
     output: str | None,
@@ -136,6 +163,11 @@ def main(
     notebook: bool,
     notebook_from_cache: bool,
     notebook_path: str | None,
+    timeout: float,
+    experiments: str | None,
+    models: str | None,
+    latest_only: bool,
+    disable_project_filtering: bool,
 ) -> None:
     """Generate model documentation from ML codebases.
 
@@ -155,6 +187,14 @@ def main(
     For full configuration options, see the Settings class in autodoc/core/config.py
     """
     try:
+        # Configure logging based on verbosity
+        log_level = logging.INFO if verbose else logging.WARNING
+        logging.basicConfig(
+            level=log_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler()]
+        )
+        
         # Load settings from .env and environment
         settings = Settings()
 
@@ -193,6 +233,15 @@ def main(
             )
             return
 
+        # Parse CSV filtering options
+        experiment_names = None
+        if experiments:
+            experiment_names = [name.strip() for name in experiments.split(",") if name.strip()]
+            
+        model_names = None
+        if models:
+            model_names = [name.strip() for name in models.split(",") if name.strip()]
+
         # Load document spec
         console.print(f"\n[bold blue]Loading specification:[/] {spec}")
         doc_spec = DocumentSpec.from_yaml(spec)
@@ -211,6 +260,16 @@ def main(
             console.print(f"[dim]Initial backoff:[/] {settings.llm_initial_backoff}")
             console.print(f"[dim]Max backoff:[/] {settings.llm_max_backoff}")
             console.print(f"[dim]Backoff jitter:[/] {settings.llm_backoff_jitter}")
+            console.print(f"[dim]Timeout:[/] {timeout}s")
+            
+            # Show filtering options
+            console.print(f"[dim]Project filtering:[/] {'disabled' if disable_project_filtering else 'enabled'}")
+            if experiment_names:
+                console.print(f"[dim]Experiments:[/] {', '.join(experiment_names)}")
+            if model_names:
+                console.print(f"[dim]Models:[/] {', '.join(model_names)}")
+            if latest_only:
+                console.print(f"[dim]Version filtering:[/] latest only")
 
         # Get API key from settings
         try:
@@ -229,6 +288,7 @@ def main(
             initial_backoff=settings.llm_initial_backoff,
             max_backoff=settings.llm_max_backoff,
             backoff_jitter=settings.llm_backoff_jitter,
+            timeout_seconds=timeout,
         )
         sanitizer = ContentSanitizer()
         orchestrator = Orchestrator(
@@ -240,6 +300,11 @@ def main(
             max_files=settings.max_files,
             generate_notebook=notebook or bool(notebook_path),
             notebook_path=Path(notebook_path) if notebook_path else None,
+            # Pass filtering options to orchestrator
+            experiment_names=experiment_names,
+            model_names=model_names,
+            latest_only=latest_only,
+            disable_project_filtering=disable_project_filtering,
         )
 
         # Run generation with progress

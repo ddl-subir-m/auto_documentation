@@ -1,9 +1,14 @@
 """MLflow artifact scanner for extracting model metadata."""
 
-from typing import Optional
+import fnmatch
+import logging
+import os
+from typing import List, Optional, Set
 
 from autodoc.core.exceptions import ScannerError
 from autodoc.core.models import ArtifactContext, ModelInfo
+
+logger = logging.getLogger(__name__)
 
 
 class ArtifactScanner:
@@ -17,15 +22,27 @@ class ArtifactScanner:
         self,
         tracking_uri: Optional[str] = None,
         experiment_name: Optional[str] = None,
+        experiment_names: Optional[List[str]] = None,
+        model_names: Optional[List[str]] = None,
+        latest_only: bool = False,
+        disable_project_filtering: bool = False,
     ):
         """Initialize the artifact scanner.
 
         Args:
             tracking_uri: MLflow tracking server URI.
-            experiment_name: Specific experiment to query (optional).
+            experiment_name: Specific experiment to query (optional, deprecated).
+            experiment_names: List of experiment names to include.
+            model_names: List of specific model names to include.
+            latest_only: Only include the latest version of each model.
+            disable_project_filtering: Disable automatic Domino project filtering.
         """
         self.tracking_uri = tracking_uri
-        self.experiment_name = experiment_name
+        self.experiment_name = experiment_name  # Keep for backward compatibility
+        self.experiment_names = experiment_names or []
+        self.model_names = model_names or []
+        self.latest_only = latest_only
+        self.disable_project_filtering = disable_project_filtering
         self._client = None
 
     def _get_client(self):
@@ -63,17 +80,45 @@ class ArtifactScanner:
             )
 
         try:
-            # Get registered models
-            models = await self._scan_registered_models(client)
+            # Get current Domino project info
+            domino_project_id = None
+            if not self.disable_project_filtering:
+                domino_project_id = os.environ.get("DOMINO_PROJECT_ID")
+                if domino_project_id:
+                    logger.info(f"Filtering models to Domino project: {domino_project_id}")
+                    project_metadata["domino_project_id"] = domino_project_id
+                    project_metadata["domino_project_name"] = os.environ.get("DOMINO_PROJECT_NAME")
 
-            # Get experiment info if specified
+            # Get target experiments based on filtering
+            target_experiments = await self._get_target_experiments(client, domino_project_id)
+            
+            # Log filtering info
+            if target_experiments:
+                logger.info(f"Target experiments: {list(target_experiments.keys())}")
+            if self.model_names:
+                logger.info(f"Filtering to models: {self.model_names}")
+            if self.latest_only:
+                logger.info("Including only latest versions of each model")
+
+            # Get registered models with filtering
+            models = await self._scan_registered_models(client, target_experiments)
+
+            # Get experiment info if specified (backward compatibility)
             if self.experiment_name:
-                project_metadata = await self._get_experiment_metadata(client)
+                project_metadata.update(await self._get_experiment_metadata(client))
 
             project_metadata["mlflow_available"] = True
             project_metadata["tracking_uri"] = self.tracking_uri
+            project_metadata["models_found"] = len(models)
+            project_metadata["filtering_applied"] = {
+                "project_filtering": not self.disable_project_filtering and domino_project_id is not None,
+                "experiment_filtering": bool(self.experiment_names),
+                "model_filtering": bool(self.model_names),
+                "latest_only": self.latest_only,
+            }
 
         except Exception as e:
+            logger.error(f"Error scanning MLflow artifacts: {e}")
             # Log but don't fail - MLflow might not be configured
             project_metadata["mlflow_error"] = str(e)
             project_metadata["mlflow_available"] = False
@@ -84,13 +129,86 @@ class ArtifactScanner:
             project_metadata=project_metadata,
         )
 
-    async def _scan_registered_models(self, client) -> list[ModelInfo]:
+    async def _get_target_experiments(self, client, domino_project_id: Optional[str]) -> dict:
+        """Get target experiments based on filtering criteria.
+        
+        Returns:
+            Dict mapping experiment name to experiment ID for target experiments.
+        """
+        target_experiments = {}
+        
+        try:
+            # Get all experiments
+            experiments = client.search_experiments()
+            
+            for exp in experiments:
+                # Skip deleted experiments
+                if exp.lifecycle_stage == "deleted":
+                    continue
+                    
+                # Apply Domino project filtering
+                if domino_project_id and not self.disable_project_filtering:
+                    project_tag = exp.tags.get("mlflow.domino.project_id")
+                    if project_tag != domino_project_id:
+                        continue
+                
+                # Apply experiment name filtering
+                if self.experiment_names:
+                    # Check if any pattern matches this experiment
+                    matched = False
+                    for pattern in self.experiment_names:
+                        # Use wildcard matching if pattern contains wildcards
+                        if '*' in pattern or '?' in pattern:
+                            if fnmatch.fnmatch(exp.name, pattern):
+                                matched = True
+                                break
+                        else:
+                            # Exact match for non-wildcard patterns
+                            if exp.name == pattern:
+                                matched = True
+                                break
+                    
+                    if not matched:
+                        continue
+                        
+                elif self.experiment_name:  # Backward compatibility
+                    if exp.name != self.experiment_name:
+                        continue
+                
+                target_experiments[exp.name] = exp.experiment_id
+                
+        except Exception as e:
+            logger.warning(f"Error getting target experiments: {e}")
+            
+        return target_experiments
+
+    async def _scan_registered_models(self, client, target_experiments: Optional[dict] = None) -> list[ModelInfo]:
         """Scan MLflow model registry for registered models."""
         models = []
+        model_versions_by_name = {}  # For latest_only filtering
 
         try:
             # Search for all registered models
             for rm in client.search_registered_models():
+                # Apply model name filtering
+                if self.model_names:
+                    # Check if any pattern matches this model name
+                    matched = False
+                    for pattern in self.model_names:
+                        # Use wildcard matching if pattern contains wildcards
+                        if '*' in pattern or '?' in pattern:
+                            if fnmatch.fnmatch(rm.name, pattern):
+                                matched = True
+                                break
+                        else:
+                            # Exact match for non-wildcard patterns
+                            if rm.name == pattern:
+                                matched = True
+                                break
+                    
+                    if not matched:
+                        continue
+                    
                 # Get all versions of this model
                 versions = client.search_model_versions(f"name='{rm.name}'")
 
@@ -98,6 +216,17 @@ class ArtifactScanner:
                     try:
                         # Get the run associated with this version
                         run = client.get_run(version.run_id)
+                        
+                        # Check if the experiment is deleted
+                        experiment = client.get_experiment(run.info.experiment_id)
+                        if experiment and experiment.lifecycle_stage == "deleted":
+                            # Skip models from deleted experiments
+                            continue
+
+                        # Apply experiment filtering if specified
+                        if target_experiments is not None:
+                            if experiment.name not in target_experiments:
+                                continue
 
                         model_info = ModelInfo(
                             name=rm.name,
@@ -108,21 +237,31 @@ class ArtifactScanner:
                             params=dict(run.data.params),
                             artifacts=self._list_artifacts(client, version.run_id),
                         )
-                        models.append(model_info)
+                        
+                        # For latest_only filtering, track versions by model name
+                        if self.latest_only:
+                            if rm.name not in model_versions_by_name:
+                                model_versions_by_name[rm.name] = []
+                            model_versions_by_name[rm.name].append(model_info)
+                        else:
+                            models.append(model_info)
 
-                    except Exception:
-                        # Skip versions that can't be loaded
-                        models.append(ModelInfo(
-                            name=rm.name,
-                            version=version.version,
-                            stage=version.current_stage,
-                            run_id=version.run_id,
-                        ))
+                    except Exception as e:
+                        logger.debug(f"Skipping model version {rm.name} v{version.version}: {e}")
+                        # Skip versions that can't be loaded - already filtered by model name patterns above
 
-        except Exception:
-            # Model registry might not have any models
-            pass
+            # Apply latest_only filtering
+            if self.latest_only:
+                for model_name, model_list in model_versions_by_name.items():
+                    # Sort by version number (descending) and take the first one
+                    latest_model = max(model_list, key=lambda m: int(m.version))
+                    models.append(latest_model)
+                    logger.debug(f"Selected latest version of {model_name}: v{latest_model.version}")
 
+        except Exception as e:
+            logger.warning(f"Error scanning registered models: {e}")
+
+        logger.info(f"Found {len(models)} models after filtering")
         return models
 
     def _list_artifacts(self, client, run_id: str) -> list[str]:
@@ -140,6 +279,12 @@ class ArtifactScanner:
         try:
             experiment = client.get_experiment_by_name(self.experiment_name)
             if experiment:
+                # Skip deleted experiments
+                if experiment.lifecycle_stage == "deleted":
+                    metadata["experiment_skipped"] = True
+                    metadata["skip_reason"] = f"Experiment '{self.experiment_name}' is deleted"
+                    return metadata
+                    
                 metadata["experiment_id"] = experiment.experiment_id
                 metadata["experiment_name"] = experiment.name
                 metadata["artifact_location"] = experiment.artifact_location

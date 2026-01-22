@@ -6,9 +6,18 @@ import argparse
 import pandas as pd
 import mlflow
 import mlflow.sklearn
+from datetime import datetime
 
 # Add parent directory to path for shared utilities
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+# Configure MLflow for Domino or local environment
+try:
+    # Try the full configuration first
+    from shared.mlflow_config import configure_mlflow_tracking, print_environment_banner
+except Exception:
+    # Fall back to simple environment-based configuration
+    from shared.mlflow_config_simple import configure_mlflow_env as configure_mlflow_tracking, print_environment_banner
 
 from shared.utils import calculate_classification_metrics, get_classification_report_text
 from shared.plotting import (
@@ -24,8 +33,8 @@ from pipeline import ChurnPipeline, split_data, prepare_features_target
 MODEL_NAME = "churn_predictor"
 
 
-# Project-level experiment name for MLflow UI grouping
-PROJECT_EXPERIMENT_NAME = "customer_churn"
+# Base project-level experiment name for MLflow UI grouping
+BASE_EXPERIMENT_NAME = "customer_churn"
 
 # Define experiments representing different research phases
 EXPERIMENTS = {
@@ -88,7 +97,7 @@ EXPERIMENTS = {
 }
 
 
-def train_model_in_experiment(phase_name, phase_description, model_config, train_data, test_data):
+def train_model_in_experiment(phase_name, phase_description, model_config, train_data, test_data, experiment_name, model_registry_name):
     """
     Train a single model within a specific experiment.
 
@@ -101,8 +110,17 @@ def train_model_in_experiment(phase_name, phase_description, model_config, train
     Returns:
         str: Run ID of the MLflow run
     """
+    # Configure MLflow tracking URI (works with environment variables)
+    try:
+        configure_mlflow_tracking()
+    except Exception as e:
+        print(f"Warning: Could not configure MLflow tracking: {e}")
+        # Ensure environment variable is set as fallback
+        if not os.getenv("MLFLOW_TRACKING_URI"):
+            os.environ["MLFLOW_TRACKING_URI"] = "http://127.0.0.1:5000"
+    
     # Set project-level experiment and tag the phase for filtering
-    mlflow.set_experiment(PROJECT_EXPERIMENT_NAME)
+    mlflow.set_experiment(experiment_name)
 
     # Prepare features and target
     X_train, y_train = prepare_features_target(train_data)
@@ -112,14 +130,14 @@ def train_model_in_experiment(phase_name, phase_description, model_config, train
     run_name = f"{phase_name}__{model_config['name']}_run"
     with mlflow.start_run(run_name=run_name) as run:
         print(f"\n{'='*60}")
-        print(f"Training {model_config['name']} in experiment: {PROJECT_EXPERIMENT_NAME}")
+        print(f"Training {model_config['name']} in experiment: {experiment_name}")
         print(f"MLflow Run ID: {run.info.run_id}")
         print(f"{'='*60}")
         mlflow.set_tags(
             {
                 "phase_name": phase_name,
                 "phase_description": phase_description,
-                "project": PROJECT_EXPERIMENT_NAME,
+                "project": experiment_name,
             }
         )
 
@@ -209,11 +227,11 @@ def train_model_in_experiment(phase_name, phase_description, model_config, train
         print("Artifacts logged successfully")
 
         # Log model to Model Registry
-        print(f"\nRegistering model to Model Registry: {MODEL_NAME}")
+        print(f"\nRegistering model to Model Registry: {model_registry_name}")
         mlflow.sklearn.log_model(
             pipeline,
-            name="model",
-            registered_model_name=MODEL_NAME
+            artifact_path="model",
+            registered_model_name=model_registry_name
         )
 
         run_id = run.info.run_id
@@ -257,13 +275,27 @@ def train_model_in_experiment(phase_name, phase_description, model_config, train
     return run_id
 
 
-def run_all_experiments(data_path):
+def run_all_experiments(data_path, experiment_suffix=None, use_suffix_for_models=False):
     """
     Run all experiments sequentially.
 
     Args:
         data_path: Path to the customer churn dataset
+        experiment_suffix: Optional suffix for experiment name
+        use_suffix_for_models: Whether to also add suffix to model names
     """
+    # Generate experiment and model names with suffix
+    if experiment_suffix:
+        experiment_name = f"{BASE_EXPERIMENT_NAME}_{experiment_suffix}"
+        model_registry_name = f"{MODEL_NAME}_{experiment_suffix}" if use_suffix_for_models else MODEL_NAME
+    else:
+        experiment_name = BASE_EXPERIMENT_NAME
+        model_registry_name = MODEL_NAME
+    
+    print(f"Using experiment name: {experiment_name}")
+    print(f"Using model registry name: {model_registry_name}")
+    print()
+    
     # Load data
     print("Loading data...")
     data = pd.read_csv(data_path)
@@ -288,7 +320,9 @@ def run_all_experiments(data_path):
                 exp_config['description'],
                 model_config,
                 train_data,
-                test_data
+                test_data,
+                experiment_name,
+                model_registry_name
             )
 
     print("\n" + "="*60)
@@ -303,6 +337,9 @@ def run_all_experiments(data_path):
 
 def main():
     """Main execution function."""
+    # Print environment configuration
+    print_environment_banner()
+    
     parser = argparse.ArgumentParser(description='Train customer churn prediction models')
     parser.add_argument(
         '--data-path',
@@ -314,6 +351,22 @@ def main():
         '--generate-data',
         action='store_true',
         help='Generate synthetic data before training'
+    )
+    parser.add_argument(
+        '--experiment-suffix',
+        type=str,
+        default=None,
+        help='Suffix to append to experiment name (e.g., timestamp or run ID)'
+    )
+    parser.add_argument(
+        '--use-timestamp',
+        action='store_true',
+        help='Automatically append timestamp to experiment name'
+    )
+    parser.add_argument(
+        '--suffix-models',
+        action='store_true',
+        help='Also append suffix to model registry names'
     )
 
     args = parser.parse_args()
@@ -333,7 +386,13 @@ def main():
         sys.exit(1)
 
     # Run experiments
-    run_all_experiments(args.data_path)
+    # Determine experiment suffix
+    experiment_suffix = args.experiment_suffix
+    if args.use_timestamp and not experiment_suffix:
+        experiment_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Run all experiments
+    run_all_experiments(args.data_path, experiment_suffix, args.suffix_models)
 
 
 if __name__ == "__main__":

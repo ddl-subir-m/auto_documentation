@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+import logging
 import os
 import random
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from autodoc.core.exceptions import LLMError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,6 +39,7 @@ class LLMClient:
         initial_backoff: float = 1.0,
         max_backoff: float = 20.0,
         backoff_jitter: float = 0.2,
+        timeout_seconds: float = 120.0,
     ):
         """Initialize the LLM client.
 
@@ -47,12 +51,14 @@ class LLMClient:
             initial_backoff: Initial backoff delay in seconds.
             max_backoff: Maximum backoff delay in seconds.
             backoff_jitter: Random jitter factor applied to backoff.
+            timeout_seconds: Timeout for individual API calls in seconds.
         """
         self.provider = provider.lower()
         self.max_retries = max_retries
         self.initial_backoff = initial_backoff
         self.max_backoff = max_backoff
         self.backoff_jitter = backoff_jitter
+        self.timeout_seconds = timeout_seconds
 
         if self.provider == "anthropic":
             from anthropic import AsyncAnthropic
@@ -228,7 +234,28 @@ class LLMClient:
 
         while True:
             try:
-                return await request_fn()
+                # Add timeout wrapper around the request
+                logger.debug(f"Making LLM API call (attempt {attempt + 1}, timeout={self.timeout_seconds}s)")
+                start_time = asyncio.get_event_loop().time()
+                
+                result = await asyncio.wait_for(
+                    request_fn(), 
+                    timeout=self.timeout_seconds
+                )
+                
+                elapsed = asyncio.get_event_loop().time() - start_time
+                logger.debug(f"LLM API call completed in {elapsed:.2f}s")
+                return result
+                
+            except asyncio.TimeoutError as e:
+                logger.warning(f"LLM API call timed out after {self.timeout_seconds}s (attempt {attempt + 1})")
+                if attempt >= self.max_retries:
+                    setattr(e, "_autodoc_retry_attempts", attempt + 1)
+                    raise LLMError(
+                        f"LLM request timed out after {self.timeout_seconds}s "
+                        f"and {attempt + 1} attempts. Consider reducing concurrency "
+                        f"with --workers or increasing timeout."
+                    ) from e
             except Exception as e:
                 retryable = self._is_retryable_error(e)
                 if not retryable or attempt >= self.max_retries:
@@ -236,13 +263,17 @@ class LLMClient:
                         setattr(e, "_autodoc_retry_attempts", attempt)
                     raise
 
-                delay = min(self.max_backoff, backoff)
-                if self.backoff_jitter > 0:
-                    delay += random.uniform(0, delay * self.backoff_jitter)
+                logger.debug(f"LLM API call failed (attempt {attempt + 1}): {e}")
+                
+            # Calculate delay for retry
+            delay = min(self.max_backoff, backoff)
+            if self.backoff_jitter > 0:
+                delay += random.uniform(0, delay * self.backoff_jitter)
 
-                await asyncio.sleep(delay)
-                backoff *= 2
-                attempt += 1
+            logger.debug(f"Retrying LLM API call in {delay:.2f}s")
+            await asyncio.sleep(delay)
+            backoff *= 2
+            attempt += 1
 
     def _is_retryable_error(self, error: Exception) -> bool:
         """Return True for transient errors worth retrying."""
