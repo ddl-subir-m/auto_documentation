@@ -102,8 +102,8 @@ dmypy.json
 .DS_Store
 
 # Application specific
-# output/
-# .autodoc_cache/
+output/
+.autodoc_cache/
 *.docx
 *.pdf
 
