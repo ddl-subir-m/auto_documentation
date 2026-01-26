@@ -495,7 +495,77 @@ def _start_job(job_request: JobRequest) -> JobState:
 
 
 app, rt = fast_app(
+    # Disable default CDN headers and use permissive settings for Domino
+    pico=False,  # Disable pico CSS CDN if causing issues
     hdrs=(
+        # Try multiple CDNs for htmx with fallback
+        Script(src="https://unpkg.com/htmx.org@1.9.10", defer=True),
+        # Fallback vanilla JS polling if htmx fails to load
+        Script(r"""
+            // Fallback polling if htmx doesn't load (for strict CSP environments)
+            window.addEventListener('DOMContentLoaded', function() {
+                // Check if htmx loaded
+                if (typeof htmx === 'undefined') {
+                    console.log('htmx not available, using fallback polling');
+                    
+                    // Fallback status polling
+                    function pollStatus() {
+                        var panel = document.getElementById('status-panel');
+                        if (!panel) return;
+                        
+                        fetch('/status')
+                            .then(function(r) { return r.text(); })
+                            .then(function(html) { panel.innerHTML = html; })
+                            .catch(function(e) { console.log('Status poll error:', e); });
+                    }
+                    
+                    // Poll every 2 seconds
+                    setInterval(pollStatus, 2000);
+                    
+                    // Handle form submission
+                    var form = document.querySelector('form');
+                    if (form) {
+                        form.addEventListener('submit', function(e) {
+                            e.preventDefault();
+                            var formData = new FormData(form);
+                            fetch('/run', {
+                                method: 'POST',
+                                body: formData
+                            })
+                            .then(function(r) { return r.text(); })
+                            .then(function(html) {
+                                var panel = document.getElementById('status-panel');
+                                if (panel) panel.innerHTML = html;
+                            })
+                            .catch(function(e) { console.log('Form submit error:', e); });
+                        });
+                    }
+                    
+                    // Handle stop button clicks
+                    document.addEventListener('click', function(e) {
+                        var target = e.target;
+                        if (target.textContent === 'Stop' && !target.classList.contains('terminal-action-disabled')) {
+                            e.preventDefault();
+                            fetch('/stop', { method: 'POST' })
+                                .then(function(r) { return r.text(); })
+                                .then(function(html) {
+                                    var panel = document.getElementById('status-panel');
+                                    if (panel) panel.innerHTML = html;
+                                });
+                        }
+                        if (target.textContent === 'Clear' && !target.classList.contains('terminal-action-disabled')) {
+                            e.preventDefault();
+                            fetch('/clear-terminal', { method: 'POST' })
+                                .then(function(r) { return r.text(); })
+                                .then(function(html) {
+                                    var panel = document.getElementById('status-panel');
+                                    if (panel) panel.innerHTML = html;
+                                });
+                        }
+                    });
+                }
+            });
+        """),
         Style(
             """
             :root {
@@ -1222,11 +1292,12 @@ def index():
                 hx_encoding="multipart/form-data",
                 enctype="multipart/form-data",
             ),
-            # Terminal panel
+            # Terminal panel - render initial state directly, then poll for updates
             Div(
+                _render_status(_resolve_job(ACTIVE_JOB_ID)),
                 id="status-panel",
                 hx_get="/status",
-                hx_trigger="load, every 2s",
+                hx_trigger="every 2s",
                 hx_swap="innerHTML",
             ),
             cls="page",
@@ -1300,10 +1371,28 @@ def download(job_id: str, artifact: str):
 
 
 import os
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Domino Apps run on 0.0.0.0:8888 by default
 # Use environment variables to allow configuration
 HOST = os.environ.get("APP_HOST", "0.0.0.0")
 PORT = int(os.environ.get("APP_PORT", "8888"))
+
+# Add middleware for Domino's reverse proxy
+# Allow all hosts since Domino uses dynamic URLs
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
+# Add CORS headers for Domino iframe embedding
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    # Allow embedding in Domino's iframe
+    response.headers["X-Frame-Options"] = "ALLOWALL"
+    response.headers["Content-Security-Policy"] = "frame-ancestors *"
+    # Allow htmx requests
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "HX-Request, HX-Target, HX-Current-URL, Content-Type"
+    return response
 
 serve(host=HOST, port=PORT)
