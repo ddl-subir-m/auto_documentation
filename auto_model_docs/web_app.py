@@ -552,68 +552,120 @@ app, rt = fast_app(
         Script(src="https://unpkg.com/htmx.org@1.9.10"),
         # Fallback vanilla JS polling if htmx fails to load
         Script(r"""
-            // Fallback polling if htmx doesn't load (for strict CSP environments)
+            // Robust form handling that works regardless of HTMX state
+            // (Domino CSP may block or interfere with external scripts)
             window.addEventListener('DOMContentLoaded', function() {
-                // Check if htmx loaded
-                if (typeof htmx === 'undefined') {
-                    console.log('htmx not available, using fallback polling');
+                var htmxWorking = false;
+                
+                // Test if htmx is actually functional
+                if (typeof htmx !== 'undefined' && typeof htmx.ajax === 'function') {
+                    htmxWorking = true;
+                    console.log('htmx loaded and functional');
+                } else {
+                    console.log('htmx not functional, using vanilla JS');
+                }
+                
+                // Status polling - always set up as backup
+                function pollStatus() {
+                    var panel = document.getElementById('status-panel');
+                    if (!panel) return;
                     
-                    // Fallback status polling
-                    function pollStatus() {
-                        var panel = document.getElementById('status-panel');
-                        if (!panel) return;
-                        
-                        fetch('status')
-                            .then(function(r) { return r.text(); })
-                            .then(function(html) { panel.innerHTML = html; })
-                            .catch(function(e) { console.log('Status poll error:', e); });
-                    }
-                    
-                    // Poll every 2 seconds
+                    fetch('status')
+                        .then(function(r) { return r.text(); })
+                        .then(function(html) { panel.innerHTML = html; })
+                        .catch(function(e) { console.log('Status poll error:', e); });
+                }
+                
+                // Start polling if htmx isn't working (htmx would handle its own polling)
+                if (!htmxWorking) {
                     setInterval(pollStatus, 2000);
+                }
+                
+                // Direct click handler on Generate button - works regardless of htmx
+                var generateBtn = document.getElementById('generate-btn');
+                if (generateBtn) {
+                    generateBtn.addEventListener('click', function(e) {
+                        // If htmx is working, let it handle the submission
+                        if (htmxWorking) {
+                            return; // htmx will handle it
+                        }
+                        
+                        // Otherwise, handle manually
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        var form = document.querySelector('form');
+                        if (!form) return;
+                        
+                        var formData = new FormData(form);
+                        
+                        // Disable button to prevent double-clicks
+                        generateBtn.disabled = true;
+                        generateBtn.textContent = 'Starting...';
+                        
+                        fetch('run', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(function(r) { return r.text(); })
+                        .then(function(html) {
+                            var panel = document.getElementById('status-panel');
+                            if (panel) panel.innerHTML = html;
+                            // Re-enable button
+                            generateBtn.disabled = false;
+                            generateBtn.textContent = 'Generate Docs';
+                            // Start polling for updates
+                            if (!htmxWorking) {
+                                pollStatus();
+                            }
+                        })
+                        .catch(function(e) {
+                            console.log('Form submit error:', e);
+                            generateBtn.disabled = false;
+                            generateBtn.textContent = 'Generate Docs';
+                        });
+                    });
+                }
+                
+                // Also handle form submit event as backup
+                var form = document.querySelector('form');
+                if (form && !htmxWorking) {
+                    form.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        // Trigger the button click handler
+                        var btn = document.getElementById('generate-btn');
+                        if (btn) btn.click();
+                    });
+                }
+                
+                // Handle stop and clear button clicks via event delegation
+                document.addEventListener('click', function(e) {
+                    var target = e.target;
                     
-                    // Handle form submission
-                    var form = document.querySelector('form');
-                    if (form) {
-                        form.addEventListener('submit', function(e) {
-                            e.preventDefault();
-                            var formData = new FormData(form);
-                            fetch('run', {
-                                method: 'POST',
-                                body: formData
-                            })
+                    // Stop button
+                    if (target.textContent === 'Stop' && !target.classList.contains('terminal-action-disabled')) {
+                        if (htmxWorking) return; // let htmx handle it
+                        e.preventDefault();
+                        fetch('stop', { method: 'POST' })
                             .then(function(r) { return r.text(); })
                             .then(function(html) {
                                 var panel = document.getElementById('status-panel');
                                 if (panel) panel.innerHTML = html;
-                            })
-                            .catch(function(e) { console.log('Form submit error:', e); });
-                        });
+                            });
                     }
                     
-                    // Handle stop button clicks
-                    document.addEventListener('click', function(e) {
-                        var target = e.target;
-                        if (target.textContent === 'Stop' && !target.classList.contains('terminal-action-disabled')) {
-                            e.preventDefault();
-                            fetch('stop', { method: 'POST' })
-                                .then(function(r) { return r.text(); })
-                                .then(function(html) {
-                                    var panel = document.getElementById('status-panel');
-                                    if (panel) panel.innerHTML = html;
-                                });
-                        }
-                        if (target.textContent === 'Clear' && !target.classList.contains('terminal-action-disabled')) {
-                            e.preventDefault();
-                            fetch('clear-terminal', { method: 'POST' })
-                                .then(function(r) { return r.text(); })
-                                .then(function(html) {
-                                    var panel = document.getElementById('status-panel');
-                                    if (panel) panel.innerHTML = html;
-                                });
-                        }
-                    });
-                }
+                    // Clear button
+                    if (target.textContent === 'Clear' && !target.classList.contains('terminal-action-disabled')) {
+                        if (htmxWorking) return; // let htmx handle it
+                        e.preventDefault();
+                        fetch('clear-terminal', { method: 'POST' })
+                            .then(function(r) { return r.text(); })
+                            .then(function(html) {
+                                var panel = document.getElementById('status-panel');
+                                if (panel) panel.innerHTML = html;
+                            });
+                    }
+                });
             });
         """),
         Style(
@@ -1422,7 +1474,7 @@ def index():
                 ),
                 # Generate button
                 Div(
-                    Button("Generate Docs", cls="primary"),
+                    Button("Generate Docs", type="submit", id="generate-btn", cls="primary"),
                     cls="btn-row",
                 ),
                 hx_post="run",
