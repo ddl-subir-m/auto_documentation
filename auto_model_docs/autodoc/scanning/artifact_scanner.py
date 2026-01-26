@@ -1,5 +1,6 @@
 """MLflow artifact scanner for extracting model metadata."""
 
+import asyncio
 import fnmatch
 import logging
 import os
@@ -66,6 +67,9 @@ class ArtifactScanner:
         Returns:
             ArtifactContext with model information.
         """
+        return await asyncio.to_thread(self._scan_sync)
+
+    def _scan_sync(self) -> ArtifactContext:
         models = []
         datasets = []
         project_metadata = {}
@@ -90,7 +94,7 @@ class ArtifactScanner:
                     project_metadata["domino_project_name"] = os.environ.get("DOMINO_PROJECT_NAME")
 
             # Get target experiments based on filtering
-            target_experiments = await self._get_target_experiments(client, domino_project_id)
+            target_experiments = self._get_target_experiments(client, domino_project_id)
             
             # Log filtering info
             if target_experiments:
@@ -101,11 +105,11 @@ class ArtifactScanner:
                 logger.info("Including only latest versions of each model")
 
             # Get registered models with filtering
-            models = await self._scan_registered_models(client, target_experiments)
+            models = self._scan_registered_models(client, target_experiments)
 
             # Get experiment info if specified (backward compatibility)
             if self.experiment_name:
-                project_metadata.update(await self._get_experiment_metadata(client))
+                project_metadata.update(self._get_experiment_metadata(client))
 
             project_metadata["mlflow_available"] = True
             project_metadata["tracking_uri"] = self.tracking_uri
@@ -129,7 +133,7 @@ class ArtifactScanner:
             project_metadata=project_metadata,
         )
 
-    async def _get_target_experiments(self, client, domino_project_id: Optional[str]) -> dict:
+    def _get_target_experiments(self, client, domino_project_id: Optional[str]) -> dict:
         """Get target experiments based on filtering criteria.
         
         Returns:
@@ -182,7 +186,7 @@ class ArtifactScanner:
             
         return target_experiments
 
-    async def _scan_registered_models(self, client, target_experiments: Optional[dict] = None) -> list[ModelInfo]:
+    def _scan_registered_models(self, client, target_experiments: Optional[dict] = None) -> list[ModelInfo]:
         """Scan MLflow model registry for registered models."""
         models = []
         model_versions_by_name = {}  # For latest_only filtering
@@ -272,7 +276,7 @@ class ArtifactScanner:
         except Exception:
             return []
 
-    async def _get_experiment_metadata(self, client) -> dict:
+    def _get_experiment_metadata(self, client) -> dict:
         """Get experiment metadata."""
         metadata = {}
 

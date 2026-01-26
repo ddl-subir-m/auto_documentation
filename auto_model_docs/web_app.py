@@ -34,6 +34,7 @@ class JobState:
     phase: str = "Idle"
     progress: float = 0.0
     logs: list[str] = field(default_factory=list)
+    detail_status: Optional[str] = None
     output_path: Optional[Path] = None
     notebook_path: Optional[Path] = None
     output_dir: Optional[Path] = None
@@ -317,6 +318,13 @@ def _render_status(job: Optional[JobState]) -> FT:
                 Div(*download_links, cls="download-section")
             )
     
+    detail_line = None
+    if is_running and job.detail_status:
+        detail_classes = "terminal-detail"
+        if job.phase == "Scanning" and "mlflow" in job.detail_status.lower():
+            detail_classes = f"{detail_classes} terminal-detail-active"
+        detail_line = Div(job.detail_status, cls=detail_classes)
+
     return Div(
         Div(
             H3("Terminal"),
@@ -328,6 +336,7 @@ def _render_status(job: Optional[JobState]) -> FT:
             cls="terminal-header",
         ),
         Div(status_text, cls=f"terminal-status terminal-status-{job.status}"),
+        detail_line if detail_line else "",
         *progress_section,
         *download_section,
         Pre(log_text, cls="terminal"),
@@ -462,10 +471,14 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         _log(job, "Beginning scan: code + MLflow artifacts.")
         console.print("\n[bold green]Starting documentation generation pipeline...[/bold green]\n")
         
+        def on_status(message: str) -> None:
+            job.detail_status = message
+            _log(job, message)
+
         output_path = await orchestrator.generate(
             doc_spec,
             on_progress,
-            on_status=lambda message: _log(job, message),
+            on_status=on_status,
         )
         
         # Complete final task
@@ -1057,6 +1070,26 @@ app, rt = fast_app(
             .terminal-status-cancelled {
                 background: rgba(245, 158, 11, 0.15);
                 color: #f59e0b;
+            }
+            .terminal-detail {
+                margin: 0.5rem 0 0.75rem 0;
+                padding: 0.35rem 0.6rem;
+                border-radius: 6px;
+                background: rgba(148, 163, 184, 0.1);
+                color: #cbd5e1;
+                font-size: 0.75rem;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+            }
+            .terminal-detail-active::before {
+                content: '';
+                width: 12px;
+                height: 12px;
+                border: 2px solid rgba(165, 180, 252, 0.35);
+                border-top-color: #a5b4fc;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
             }
             
             /* Progress Phases */
