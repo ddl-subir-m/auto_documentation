@@ -548,8 +548,8 @@ app, rt = fast_app(
     # Disable default CDN headers and use permissive settings for Domino
     pico=False,  # Disable pico CSS CDN if causing issues
     hdrs=(
-        # Try multiple CDNs for htmx with fallback
-        Script(src="https://unpkg.com/htmx.org@1.9.10", defer=True),
+        # Load htmx synchronously to ensure it's ready before user interaction
+        Script(src="https://unpkg.com/htmx.org@1.9.10"),
         # Fallback vanilla JS polling if htmx fails to load
         Script(r"""
             // Fallback polling if htmx doesn't load (for strict CSP environments)
