@@ -1176,29 +1176,12 @@ app, rt = fast_app(
                 content: '↓';
                 font-size: 1rem;
             }
-            /* Terminal line spinner */
+            /* Terminal line styling */
             .terminal-line-active {
-                display: inline-flex;
-                align-items: center;
                 color: #a5b4fc;
-            }
-            .terminal-line-active::before {
-                content: '';
-                display: inline-block;
-                width: 10px;
-                height: 10px;
-                margin-right: 8px;
-                border: 2px solid rgba(99, 102, 241, 0.3);
-                border-top-color: var(--accent);
-                border-radius: 50%;
-                animation: spin 0.8s linear infinite;
             }
             .terminal-line-complete {
                 color: #22c55e;
-            }
-            .terminal-line-complete::before {
-                content: '✓';
-                margin-right: 6px;
             }
             """
         ),
