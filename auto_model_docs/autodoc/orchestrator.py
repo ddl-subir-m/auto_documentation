@@ -1,6 +1,7 @@
 """Pipeline orchestrator for document generation."""
 
 import asyncio
+import time
 import base64
 import json
 import logging
@@ -127,8 +128,14 @@ class Orchestrator:
         Returns:
             Path to the generated Word document.
         """
+        timing_start = time.monotonic()
+        logger.info("TIMING orchestrator_generate_enter")
         # Phase 1: Scan
         if on_progress:
+            logger.info(
+                "TIMING orchestrator_on_progress_scanning_start_s=%.2f",
+                time.monotonic() - timing_start,
+            )
             on_progress("Scanning", 0.0)
 
         code_ctx, artifact_ctx = await asyncio.gather(

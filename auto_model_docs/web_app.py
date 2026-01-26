@@ -343,8 +343,10 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
     try:
         job.status = "running"
         _log(job, "Preparing generation run.")
+        run_start = time.monotonic()
 
         settings = Settings()
+        console.print(f"TIMING run_init_settings_s={time.monotonic() - run_start:.2f}")
         if request.provider:
             settings.llm_provider = request.provider
         if request.model:
@@ -403,6 +405,7 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             backoff_jitter=settings.llm_backoff_jitter,
             timeout_seconds=request.timeout or 120.0,
         )
+        console.print(f"TIMING run_init_llm_s={time.monotonic() - run_start:.2f}")
         sanitizer = ContentSanitizer()
         orchestrator = Orchestrator(
             llm=llm,
@@ -419,6 +422,7 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             model_names=_parse_comma_list(request.model_names),
             latest_only=request.latest_only,
         )
+        console.print(f"TIMING run_init_orchestrator_s={time.monotonic() - run_start:.2f}")
 
         # Create rich progress bar for terminal
         progress_ctx = Progress(
