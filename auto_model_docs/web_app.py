@@ -62,6 +62,9 @@ class JobRequest:
     timeout: Optional[float]
     notebook: bool
     notebook_path: Optional[str]
+    experiment_names: Optional[str]  # Comma-separated list
+    model_names: Optional[str]  # Comma-separated list
+    latest_only: bool
 
 
 JOB_STORE: dict[str, JobState] = {}
@@ -133,6 +136,14 @@ def _sanitize_optional_float(value: Optional[str]) -> Optional[float]:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _parse_comma_list(value: Optional[str]) -> Optional[list[str]]:
+    """Parse a comma-separated string into a list of trimmed strings."""
+    if not value:
+        return None
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items if items else None
 
 
 def _resolve_job(job_id: Optional[str]) -> Optional[JobState]:
@@ -403,6 +414,9 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             notebook_path=Path(request.notebook_path)
             if request.notebook_path
             else None,
+            experiment_names=_parse_comma_list(request.experiment_names),
+            model_names=_parse_comma_list(request.model_names),
+            latest_only=request.latest_only,
         )
 
         # Create rich progress bar for terminal
@@ -514,6 +528,9 @@ async def _parse_request(req: Request) -> JobRequest:
         timeout=_sanitize_optional_float(form.get("timeout")),
         notebook=form.get("notebook") in ("on", "true", "1", "yes"),
         notebook_path=form.get("notebook_path") or None,
+        experiment_names=form.get("experiment_names") or None,
+        model_names=form.get("model_names") or None,
+        latest_only=form.get("latest_only") in ("on", "true", "1", "yes"),
     )
 
 
@@ -842,6 +859,33 @@ app, rt = fast_app(
                 margin-bottom: 0;
             }
             
+            /* Filtering Section */
+            .filter-section {
+                margin-top: 1rem;
+                padding-top: 1rem;
+                border-top: 1px solid var(--panel-border);
+            }
+            .filter-section-title {
+                font-size: 0.7rem;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: var(--text-muted);
+                margin-bottom: 0.75rem;
+            }
+            .filter-section .field {
+                margin-bottom: 0.75rem;
+            }
+            .filter-section .checkbox-field {
+                margin-top: 0.5rem;
+            }
+            .field-hint-text {
+                display: block;
+                font-size: 0.7rem;
+                color: var(--text-muted);
+                margin-top: 0.25rem;
+            }
+            
             /* Primary Button */
             .btn-row {
                 display: flex;
@@ -1148,58 +1192,58 @@ app, rt = fast_app(
                         }
                     });
                 }
-            });
-            
-            // Highlight active terminal lines with spinner
-            function styleTerminalLines() {
-                const terminal = document.querySelector('.terminal:not(.terminal-idle)');
-                if (!terminal) return;
                 
-                const text = terminal.textContent;
-                const lines = text.split('\\n');
-                const totalLines = lines.length;
-                
-                // Check if job is still running (look for completion indicators)
-                const isComplete = lines.some(line => 
-                    line.includes('Generation complete') || 
-                    line.includes('Error:') || 
-                    line.includes('Cancelled') ||
-                    line.includes('Cleanup complete')
-                );
-                
-                // Find last active line index (the most recent activity)
-                let lastActiveIndex = -1;
-                if (!isComplete) {
-                    for (let i = lines.length - 1; i >= 0; i--) {
-                        const line = lines[i].trim();
-                        if (line && line.match(/^\[\d{2}:\d{2}:\d{2}\]/)) {
-                            lastActiveIndex = i;
-                            break;
+                // Highlight active terminal lines with spinner
+                function styleTerminalLines() {
+                    const terminal = document.querySelector('.terminal:not(.terminal-idle)');
+                    if (!terminal) return;
+                    
+                    const text = terminal.textContent;
+                    const lines = text.split('\\n');
+                    const totalLines = lines.length;
+                    
+                    // Check if job is still running (look for completion indicators)
+                    const isComplete = lines.some(line => 
+                        line.includes('Generation complete') || 
+                        line.includes('Error:') || 
+                        line.includes('Cancelled') ||
+                        line.includes('Cleanup complete')
+                    );
+                    
+                    // Find last active line index (the most recent activity)
+                    let lastActiveIndex = -1;
+                    if (!isComplete) {
+                        for (let i = lines.length - 1; i >= 0; i--) {
+                            const line = lines[i].trim();
+                            if (line && line.match(/^\[\d{2}:\d{2}:\d{2}\]/)) {
+                                lastActiveIndex = i;
+                                break;
+                            }
                         }
                     }
+                    
+                    // Style the lines
+                    let styledHtml = lines.map((line, index) => {
+                        const escapedLine = line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        
+                        // Show spinner on the last active timestamped line
+                        if (index === lastActiveIndex) {
+                            return '<span class="terminal-line-active">' + escapedLine + '</span>';
+                        }
+                        // Style completion messages
+                        if (line.includes('Complete') || line.includes('Generation complete')) {
+                            return '<span class="terminal-line-complete">' + escapedLine + '</span>';
+                        }
+                        return escapedLine;
+                    }).join('\\n');
+                    
+                    terminal.innerHTML = styledHtml;
                 }
                 
-                // Style the lines
-                let styledHtml = lines.map((line, index) => {
-                    const escapedLine = line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    
-                    // Show spinner on the last active timestamped line
-                    if (index === lastActiveIndex) {
-                        return '<span class="terminal-line-active">' + escapedLine + '</span>';
-                    }
-                    // Style completion messages
-                    if (line.includes('Complete') || line.includes('Generation complete')) {
-                        return '<span class="terminal-line-complete">' + escapedLine + '</span>';
-                    }
-                    return escapedLine;
-                }).join('\\n');
-                
-                terminal.innerHTML = styledHtml;
-            }
-            
-            // Run on load and whenever htmx swaps content
-            document.body.addEventListener('htmx:afterSwap', styleTerminalLines);
-            setInterval(styleTerminalLines, 500);
+                // Run on load and whenever htmx swaps content
+                document.body.addEventListener('htmx:afterSwap', styleTerminalLines);
+                setInterval(styleTerminalLines, 500);
+            });
             """
         ),
     )
@@ -1335,6 +1379,38 @@ def index():
                                         cls="field",
                                     ),
                                     cls="advanced-grid",
+                                ),
+                                # Filtering subsection
+                                Div(
+                                    Div("Artifact Filtering", cls="filter-section-title"),
+                                    Div(
+                                        Label("Experiment names", for_="field-experiment_names"),
+                                        Input(
+                                            name="experiment_names",
+                                            id="field-experiment_names",
+                                            type="text",
+                                            placeholder="exp1, exp2, my-experiment*",
+                                        ),
+                                        Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
+                                        cls="field",
+                                    ),
+                                    Div(
+                                        Label("Model names", for_="field-model_names"),
+                                        Input(
+                                            name="model_names",
+                                            id="field-model_names",
+                                            type="text",
+                                            placeholder="model1, churn*, fraud-*",
+                                        ),
+                                        Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
+                                        cls="field",
+                                    ),
+                                    Label(
+                                        Input(type="checkbox", name="latest_only", id="field-latest_only"),
+                                        Span("Latest version only"),
+                                        cls="checkbox-field",
+                                    ),
+                                    cls="filter-section",
                                 ),
                                 cls="advanced-content",
                             ),
