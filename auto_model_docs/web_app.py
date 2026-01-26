@@ -1065,7 +1065,7 @@ app, rt = fast_app(
                 const specPath = document.getElementById('field-spec_path');
                 const uploadFilename = document.getElementById('upload-filename');
                 
-                if (specUpload) {
+                if (specUpload && specPath) {
                     specUpload.addEventListener('change', function(e) {
                         const file = e.target.files[0];
                         if (file) {
@@ -1386,9 +1386,9 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
-    # Allow embedding in Domino's iframe
+    # Allow embedding in Domino's iframe (X-Frame-Options for older browsers)
     response.headers["X-Frame-Options"] = "ALLOWALL"
-    response.headers["Content-Security-Policy"] = "frame-ancestors *"
+    # Note: Domino already sets Content-Security-Policy with frame-ancestors, so we don't add it here
     # Allow htmx requests
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
