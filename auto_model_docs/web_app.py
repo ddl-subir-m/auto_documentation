@@ -251,7 +251,7 @@ def _render_status(job: Optional[JobState]) -> FT:
     is_running = job.status == "running"
     stop_link = A(
         "Stop",
-        hx_post="/stop",
+        hx_post="stop",
         hx_target="#status-panel",
         hx_swap="innerHTML",
         cls="terminal-action",
@@ -263,7 +263,7 @@ def _render_status(job: Optional[JobState]) -> FT:
 
     clear_link = A(
         "Clear",
-        hx_post="/clear-terminal",
+        hx_post="clear-terminal",
         hx_target="#status-panel",
         hx_swap="innerHTML",
         cls="terminal-action" if not is_running else "terminal-action terminal-action-disabled",
@@ -513,7 +513,7 @@ app, rt = fast_app(
                         var panel = document.getElementById('status-panel');
                         if (!panel) return;
                         
-                        fetch('/status')
+                        fetch('status')
                             .then(function(r) { return r.text(); })
                             .then(function(html) { panel.innerHTML = html; })
                             .catch(function(e) { console.log('Status poll error:', e); });
@@ -528,7 +528,7 @@ app, rt = fast_app(
                         form.addEventListener('submit', function(e) {
                             e.preventDefault();
                             var formData = new FormData(form);
-                            fetch('/run', {
+                            fetch('run', {
                                 method: 'POST',
                                 body: formData
                             })
@@ -546,7 +546,7 @@ app, rt = fast_app(
                         var target = e.target;
                         if (target.textContent === 'Stop' && !target.classList.contains('terminal-action-disabled')) {
                             e.preventDefault();
-                            fetch('/stop', { method: 'POST' })
+                            fetch('stop', { method: 'POST' })
                                 .then(function(r) { return r.text(); })
                                 .then(function(html) {
                                     var panel = document.getElementById('status-panel');
@@ -555,7 +555,7 @@ app, rt = fast_app(
                         }
                         if (target.textContent === 'Clear' && !target.classList.contains('terminal-action-disabled')) {
                             e.preventDefault();
-                            fetch('/clear-terminal', { method: 'POST' })
+                            fetch('clear-terminal', { method: 'POST' })
                                 .then(function(r) { return r.text(); })
                                 .then(function(html) {
                                     var panel = document.getElementById('status-panel');
@@ -1286,7 +1286,7 @@ def index():
                     Button("Generate Docs", cls="primary"),
                     cls="btn-row",
                 ),
-                hx_post="/run",
+                hx_post="run",
                 hx_target="#status-panel",
                 hx_swap="innerHTML",
                 hx_encoding="multipart/form-data",
@@ -1296,7 +1296,7 @@ def index():
             Div(
                 _render_status(_resolve_job(ACTIVE_JOB_ID)),
                 id="status-panel",
-                hx_get="/status",
+                hx_get="status",
                 hx_trigger="every 2s",
                 hx_swap="innerHTML",
             ),
