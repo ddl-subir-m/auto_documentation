@@ -1430,7 +1430,8 @@ def download(job_id: str, artifact: str):
     if not path or not path.exists():
         return Response("File not found", status_code=404)
 
-    return FileResponse(path)
+    # Use the actual filename from the path
+    return FileResponse(path, filename=path.name)
 
 
 import os
