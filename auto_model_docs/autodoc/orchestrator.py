@@ -129,19 +129,21 @@ class Orchestrator:
             Path to the generated Word document.
         """
         timing_start = time.monotonic()
-        logger.info("TIMING orchestrator_generate_enter")
+        print("TIMING orchestrator_generate_enter")
         # Phase 1: Scan
         if on_progress:
-            logger.info(
-                "TIMING orchestrator_on_progress_scanning_start_s=%.2f",
-                time.monotonic() - timing_start,
+            print(
+                f"TIMING orchestrator_on_progress_scanning_start_s="
+                f"{time.monotonic() - timing_start:.2f}"
             )
             on_progress("Scanning", 0.0)
 
+        scan_start = time.monotonic()
         code_ctx, artifact_ctx = await asyncio.gather(
             self.code_scanner.scan(),
             self.artifact_scanner.scan(),
         )
+        print(f"TIMING orchestrator_scan_total_s={time.monotonic() - scan_start:.2f}")
 
         if on_progress:
             on_progress("Scanning", 1.0)

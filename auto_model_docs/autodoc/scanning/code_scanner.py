@@ -1,5 +1,6 @@
 """LLM-based code scanner for semantic analysis of ML codebases."""
 
+import time
 from pathlib import Path
 from typing import Dict, List
 
@@ -70,6 +71,8 @@ class CodeScanner:
         Raises:
             ScannerError: If scanning fails.
         """
+        start_time = time.monotonic()
+        print("TIMING code_scanner_start")
         try:
             # Find Python files
             files = self._find_python_files()
@@ -96,6 +99,7 @@ class CodeScanner:
             context = await self._analyze_code(code_contents)
             context.readme = readme_content
 
+            print(f"TIMING code_scanner_total_s={time.monotonic() - start_time:.2f}")
             return context
 
         except Exception as e:
