@@ -101,8 +101,13 @@ def _cleanup_job(job: JobState) -> None:
 
 
 def _get_default_output_dir() -> Path:
-    if Path("/mnt/artifacts").exists():
-        return Path("/mnt/artifacts")
+    # In Domino, use /mnt/data/{project_name} (persisted via Datasets)
+    if Path("/mnt/data").exists():
+        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
+        output = Path(f"/mnt/data/{project_name}")
+        output.mkdir(parents=True, exist_ok=True)
+        return output
+    # Fallback for local development
     output = Path("./output")
     output.mkdir(exist_ok=True)
     return output
@@ -274,6 +279,33 @@ def _render_status(job: Optional[JobState]) -> FT:
     if is_running:
         progress_section.append(_render_progress_bar(job))
     
+    # Build download links if job completed
+    download_section = []
+    if job.status == "completed":
+        download_links = []
+        if job.output_path and job.output_path.exists():
+            download_links.append(
+                A(
+                    "Download Document (.docx)",
+                    href=f"download/{job.id}/docx",
+                    cls="download-btn",
+                    download=True,
+                )
+            )
+        if job.notebook_path and job.notebook_path.exists():
+            download_links.append(
+                A(
+                    "Download Notebook (.ipynb)",
+                    href=f"download/{job.id}/notebook",
+                    cls="download-btn",
+                    download=True,
+                )
+            )
+        if download_links:
+            download_section.append(
+                Div(*download_links, cls="download-section")
+            )
+    
     return Div(
         Div(
             H3("Terminal"),
@@ -286,6 +318,7 @@ def _render_status(job: Optional[JobState]) -> FT:
         ),
         Div(status_text, cls=f"terminal-status terminal-status-{job.status}"),
         *progress_section,
+        *download_section,
         Pre(log_text, cls="terminal"),
         cls="terminal-card",
     )
@@ -1016,6 +1049,36 @@ app, rt = fast_app(
             }
             .field-hint.hidden {
                 display: none;
+            }
+            /* Download section */
+            .download-section {
+                display: flex;
+                gap: 0.75rem;
+                margin: 0.75rem 0;
+                flex-wrap: wrap;
+            }
+            .download-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 0.625rem 1rem;
+                background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+                color: white;
+                border-radius: 6px;
+                font-size: 0.85rem;
+                font-weight: 600;
+                text-decoration: none;
+                transition: all 0.2s ease;
+                box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+            }
+            .download-btn:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(34, 197, 94, 0.4);
+                color: white;
+            }
+            .download-btn::before {
+                content: '↓';
+                font-size: 1rem;
             }
             /* Terminal line spinner */
             .terminal-line-active {

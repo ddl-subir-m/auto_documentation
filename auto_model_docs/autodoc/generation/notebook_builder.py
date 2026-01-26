@@ -57,7 +57,7 @@ class NotebookBuilder:
 
     def __init__(
         self,
-        output_dir: Path = Path("/mnt/artifacts"),
+        output_dir: Path = Path("./output"),
         dependencies: List[str] | None = None,
         notebook_path: Path | None = None,
     ):

@@ -42,7 +42,7 @@ console = Console()
     "--output",
     "-o",
     type=click.Path(),
-    help="Output directory (default: /mnt/artifacts or ./output)",
+    help="Output directory (default: /mnt/data/{DOMINO_PROJECT_NAME} or ./output)",
 )
 @click.option(
     "--code-root",
@@ -406,9 +406,12 @@ def _regenerate_notebook_from_cache(
 
 def _get_default_output_dir() -> Path:
     """Get default output directory."""
-    # Check Domino environment first
-    if Path("/mnt/artifacts").exists():
-        return Path("/mnt/artifacts")
+    # In Domino, use /mnt/data/{project_name} (persisted via Datasets)
+    if Path("/mnt/data").exists():
+        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
+        output = Path(f"/mnt/data/{project_name}")
+        output.mkdir(parents=True, exist_ok=True)
+        return output
     # Fall back to local output directory
     output = Path("./output")
     output.mkdir(exist_ok=True)

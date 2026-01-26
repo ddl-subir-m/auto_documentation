@@ -1,10 +1,19 @@
 """Configuration settings for Auto Model Documentation."""
 
+import os
 from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _get_default_output_path() -> Path:
+    """Get default output directory based on environment."""
+    if Path("/mnt/data").exists():
+        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
+        return Path(f"/mnt/data/{project_name}")
+    return Path("./output")
 
 
 class Settings(BaseSettings):
@@ -73,7 +82,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AUTODOC_CODE_ROOT", "CODE_ROOT"),
     )
     output_dir: Path = Field(
-        default=Path("/mnt/artifacts"),
+        default_factory=_get_default_output_path,
         description="Output directory for generated documents",
         validation_alias=AliasChoices("AUTODOC_OUTPUT_DIR", "OUTPUT_DIR"),
     )

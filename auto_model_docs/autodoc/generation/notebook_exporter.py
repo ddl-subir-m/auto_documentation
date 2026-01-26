@@ -30,7 +30,7 @@ class NotebookExporter:
     and delegates to DocumentBuilder for Word assembly.
     """
 
-    def __init__(self, output_dir: Path = Path("/mnt/artifacts")):
+    def __init__(self, output_dir: Path = Path("./output")):
         """Initialize the notebook exporter.
 
         Args:

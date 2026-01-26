@@ -45,7 +45,7 @@ class Orchestrator:
         llm: LLMClient,
         sanitizer: ContentSanitizer,
         code_root: Path = Path("/mnt/code"),
-        output_dir: Path = Path("/mnt/artifacts"),
+        output_dir: Path = Path("./output"),
         mlflow_tracking_uri: Optional[str] = None,
         parallel_workers: int = 4,
         max_files: int = 50,

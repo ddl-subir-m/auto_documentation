@@ -25,7 +25,7 @@ class DocumentBuilder:
     title page, table of contents, and content sections.
     """
 
-    def __init__(self, output_dir: Path = Path("/mnt/artifacts")):
+    def __init__(self, output_dir: Path = Path("./output")):
         """Initialize the document builder.
 
         Args:
