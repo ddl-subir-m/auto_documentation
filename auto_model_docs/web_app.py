@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -509,11 +510,15 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
 
 
 async def _parse_request(req: Request) -> JobRequest:
+    start_time = time.monotonic()
     form = await req.form()
+    console.print(f"TIMING form_parse_s={time.monotonic() - start_time:.2f}")
     spec_upload = form.get("spec_upload")
     spec_content = None
     if spec_upload and hasattr(spec_upload, "read"):
+        read_start = time.monotonic()
         content = await spec_upload.read()
+        console.print(f"TIMING spec_upload_read_s={time.monotonic() - read_start:.2f}")
         spec_content = content.decode("utf-8", errors="replace")
 
     return JobRequest(
@@ -1481,13 +1486,17 @@ def index():
 
 @rt("/run")
 async def run(req: Request):
+    run_start = time.monotonic()
     active = _resolve_job(ACTIVE_JOB_ID)
     if active and active.status == "running":
         _log(active, "A job is already running. Please wait for completion.")
         return _render_status(active)
 
+    console.print("TIMING run_request_received")
     job_request = await _parse_request(req)
+    console.print(f"TIMING run_parse_total_s={time.monotonic() - run_start:.2f}")
     job = _start_job(job_request)
+    console.print(f"TIMING run_start_job_s={time.monotonic() - run_start:.2f}")
     _log(job, "Job submitted.")
     return _render_status(job)
 
