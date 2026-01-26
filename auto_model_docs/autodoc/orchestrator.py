@@ -29,6 +29,7 @@ from autodoc.scanning import ArtifactScanner, CodeScanner, ContentSanitizer
 
 # Type alias for progress callback
 ProgressCallback = Callable[[str, float], None]
+StatusCallback = Callable[[str], None]
 
 
 class Orchestrator:
@@ -117,6 +118,7 @@ class Orchestrator:
         self,
         spec: DocumentSpec,
         on_progress: Optional[ProgressCallback] = None,
+        on_status: Optional[StatusCallback] = None,
     ) -> Path:
         """Execute the full document generation pipeline.
 
@@ -128,22 +130,22 @@ class Orchestrator:
         Returns:
             Path to the generated Word document.
         """
-        timing_start = time.monotonic()
-        print("TIMING orchestrator_generate_enter")
         # Phase 1: Scan
         if on_progress:
-            print(
-                f"TIMING orchestrator_on_progress_scanning_start_s="
-                f"{time.monotonic() - timing_start:.2f}"
-            )
             on_progress("Scanning", 0.0)
 
-        scan_start = time.monotonic()
-        code_ctx, artifact_ctx = await asyncio.gather(
-            self.code_scanner.scan(),
-            self.artifact_scanner.scan(),
-        )
-        print(f"TIMING orchestrator_scan_total_s={time.monotonic() - scan_start:.2f}")
+        code_task = asyncio.create_task(self.code_scanner.scan())
+        artifact_start = time.monotonic()
+        if on_status:
+            on_status("Scanning MLflow artifacts...")
+        artifact_task = asyncio.create_task(self.artifact_scanner.scan())
+        artifact_ctx = await artifact_task
+        if on_status:
+            on_status(
+                "MLflow artifact scan completed "
+                f"in {time.monotonic() - artifact_start:.1f}s."
+            )
+        code_ctx = await code_task
 
         if on_progress:
             on_progress("Scanning", 1.0)

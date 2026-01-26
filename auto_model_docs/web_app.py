@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -343,10 +342,8 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
     try:
         job.status = "running"
         _log(job, "Preparing generation run.")
-        run_start = time.monotonic()
 
         settings = Settings()
-        console.print(f"TIMING run_init_settings_s={time.monotonic() - run_start:.2f}")
         if request.provider:
             settings.llm_provider = request.provider
         if request.model:
@@ -405,7 +402,6 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             backoff_jitter=settings.llm_backoff_jitter,
             timeout_seconds=request.timeout or 120.0,
         )
-        console.print(f"TIMING run_init_llm_s={time.monotonic() - run_start:.2f}")
         sanitizer = ContentSanitizer()
         orchestrator = Orchestrator(
             llm=llm,
@@ -422,7 +418,6 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             model_names=_parse_comma_list(request.model_names),
             latest_only=request.latest_only,
         )
-        console.print(f"TIMING run_init_orchestrator_s={time.monotonic() - run_start:.2f}")
 
         # Create rich progress bar for terminal
         progress_ctx = Progress(
@@ -464,9 +459,14 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
                 _log(job, f"{phase}: {'Started' if pct == 0.0 else 'Complete'}")
 
         _log(job, "Starting pipeline.")
+        _log(job, "Beginning scan: code + MLflow artifacts.")
         console.print("\n[bold green]Starting documentation generation pipeline...[/bold green]\n")
         
-        output_path = await orchestrator.generate(doc_spec, on_progress)
+        output_path = await orchestrator.generate(
+            doc_spec,
+            on_progress,
+            on_status=lambda message: _log(job, message),
+        )
         
         # Complete final task
         if current_task_id is not None:
@@ -514,15 +514,11 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
 
 
 async def _parse_request(req: Request) -> JobRequest:
-    start_time = time.monotonic()
     form = await req.form()
-    console.print(f"TIMING form_parse_s={time.monotonic() - start_time:.2f}")
     spec_upload = form.get("spec_upload")
     spec_content = None
     if spec_upload and hasattr(spec_upload, "read"):
-        read_start = time.monotonic()
         content = await spec_upload.read()
-        console.print(f"TIMING spec_upload_read_s={time.monotonic() - read_start:.2f}")
         spec_content = content.decode("utf-8", errors="replace")
 
     return JobRequest(
@@ -1490,17 +1486,13 @@ def index():
 
 @rt("/run")
 async def run(req: Request):
-    run_start = time.monotonic()
     active = _resolve_job(ACTIVE_JOB_ID)
     if active and active.status == "running":
         _log(active, "A job is already running. Please wait for completion.")
         return _render_status(active)
 
-    console.print("TIMING run_request_received")
     job_request = await _parse_request(req)
-    console.print(f"TIMING run_parse_total_s={time.monotonic() - run_start:.2f}")
     job = _start_job(job_request)
-    console.print(f"TIMING run_start_job_s={time.monotonic() - run_start:.2f}")
     _log(job, "Job submitted.")
     return _render_status(job)
 

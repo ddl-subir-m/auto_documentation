@@ -1,6 +1,5 @@
 """MLflow artifact scanner for extracting model metadata."""
 
-import time
 import fnmatch
 import logging
 import os
@@ -67,8 +66,6 @@ class ArtifactScanner:
         Returns:
             ArtifactContext with model information.
         """
-        start_time = time.monotonic()
-        print("TIMING artifact_scanner_start")
         models = []
         datasets = []
         project_metadata = {}
@@ -126,7 +123,6 @@ class ArtifactScanner:
             project_metadata["mlflow_error"] = str(e)
             project_metadata["mlflow_available"] = False
 
-        print(f"TIMING artifact_scanner_total_s={time.monotonic() - start_time:.2f}")
         return ArtifactContext(
             models=models,
             datasets=datasets,
