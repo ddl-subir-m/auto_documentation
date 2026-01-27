@@ -55,6 +55,7 @@ class JobRequest:
     spec_content: Optional[str]
     provider: str
     model: Optional[str]
+    api_key: Optional[str]
     code_root: Optional[str]
     output_dir: Optional[str]
     max_files: Optional[int]
@@ -69,6 +70,7 @@ class JobRequest:
 
 JOB_STORE: dict[str, JobState] = {}
 ACTIVE_JOB_ID: Optional[str] = None
+LAST_API_KEY: Optional[str] = None
 
 
 def _timestamp() -> str:
@@ -243,7 +245,7 @@ def _render_status(job: Optional[JobState]) -> FT:
     if not job:
         return Div(
             Div(
-                H3("Terminal"),
+                H3("Logs"),
                 Div(
                     A("Stop", href="#", cls="terminal-action terminal-action-disabled"),
                     A("Clear", href="#", cls="terminal-action terminal-action-disabled"),
@@ -340,6 +342,7 @@ def _render_status(job: Optional[JobState]) -> FT:
 async def _run_generation(job: JobState, request: JobRequest) -> None:
     progress_ctx = None
     try:
+        global LAST_API_KEY
         job.status = "running"
         _log(job, "Preparing generation run.")
 
@@ -391,7 +394,9 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         doc_spec = DocumentSpec.from_yaml(str(spec_path))
         _log(job, f"Loaded spec: {doc_spec.title}")
 
-        api_key = settings.get_api_key()
+        if request.api_key:
+            LAST_API_KEY = request.api_key
+        api_key = LAST_API_KEY or settings.get_api_key()
         llm = LLMClient(
             provider=settings.llm_provider,
             model=settings.get_model_name(),
@@ -529,6 +534,7 @@ async def _parse_request(req: Request) -> JobRequest:
         spec_content=spec_content,
         provider=form.get("provider", "anthropic"),
         model=form.get("model") or None,
+        api_key=form.get("api_key") or None,
         code_root=form.get("code_root") or None,
         output_dir=form.get("output_dir") or None,
         max_files=_sanitize_optional_int(form.get("max_files")),
@@ -621,7 +627,7 @@ app, rt = fast_app(
                             if (panel) panel.innerHTML = html;
                             // Re-enable button
                             generateBtn.disabled = false;
-                            generateBtn.textContent = 'Generate Docs';
+                            generateBtn.textContent = 'Generate Documentation';
                             // Start polling for updates
                             if (!htmxWorking) {
                                 pollStatus();
@@ -630,7 +636,7 @@ app, rt = fast_app(
                         .catch(function(e) {
                             console.log('Form submit error:', e);
                             generateBtn.disabled = false;
-                            generateBtn.textContent = 'Generate Docs';
+                            generateBtn.textContent = 'Generate Documentation';
                         });
                     });
                 }
@@ -953,7 +959,7 @@ app, rt = fast_app(
                 margin-bottom: 1.5rem;
             }
             button.primary {
-                background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+                background: var(--accent);
                 border: none;
                 border-radius: 8px;
                 padding: 0.75rem 2rem;
@@ -1301,7 +1307,7 @@ def index():
         Div(
             # Hero Section
             Div(
-                P("Generate ML model documentation with a single, guided workflow."),
+                P("Generate model documentation with a single, guided workflow."),
                 cls="hero",
             ),
             Form(
@@ -1371,6 +1377,19 @@ def index():
                                 Option("OpenAI", value="openai"),
                                 name="provider",
                                 id="field-provider",
+                            ),
+                            cls="field",
+                        ),
+                        # API key (in-memory only while app is open)
+                        Div(
+                            Label("API key", for_="field-api_key"),
+                            Input(
+                                name="api_key",
+                                id="field-api_key",
+                                type="password",
+                                placeholder="Paste your API key",
+                                autocomplete="off",
+                                spellcheck="false",
                             ),
                             cls="field",
                         ),
@@ -1465,7 +1484,7 @@ def index():
                 ),
                 # Generate button
                 Div(
-                    Button("Generate Docs", type="submit", id="generate-btn", cls="primary"),
+                    Button("Generate Documentation", type="submit", id="generate-btn", cls="primary"),
                     cls="btn-row",
                 ),
                 hx_post="run",
@@ -1511,7 +1530,7 @@ def clear_terminal():
     job = _resolve_job(ACTIVE_JOB_ID)
     if job and job.status != "running":
         job.logs.clear()
-        _log(job, "Terminal cleared.")
+        _log(job, "Logs cleared.")
     elif job and job.status == "running":
         _log(job, "Clear requested during run; preserving logs.")
     return _render_status(job)
