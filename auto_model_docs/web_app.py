@@ -1213,19 +1213,24 @@ app, rt = fast_app(
                     toggleNotebookHint();
                 }
 
-                // Toggle base URL field based on provider selection
+                // Toggle base URL and model name fields based on provider selection
                 const providerSelect = document.getElementById('field-provider');
                 const baseUrlField = document.getElementById('base-url-field');
+                const modelNameField = document.getElementById('model-name-field');
 
-                function toggleBaseUrlField() {
-                    if (providerSelect && baseUrlField) {
-                        baseUrlField.style.display = providerSelect.value === 'openai' ? 'flex' : 'none';
+                function toggleOpenAIFields() {
+                    const isOpenAI = providerSelect && providerSelect.value === 'openai';
+                    if (baseUrlField) {
+                        baseUrlField.style.display = isOpenAI ? 'flex' : 'none';
+                    }
+                    if (modelNameField) {
+                        modelNameField.style.display = isOpenAI ? 'flex' : 'none';
                     }
                 }
 
                 if (providerSelect) {
-                    providerSelect.addEventListener('change', toggleBaseUrlField);
-                    toggleBaseUrlField();
+                    providerSelect.addEventListener('change', toggleOpenAIFields);
+                    toggleOpenAIFields();
                 }
                 
                 // Handle file upload and update spec path display
@@ -1397,7 +1402,7 @@ def index():
                             Label("Provider", for_="field-provider"),
                             Select(
                                 Option("Anthropic", value="anthropic"),
-                                Option("OpenAI", value="openai"),
+                                Option("OpenAI (Compatible)", value="openai"),
                                 name="provider",
                                 id="field-provider",
                             ),
@@ -1415,6 +1420,20 @@ def index():
                                 spellcheck="false",
                             ),
                             cls="field",
+                        ),
+                        # Model name (only shown for OpenAI provider)
+                        Div(
+                            Label("Model", for_="field-model"),
+                            Input(
+                                name="model",
+                                id="field-model",
+                                type="text",
+                                placeholder="gpt-4o",
+                            ),
+                            Span("Leave blank to use default (gpt-4o)", cls="field-hint-text"),
+                            cls="field",
+                            id="model-name-field",
+                            style="display: none;",
                         ),
                         # Base URL (only shown for OpenAI provider)
                         Div(
