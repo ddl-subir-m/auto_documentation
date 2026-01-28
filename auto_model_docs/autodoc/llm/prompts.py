@@ -190,9 +190,9 @@ def build_section_planning_prompt(
 Determine what content blocks this section should contain to create useful documentation.
 
 Content block types available:
-- narrative: Explanatory paragraphs (2-4 paragraphs)
-- table: Structured data in rows and columns
 - chart: Visual representation (bar, line, or scatter)
+- table: Structured data in rows and columns
+- narrative: Explanatory paragraphs (2-4 paragraphs)
 - bullet_list: Bulleted list of items
 - numbered_list: Numbered/ordered list of steps
 
@@ -200,9 +200,10 @@ CRITICAL: Only plan content blocks that can be generated from the data provided 
 - Do NOT request tables or charts of metrics that are not explicitly listed in the context
 - Do NOT request content about cross-validation unless CV metrics are provided
 - Do NOT request visualizations of data that doesn't exist
+- Do NOT create both a table and chart showing the same data - choose the most effective format
 - If limited data is available, plan fewer content blocks focused on what IS known
 
-Consider what would be most valuable for documenting this section. Include 2-4 content blocks."""
+Consider what would be most valuable for documenting this section. Prefer visual content (charts, tables) when data allows. Include 2-4 content blocks."""
 
 
 SECTION_PLANNING_SCHEMA: Dict[str, Any] = {
@@ -424,13 +425,21 @@ def build_chart_prompt(
 - Model Type: {model_classes}
 - ML Task: {ml_task_type}
 
+## Instructions for Chart Generation:
+1. If metrics are provided above (e.g., "roc_auc: 0.6903", "precision: 0.2399"), use them as:
+   - labels: The metric names (e.g., ["ROC-AUC", "Precision", "Recall", "F1-Score"])
+   - values: The metric values (e.g., [0.6903, 0.2399, 0.3844, 0.2956])
+   - title: A descriptive title like "Model Performance Metrics"
+
+2. For performance charts specifically, focus on test/validation metrics (not training metrics).
+
+3. If feature importance data is provided, create a chart of top features.
+
 CRITICAL: Only visualize data that is explicitly provided above.
-Do NOT fabricate or estimate any values. If the requested visualization
-cannot be created with available data, return a chart with:
-- title: "Data Not Available"
-- labels: ["No data"]
-- values: [0]
-This clearly indicates missing data rather than using placeholder labels that could confuse readers.
+Do NOT fabricate or estimate any values. If NO metrics are provided above, return:
+- title: ""  
+- labels: []
+- values: []
 
 Provide labels and values for the chart using ONLY the data provided above."""
 
