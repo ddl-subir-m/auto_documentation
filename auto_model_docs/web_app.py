@@ -1631,23 +1631,23 @@ def index():
                                 Div(
                                     Div("Artifact Filtering", cls="filter-section-title"),
                                     Div(
-                                        Label("Experiment names", for_="field-experiment_names"),
-                                        Input(
-                                            name="experiment_names",
-                                            id="field-experiment_names",
-                                            type="text",
-                                            placeholder="exp1, exp2, my-experiment*",
-                                        ),
-                                        Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
-                                        cls="field",
-                                    ),
-                                    Div(
                                         Label("Model names", for_="field-model_names"),
                                         Input(
                                             name="model_names",
                                             id="field-model_names",
                                             type="text",
                                             placeholder="model1, churn*, fraud-*",
+                                        ),
+                                        Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
+                                        cls="field",
+                                    ),
+                                    Div(
+                                        Label("Experiment names", for_="field-experiment_names"),
+                                        Input(
+                                            name="experiment_names",
+                                            id="field-experiment_names",
+                                            type="text",
+                                            placeholder="exp1, exp2, my-experiment*",
                                         ),
                                         Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
                                         cls="field",
