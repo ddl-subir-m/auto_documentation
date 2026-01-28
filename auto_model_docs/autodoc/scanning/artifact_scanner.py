@@ -235,6 +235,11 @@ class ArtifactScanner:
                 
             logger.info(f"Experiment selection complete: {len(target_experiments)} selected, {excluded_count} excluded")
             
+            # Warn if filtering was requested but no matches found
+            if self.experiment_names and len(target_experiments) == 0:
+                logger.warning(f"⚠ No experiments matched the filter patterns: {self.experiment_names}")
+                logger.warning("⚠ No models will be returned due to experiment filter with no matches")
+            
         except Exception as e:
             logger.warning(f"Error getting target experiments: {e}")
             
@@ -312,14 +317,16 @@ class ArtifactScanner:
                             continue
 
                         # Apply experiment filtering if specified
-                        # Only filter if we have target experiments (empty dict is falsy)
-                        if target_experiments:
-                            if experiment.name not in target_experiments:
+                        # Check if experiment filtering was requested (not just if matches exist)
+                        if self.experiment_names is not None:
+                            # Experiment filtering is active
+                            if experiment.name in target_experiments:
+                                logger.info(f"    ✓ Version {version.version}: Processing (from experiment '{experiment.name}')")
+                            else:
                                 logger.info(f"    ✗ Version {version.version}: Skipped (experiment '{experiment.name}' not in targets)")
                                 continue
-                            else:
-                                logger.info(f"    ✓ Version {version.version}: Processing (from experiment '{experiment.name}')")
                         else:
+                            # No experiment filtering requested - include all
                             logger.info(f"    ✓ Version {version.version}: Processing (from experiment '{experiment.name}')")
 
                         logger.info(f"      Listing artifacts for run {version.run_id}...")
@@ -372,7 +379,12 @@ class ArtifactScanner:
         except Exception as e:
             logger.warning(f"Error scanning registered models: {e}")
 
-        logger.info(f"Found {len(models)} models after filtering")
+        # Log filtering summary
+        if self.experiment_names and len(models) == 0 and total_models > 0:
+            logger.warning(f"⚠ All {total_models} model(s) were excluded due to experiment filtering")
+        else:
+            logger.info(f"Found {len(models)} models after filtering")
+        
         return models
 
     def _list_artifacts(self, client, run_id: str, path: str = "") -> list[str]:
