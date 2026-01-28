@@ -422,18 +422,20 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
                 force=True  # Override any existing configuration
             )
             
-            # Add our handler to the autodoc loggers
+            # Add our handler ONLY to the root autodoc logger
+            # Child loggers will propagate their messages up to this handler
             autodoc_logger = logging.getLogger('autodoc')
             autodoc_logger.setLevel(logging.INFO)
             autodoc_logger.addHandler(log_handler)
             
-            # Also add to specific submodules to ensure we capture everything
+            # Set log levels for child loggers but DON'T add handlers
+            # This ensures they log at INFO level but don't duplicate messages
             for module in ['autodoc.scanning', 'autodoc.scanning.artifact_scanner', 
                           'autodoc.generation', 'autodoc.generation.planner', 
                           'autodoc.generation.generator', 'autodoc.orchestrator']:
                 logger = logging.getLogger(module)
                 logger.setLevel(logging.INFO)
-                logger.addHandler(log_handler)
+                # Don't add handler here - let propagation handle it
             
             _log(job, "Verbose logging enabled - detailed progress will be shown.")
         else:
@@ -627,12 +629,9 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         # Clean up the log handler
         if log_handler:
             try:
-                # Remove handler from all loggers we added it to
-                for module in ['autodoc', 'autodoc.scanning', 'autodoc.scanning.artifact_scanner', 
-                              'autodoc.generation', 'autodoc.generation.planner', 
-                              'autodoc.generation.generator', 'autodoc.orchestrator']:
-                    logger = logging.getLogger(module)
-                    logger.removeHandler(log_handler)
+                # Remove handler only from the root autodoc logger where we added it
+                autodoc_logger = logging.getLogger('autodoc')
+                autodoc_logger.removeHandler(log_handler)
                 log_handler.close()
             except Exception:
                 pass  # Don't let cleanup errors break anything
