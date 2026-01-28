@@ -28,6 +28,59 @@ from autodoc.scanning import ContentSanitizer
 console = Console()
 
 
+class JobLogHandler(logging.Handler):
+    """Custom logging handler that captures log messages to job.logs."""
+    
+    def __init__(self, job: 'JobState', include_level: bool = False):
+        """Initialize the handler.
+        
+        Args:
+            job: The JobState to append logs to
+            include_level: Whether to include log level in the message
+        """
+        super().__init__()
+        self.job = job
+        self.include_level = include_level
+        
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record to the job logs."""
+        try:
+            # Format the message
+            msg = self.format(record)
+            
+            # Remove any ANSI color codes if present
+            import re
+            msg = re.sub(r'\x1b\[[0-9;]*m', '', msg)
+            
+            # Extract just the message part if it has timestamp from formatter
+            # Look for pattern like "2024-01-28 12:00:00,000 - module - LEVEL - message"
+            parts = msg.split(' - ', 3)
+            if len(parts) >= 4:
+                # Take just the message part
+                msg = parts[-1]
+            elif len(parts) >= 2:
+                # Might be "LEVEL - message" format
+                msg = parts[-1]
+            
+            # Optionally prepend log level
+            if self.include_level:
+                level_name = record.levelname
+                if level_name == "WARNING":
+                    msg = f"⚠ {msg}"
+                elif level_name == "ERROR":
+                    msg = f"✗ {msg}"
+                elif level_name == "INFO":
+                    # Don't prepend anything for INFO to keep it clean
+                    pass
+            
+            # Add to job logs with timestamp
+            _log(self.job, msg)
+            
+        except Exception:
+            # Don't let logging errors break the application
+            pass
+
+
 @dataclass
 class JobState:
     id: str
@@ -261,7 +314,9 @@ def _render_status(job: Optional[JobState]) -> FT:
             cls="terminal-card",
         )
 
-    log_text = "\n".join(job.logs[-200:]) if job.logs else "Initializing..."
+    # Show more logs when verbose mode is on (last 500 lines vs 200)
+    log_limit = 500 if len(job.logs) > 200 else 200
+    log_text = "\n".join(job.logs[-log_limit:]) if job.logs else "Initializing..."
     status_text = job.status.upper()
     if job.status == "completed":
         status_text = "COMPLETED"
@@ -345,6 +400,7 @@ def _render_status(job: Optional[JobState]) -> FT:
 
 async def _run_generation(job: JobState, request: JobRequest) -> None:
     progress_ctx = None
+    log_handler = None
     try:
         global LAST_API_KEY
         job.status = "running"
@@ -352,20 +408,34 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         
         # Configure logging based on verbose flag
         if request.verbose:
+            # Create our custom handler to capture logs to the job
+            log_handler = JobLogHandler(job, include_level=True)
+            log_handler.setLevel(logging.INFO)
+            # Use a simple formatter that doesn't include timestamp (we add our own)
+            log_handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
+            
+            # Configure root logging
             logging.basicConfig(
                 level=logging.INFO,
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[logging.StreamHandler()],
                 force=True  # Override any existing configuration
             )
-            # Also ensure the autodoc loggers are set to INFO
-            logging.getLogger('autodoc').setLevel(logging.INFO)
-            logging.getLogger('autodoc.scanning').setLevel(logging.INFO)
-            logging.getLogger('autodoc.scanning.artifact_scanner').setLevel(logging.INFO)
-            logging.getLogger('autodoc.generation').setLevel(logging.INFO)
-            logging.getLogger('autodoc.generation.planner').setLevel(logging.INFO)
-            logging.getLogger('autodoc.generation.generator').setLevel(logging.INFO)
-            _log(job, "Verbose logging enabled.")
+            
+            # Add our handler to the autodoc loggers
+            autodoc_logger = logging.getLogger('autodoc')
+            autodoc_logger.setLevel(logging.INFO)
+            autodoc_logger.addHandler(log_handler)
+            
+            # Also add to specific submodules to ensure we capture everything
+            for module in ['autodoc.scanning', 'autodoc.scanning.artifact_scanner', 
+                          'autodoc.generation', 'autodoc.generation.planner', 
+                          'autodoc.generation.generator', 'autodoc.orchestrator']:
+                logger = logging.getLogger(module)
+                logger.setLevel(logging.INFO)
+                logger.addHandler(log_handler)
+            
+            _log(job, "Verbose logging enabled - detailed progress will be shown.")
         else:
             logging.basicConfig(
                 level=logging.WARNING,
@@ -553,6 +623,19 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         console.print(f"\n[bold red]Error:[/bold red] {exc}")
         _log(job, f"Error: {exc}")
         _log(job, traceback.format_exc())
+    finally:
+        # Clean up the log handler
+        if log_handler:
+            try:
+                # Remove handler from all loggers we added it to
+                for module in ['autodoc', 'autodoc.scanning', 'autodoc.scanning.artifact_scanner', 
+                              'autodoc.generation', 'autodoc.generation.planner', 
+                              'autodoc.generation.generator', 'autodoc.orchestrator']:
+                    logger = logging.getLogger(module)
+                    logger.removeHandler(log_handler)
+                log_handler.close()
+            except Exception:
+                pass  # Don't let cleanup errors break anything
 
 
 async def _parse_request(req: Request) -> JobRequest:
