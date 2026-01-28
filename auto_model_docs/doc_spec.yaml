@@ -40,8 +40,11 @@ hints:
     insights, and performance analysis across different segments.
 
   "Validation Results": >
-    Cover cross-validation results, holdout set performance,
-    and any bias/fairness analysis performed.
+    Document the validation approach used based on what is found in the code.
+    If cross-validation was implemented, cover those results.
+    If only holdout/test set validation was used, document that approach.
+    Include any bias/fairness analysis if it was performed.
+    Do not describe validation methods that were not actually implemented.
 
   "Deployment Considerations": >
     Address inference latency, resource requirements, monitoring strategy,

@@ -294,7 +294,12 @@ def build_narrative_prompt(
 - Use a formal but accessible tone
 - Do NOT use markdown formatting (no headers, bullets, or bold)
 - Do NOT include a title or heading
-- Just write the paragraph content directly"""
+- Just write the paragraph content directly
+
+CRITICAL: Only describe metrics, results, and methodologies that are explicitly mentioned in the context above.
+If cross-validation or other specific techniques are not mentioned in the context, do NOT claim they were performed.
+If specific metrics are not provided, do not invent values - instead note what metrics are available.
+Do NOT fabricate, estimate, or invent any metrics, statistics, or numerical values."""
 
 
 def build_table_prompt(
@@ -331,7 +336,14 @@ def build_table_prompt(
 - Transformations: {transformations}
 - Hyperparameters: {hyperparameters}{metrics_info}
 
-Generate a useful table with 3-10 rows of data. Use realistic values based on the context."""
+CRITICAL INSTRUCTIONS:
+- ONLY include metrics and values that are explicitly provided in the "Available Context" above
+- Do NOT fabricate, estimate, or invent any metrics, statistics, or numerical values
+- Do NOT generate cross-validation metrics unless CV results are explicitly provided above
+- If specific data is not available, either omit that row/column or mark it as "Not Available"
+- Use the exact metric values provided - do not round, estimate, or modify them
+
+Generate a useful table with 3-10 rows using ONLY the data provided above."""
 
 
 TABLE_SCHEMA: Dict[str, Any] = {
@@ -386,7 +398,12 @@ def build_chart_prompt(
 - Model Type: {model_classes}
 - ML Task: {ml_task_type}
 
-Provide labels and values for the chart. Use realistic values."""
+CRITICAL: Only visualize data that is explicitly provided above.
+Do NOT fabricate or estimate any values. If the requested visualization
+cannot be created with available data, use placeholder labels like "Metric 1", "Metric 2"
+with the actual values from the metrics provided, or indicate what data would be needed.
+
+Provide labels and values for the chart using ONLY the data provided above."""
 
 
 CHART_SCHEMA: Dict[str, Any] = {
@@ -439,7 +456,11 @@ def build_list_prompt(
 - ML Task: {ml_task_type}
 - Features: {features}
 
-Generate 5-10 concise, informative items."""
+CRITICAL: Only include information that is explicitly provided in the context above.
+Do NOT fabricate metrics, statistics, or claim methodologies that are not mentioned.
+If specific data is not available, focus on what IS known from the context.
+
+Generate 5-10 concise, informative items using ONLY the data provided above."""
 
 
 LIST_SCHEMA: Dict[str, Any] = {

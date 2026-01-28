@@ -80,16 +80,22 @@ class ContentGenerator:
         context: GenerationContext,
     ) -> GeneratedContent:
         """Generate narrative text (paragraphs)."""
-        # Build context for the narrative
+        # Build context for the narrative with clear labeling
         model_info = ""
+        has_metrics = False
         if context.model_name:
             for model in context.artifact_context.models:
                 if model.name == context.model_name:
-                    metrics_str = ", ".join(
-                        f"{k}: {v:.4f}" for k, v in list(model.metrics.items())[:5]
-                    )
-                    model_info = f"\n- Model Metrics: {metrics_str}" if metrics_str else ""
+                    if model.metrics:
+                        metrics_str = ", ".join(
+                            f"{k}: {v:.4f}" for k, v in list(model.metrics.items())[:5]
+                        )
+                        model_info = f"\n- ACTUAL Logged Metrics (use only these): {metrics_str}"
+                        has_metrics = True
                     break
+
+        if not has_metrics:
+            model_info = "\n- NOTE: No metrics data available from MLflow. Do not invent metrics."
 
         prompt = build_narrative_prompt(
             section_name=context.section_name,
@@ -122,16 +128,24 @@ class ContentGenerator:
         context: GenerationContext,
     ) -> GeneratedContent:
         """Generate table data."""
-        # Get real metrics if available
-        metrics_info = ""
+        # Get real metrics if available - with clear labeling
+        metrics_info = "\n\n## ACTUAL AVAILABLE DATA (use only these values):"
+        has_real_data = False
+
         if context.model_name:
             for model in context.artifact_context.models:
                 if model.name == context.model_name:
                     if model.metrics:
-                        metrics_info = f"\n\nAvailable metrics: {dict(model.metrics)}"
+                        metrics_info += f"\nLogged Metrics: {dict(model.metrics)}"
+                        has_real_data = True
                     if model.params:
-                        metrics_info += f"\nAvailable parameters: {dict(model.params)}"
+                        metrics_info += f"\nLogged Parameters: {dict(model.params)}"
+                        has_real_data = True
                     break
+
+        if not has_real_data:
+            metrics_info += "\nNo metrics data available from MLflow."
+            metrics_info += "\nDo NOT fabricate metrics - only document what is known from code analysis."
 
         transformations = context.code_context.transformations[:5] if context.code_context.transformations else "Unknown"
 
@@ -164,13 +178,18 @@ class ContentGenerator:
         """Generate chart as PNG image bytes."""
         chart_type = block.specifics.get("chart_type", "bar")
 
-        # Get actual metrics if available
+        # Get actual metrics if available - with clear labeling
         metrics_hint = ""
+        has_metrics = False
         if context.model_name:
             for model in context.artifact_context.models:
                 if model.name == context.model_name and model.metrics:
-                    metrics_hint = f"\n\nActual available metrics: {dict(model.metrics)}"
+                    metrics_hint = f"\n\n## ACTUAL AVAILABLE METRICS (use only these values): {dict(model.metrics)}"
+                    has_metrics = True
                     break
+
+        if not has_metrics:
+            metrics_hint = "\n\nNOTE: No metrics data available. Do NOT fabricate values for the chart."
 
         prompt = build_chart_prompt(
             purpose=block.purpose,
