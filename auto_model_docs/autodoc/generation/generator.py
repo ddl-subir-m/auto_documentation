@@ -61,22 +61,35 @@ class ContentGenerator:
         Raises:
             GenerationError: If generation fails.
         """
+        model_suffix = f" for model '{context.model_name}'" if context.model_name else ""
+        logger.info(f"Generating {block.type.value}: {block.purpose}{model_suffix}")
+        
         try:
+            result = None
             if block.type == ContentType.NARRATIVE:
-                return await self._generate_narrative(block, context)
+                result = await self._generate_narrative(block, context)
             elif block.type == ContentType.TABLE:
-                return await self._generate_table(block, context)
+                result = await self._generate_table(block, context)
             elif block.type == ContentType.CHART:
-                return await self._generate_chart(block, context)
+                result = await self._generate_chart(block, context)
             elif block.type == ContentType.IMAGE:
-                return await self._generate_image(block, context)
+                result = await self._generate_image(block, context)
             elif block.type in (ContentType.BULLET_LIST, ContentType.NUMBERED_LIST):
-                return await self._generate_list(block, context)
+                result = await self._generate_list(block, context)
             else:
                 raise GenerationError(f"Unknown content type: {block.type}")
+            
+            if result:
+                logger.info(f"  ✓ Successfully generated {block.type.value}")
+            else:
+                logger.warning(f"  ⚠ No content generated for {block.type.value}")
+            return result
+            
         except GenerationError:
+            logger.error(f"  ✗ Failed to generate {block.type.value}: {block.purpose}")
             raise
         except Exception as e:
+            logger.error(f"  ✗ Unexpected error generating {block.type.value}: {e}")
             raise GenerationError(f"Content generation failed: {e}") from e
 
     async def _generate_narrative(
@@ -262,7 +275,7 @@ class ContentGenerator:
 
         if not has_metrics:
             # Log that we're skipping chart generation
-            logger.warning(f"Skipping chart generation for '{block.purpose}': no metrics available")
+            logger.warning(f"  ⚠ Skipping chart generation for '{block.purpose}': no metrics available")
             return None
 
         prompt = build_chart_prompt(
@@ -307,7 +320,7 @@ class ContentGenerator:
         values = data.get("values", [])
 
         if not labels or not values:
-            logger.warning(f"Chart has no data: labels={labels}, values={values}")
+            logger.warning(f"  ⚠ Chart has no data: labels={labels}, values={values}")
             plt.close(fig)  # Clean up the figure
             return None
         elif chart_type == "bar":
@@ -380,7 +393,7 @@ class ContentGenerator:
                             },
                         )
                 break
-        logger.warning(f"No matching image artifact found for '{block.purpose}'")
+        logger.warning(f"  ⚠ No matching image artifact found for '{block.purpose}'")
         return None
 
     def _image_matches_purpose(self, path: str, purpose: str, specifics: dict) -> bool:

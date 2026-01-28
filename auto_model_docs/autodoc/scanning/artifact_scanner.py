@@ -176,43 +176,65 @@ class ArtifactScanner:
         try:
             # Get all experiments
             experiments = client.search_experiments()
+            logger.info(f"Found {len(experiments)} total experiments in MLflow")
             
+            excluded_count = 0
             for exp in experiments:
                 # Skip deleted experiments
                 if exp.lifecycle_stage == "deleted":
+                    logger.info(f"  ✗ Skipping deleted experiment: {exp.name}")
+                    excluded_count += 1
                     continue
                     
                 # Apply Domino project filtering
                 if domino_project_id and not self.disable_project_filtering:
                     project_tag = exp.tags.get("mlflow.domino.project_id")
                     if project_tag != domino_project_id:
+                        logger.info(f"  ✗ Excluding experiment '{exp.name}' (project mismatch: {project_tag} != {domino_project_id})")
+                        excluded_count += 1
                         continue
                 
                 # Apply experiment name filtering
                 if self.experiment_names:
                     # Check if any pattern matches this experiment
                     matched = False
+                    matching_pattern = None
                     for pattern in self.experiment_names:
                         # Use wildcard matching if pattern contains wildcards
                         if '*' in pattern or '?' in pattern:
                             if fnmatch.fnmatch(exp.name, pattern):
                                 matched = True
+                                matching_pattern = pattern
                                 break
                         else:
                             # Exact match for non-wildcard patterns
                             if exp.name == pattern:
                                 matched = True
+                                matching_pattern = pattern
                                 break
                     
                     if not matched:
+                        logger.info(f"  ✗ Excluding experiment '{exp.name}' (no pattern match)")
+                        excluded_count += 1
                         continue
+                    else:
+                        logger.info(f"  ✓ Including experiment '{exp.name}' (matches pattern: {matching_pattern})")
                         
                 elif self.experiment_name:  # Backward compatibility
                     if exp.name != self.experiment_name:
+                        logger.info(f"  ✗ Excluding experiment '{exp.name}' (not matching specified: {self.experiment_name})")
+                        excluded_count += 1
                         continue
+                    else:
+                        logger.info(f"  ✓ Including experiment '{exp.name}' (matches specified name)")
+                else:
+                    # No filtering, include all
+                    logger.info(f"  ✓ Including experiment '{exp.name}' (no filter applied)")
                 
                 target_experiments[exp.name] = exp.experiment_id
                 
+            logger.info(f"Experiment selection complete: {len(target_experiments)} selected, {excluded_count} excluded")
+            
         except Exception as e:
             logger.warning(f"Error getting target experiments: {e}")
             
@@ -272,8 +294,10 @@ class ArtifactScanner:
                 # Report progress based on models processed
                 report_progress(i / total_models)
 
+                logger.info(f"\nProcessing model: {rm.name}")
                 # Get all versions of this model
                 versions = client.search_model_versions(f"name='{rm.name}'")
+                logger.info(f"  Found {len(versions)} version(s) for model {rm.name}")
 
                 for version in versions:
                     try:
@@ -284,16 +308,30 @@ class ArtifactScanner:
                         experiment = client.get_experiment(run.info.experiment_id)
                         if experiment and experiment.lifecycle_stage == "deleted":
                             # Skip models from deleted experiments
+                            logger.info(f"    ✗ Version {version.version}: Skipped (from deleted experiment)")
                             continue
 
                         # Apply experiment filtering if specified
                         # Only filter if we have target experiments (empty dict is falsy)
                         if target_experiments:
                             if experiment.name not in target_experiments:
+                                logger.info(f"    ✗ Version {version.version}: Skipped (experiment '{experiment.name}' not in targets)")
                                 continue
+                            else:
+                                logger.info(f"    ✓ Version {version.version}: Processing (from experiment '{experiment.name}')")
+                        else:
+                            logger.info(f"    ✓ Version {version.version}: Processing (from experiment '{experiment.name}')")
 
+                        logger.info(f"      Listing artifacts for run {version.run_id}...")
                         artifact_paths = self._list_artifacts(client, version.run_id)
-                        artifact_data = self._download_and_parse_artifacts(client, version.run_id, artifact_paths)
+                        logger.info(f"      Found {len(artifact_paths)} artifact(s)")
+                        
+                        if artifact_paths:
+                            logger.info(f"      Downloading and parsing artifacts...")
+                            artifact_data = self._download_and_parse_artifacts(client, version.run_id, artifact_paths)
+                            logger.info(f"      Successfully parsed {len(artifact_data)} artifact(s)")
+                        else:
+                            artifact_data = {}
 
                         model_info = ModelInfo(
                             name=rm.name,
@@ -306,8 +344,8 @@ class ArtifactScanner:
                             artifact_data=artifact_data,
                         )
 
-                        # Log model info for debugging
-                        logger.info(f"Model {rm.name} v{version.version}: {len(run.data.metrics)} metrics, {len(artifact_paths)} artifacts")
+                        # Summary for this model version
+                        logger.info(f"      Summary: {len(run.data.metrics)} metrics, {len(artifact_paths)} artifacts, stage: {version.current_stage}")
                         
                         # For latest_only filtering, track versions by model name
                         if self.latest_only:
@@ -318,7 +356,7 @@ class ArtifactScanner:
                             models.append(model_info)
 
                     except Exception as e:
-                        logger.debug(f"Skipping model version {rm.name} v{version.version}: {e}")
+                        logger.info(f"    ✗ Version {version.version}: Error - {str(e)}")
                         # Skip versions that can't be loaded - already filtered by model name patterns above
 
             # Apply latest_only filtering
@@ -353,13 +391,15 @@ class ArtifactScanner:
             artifacts = client.list_artifacts(run_id, path)
             for artifact in artifacts:
                 if artifact.is_dir:
+                    logger.info(f"        📁 Found directory: {artifact.path}")
                     # Recursively list artifacts in subdirectories
                     nested = self._list_artifacts(client, run_id, artifact.path)
                     artifact_paths.extend(nested)
                 else:
+                    logger.info(f"        📄 Found file: {artifact.path}")
                     artifact_paths.append(artifact.path)
         except Exception as e:
-            logger.debug(f"Error listing artifacts for run {run_id}: {e}")
+            logger.warning(f"        Error listing artifacts for run {run_id}: {e}")
         return artifact_paths
 
     def _download_and_parse_artifacts(
@@ -381,21 +421,29 @@ class ArtifactScanner:
         import pandas as pd
 
         artifact_data = {}
+        
+        logger.info(f"        Starting download of {len(artifact_paths)} artifact(s) for run {run_id}")
 
         for path in artifact_paths:
             try:
                 if path.endswith('.csv'):
+                    logger.info(f"        ↓ Downloading CSV: {path}")
                     # Download to temp directory
                     local_path = client.download_artifacts(run_id, path, tempfile.gettempdir())
                     df = pd.read_csv(local_path)
                     artifact_data[path] = df.to_dict('records')
+                    logger.info(f"          ✓ Parsed CSV with {len(df)} rows")
                     os.remove(local_path)
                 elif path.endswith('.txt'):
+                    logger.info(f"        ↓ Downloading text file: {path}")
                     local_path = client.download_artifacts(run_id, path, tempfile.gettempdir())
                     with open(local_path, 'r') as f:
-                        artifact_data[path] = f.read()
+                        content = f.read()
+                        artifact_data[path] = content
+                    logger.info(f"          ✓ Read text file ({len(content)} chars)")
                     os.remove(local_path)
                 elif path.endswith(('.png', '.jpg', '.jpeg')):
+                    logger.info(f"        ↓ Downloading image: {path}")
                     # Download and embed images as base64
                     local_path = client.download_artifacts(run_id, path, tempfile.gettempdir())
                     with open(local_path, 'rb') as f:
@@ -405,12 +453,15 @@ class ArtifactScanner:
                         "format": path.split('.')[-1].lower(),
                         "data": base64.b64encode(image_bytes).decode('utf-8'),
                     }
-                    logger.info(f"Embedded image artifact: {path}")
+                    logger.info(f"          ✓ Embedded image ({len(image_bytes):,} bytes)")
                     os.remove(local_path)
+                else:
+                    logger.info(f"        ‒ Skipping unsupported file type: {path}")
             except Exception as e:
-                logger.debug(f"Could not parse artifact {path}: {e}")
+                logger.warning(f"        ✗ Failed to download/parse {path}: {str(e)}")
                 continue  # Skip artifacts that can't be parsed
 
+        logger.info(f"        Artifact download complete: {len(artifact_data)}/{len(artifact_paths)} successfully parsed")
         return artifact_data
 
     def _get_experiment_metadata(self, client) -> dict:

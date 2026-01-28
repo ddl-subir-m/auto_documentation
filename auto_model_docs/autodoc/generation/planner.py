@@ -158,5 +158,14 @@ class SectionPlanner:
             content_blocks=content_blocks,
         )
         
-        logger.info(f"Successfully planned section: {section.name}{model_suffix} with {len(content_blocks)} content blocks")
+        # Log details of planned content blocks
+        logger.info(f"Successfully planned section: {section.name}{model_suffix} with {len(content_blocks)} content blocks:")
+        for i, block in enumerate(content_blocks, 1):
+            logger.info(f"  Block {i}: {block.type.value} - {block.purpose}")
+            if block.specifics:
+                for key, value in block.specifics.items():
+                    if isinstance(value, list) and value:
+                        logger.info(f"    {key}: {', '.join(str(v) for v in value[:3])}{'...' if len(value) > 3 else ''}")
+                    elif value:
+                        logger.info(f"    {key}: {value}")
         return plan
