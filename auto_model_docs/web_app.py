@@ -1540,7 +1540,7 @@ def index():
                                 Div(
                                     Label(
                                         Input(type="checkbox", name="verbose", id="field-verbose", checked=True),
-                                        Span("Verbose logging (show detailed progress)"),
+                                        Span("Show detailed progress"),
                                         cls="checkbox-field",
                                     ),
                                     cls="field",
