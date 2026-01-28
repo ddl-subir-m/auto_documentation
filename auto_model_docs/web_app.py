@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -68,6 +69,7 @@ class JobRequest:
     experiment_names: Optional[str]  # Comma-separated list
     model_names: Optional[str]  # Comma-separated list
     latest_only: bool
+    verbose: bool  # Enable verbose logging
 
 
 JOB_STORE: dict[str, JobState] = {}
@@ -347,6 +349,31 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         global LAST_API_KEY
         job.status = "running"
         _log(job, "Preparing generation run.")
+        
+        # Configure logging based on verbose flag
+        if request.verbose:
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                handlers=[logging.StreamHandler()],
+                force=True  # Override any existing configuration
+            )
+            # Also ensure the autodoc loggers are set to INFO
+            logging.getLogger('autodoc').setLevel(logging.INFO)
+            logging.getLogger('autodoc.scanning').setLevel(logging.INFO)
+            logging.getLogger('autodoc.scanning.artifact_scanner').setLevel(logging.INFO)
+            logging.getLogger('autodoc.generation').setLevel(logging.INFO)
+            logging.getLogger('autodoc.generation.planner').setLevel(logging.INFO)
+            logging.getLogger('autodoc.generation.generator').setLevel(logging.INFO)
+            _log(job, "Verbose logging enabled.")
+        else:
+            logging.basicConfig(
+                level=logging.WARNING,
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                handlers=[logging.StreamHandler()],
+                force=True
+            )
+            _log(job, "Standard logging mode.")
 
         settings = Settings()
         if request.provider:
@@ -554,6 +581,7 @@ async def _parse_request(req: Request) -> JobRequest:
         experiment_names=form.get("experiment_names") or None,
         model_names=form.get("model_names") or None,
         latest_only=form.get("latest_only") in ("on", "true", "1", "yes"),
+        verbose=form.get("verbose") in ("on", "true", "1", "yes"),
     )
 
 
@@ -1507,6 +1535,15 @@ def index():
                                         cls="field",
                                     ),
                                     cls="advanced-grid",
+                                ),
+                                # Logging section
+                                Div(
+                                    Label(
+                                        Input(type="checkbox", name="verbose", id="field-verbose", checked=True),
+                                        Span("Verbose logging (show detailed progress)"),
+                                        cls="checkbox-field",
+                                    ),
+                                    cls="field",
                                 ),
                                 # Filtering subsection
                                 Div(
