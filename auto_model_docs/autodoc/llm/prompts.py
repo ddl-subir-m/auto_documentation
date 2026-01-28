@@ -266,6 +266,7 @@ def build_narrative_prompt(
     model_name: Optional[str],
     model_info: str,
     insights: str,
+    artifact_data: str = "",
 ) -> str:
     """Build prompt for generating narrative content.
 
@@ -281,12 +282,14 @@ def build_narrative_prompt(
         model_name: Specific model name (optional).
         model_info: Additional model metrics info.
         insights: Additional insights from code analysis.
+        artifact_data: Parsed artifact data (feature importance, reports, etc.).
 
     Returns:
         Formatted prompt string.
     """
     data_line = f"\n## Data Needed: {data_needed}" if data_needed else ""
     model_line = f"\n- Specific Model: {model_name}" if model_name else ""
+    artifact_section = f"\n\n## Available Artifact Data\n{artifact_data}" if artifact_data else ""
 
     return f"""Write professional documentation content.
 
@@ -301,7 +304,7 @@ def build_narrative_prompt(
 - Data Sources: {data_sources}{model_line}{model_info}
 
 ## Additional Context
-{insights or "No additional insights available."}
+{insights or "No additional insights available."}{artifact_section}
 
 ## Instructions
 - Write 2-4 paragraphs of clear, professional prose
@@ -325,6 +328,7 @@ def build_table_prompt(
     transformations: str,
     hyperparameters: str,
     metrics_info: str = "",
+    artifact_data: str = "",
 ) -> str:
     """Build prompt for generating table content.
 
@@ -336,10 +340,13 @@ def build_table_prompt(
         transformations: Transformation info string.
         hyperparameters: Hyperparameters info string.
         metrics_info: Optional metrics information.
+        artifact_data: Parsed artifact data (feature importance, etc.).
 
     Returns:
         Formatted prompt string.
     """
+    artifact_section = f"\n\n## Available Artifact Data\n{artifact_data}" if artifact_data else ""
+
     return f"""Generate a data table for documentation.
 
 ## Purpose: {purpose}
@@ -349,7 +356,7 @@ def build_table_prompt(
 - Features: {features}
 - Model Classes: {model_classes}
 - Transformations: {transformations}
-- Hyperparameters: {hyperparameters}{metrics_info}
+- Hyperparameters: {hyperparameters}{metrics_info}{artifact_section}
 
 CRITICAL INSTRUCTIONS:
 - ONLY include metrics and values that are explicitly provided in the "Available Context" above
@@ -390,6 +397,7 @@ def build_chart_prompt(
     model_classes: str,
     ml_task_type: str,
     metrics_hint: str = "",
+    artifact_data: str = "",
 ) -> str:
     """Build prompt for generating chart data.
 
@@ -400,14 +408,17 @@ def build_chart_prompt(
         model_classes: Comma-separated model class names.
         ml_task_type: Type of ML task.
         metrics_hint: Optional actual metrics available.
+        artifact_data: Parsed artifact data (feature importance, etc.).
 
     Returns:
         Formatted prompt string.
     """
+    artifact_section = f"\n\n## Available Artifact Data\n{artifact_data}" if artifact_data else ""
+
     return f"""Generate data for a {chart_type} chart.
 
 ## Purpose: {purpose}
-## Data Needed: {data_needed or "Relevant data for visualization"}{metrics_hint}
+## Data Needed: {data_needed or "Relevant data for visualization"}{metrics_hint}{artifact_section}
 
 ## Context
 - Model Type: {model_classes}

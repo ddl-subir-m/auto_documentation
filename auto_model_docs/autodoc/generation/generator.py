@@ -83,6 +83,7 @@ class ContentGenerator:
         # Build context for the narrative with clear labeling
         model_info = ""
         has_metrics = False
+        artifact_data_str = ""
         if context.model_name:
             for model in context.artifact_context.models:
                 if model.name == context.model_name:
@@ -92,6 +93,10 @@ class ContentGenerator:
                         )
                         model_info = f"\n- ACTUAL Logged Metrics (use only these): {metrics_str}"
                         has_metrics = True
+                    # Include all artifact data for narratives
+                    if model.artifact_data:
+                        for artifact_path, data in model.artifact_data.items():
+                            artifact_data_str += f"\n\n## {artifact_path}:\n{data}"
                     break
 
         if not has_metrics:
@@ -109,6 +114,7 @@ class ContentGenerator:
             model_name=context.model_name,
             model_info=model_info,
             insights=context.code_context.insights,
+            artifact_data=artifact_data_str,
         )
 
         response = await self.llm.complete(
@@ -131,6 +137,7 @@ class ContentGenerator:
         # Get real metrics if available - with clear labeling
         metrics_info = "\n\n## ACTUAL AVAILABLE DATA (use only these values):"
         has_real_data = False
+        artifact_data_str = ""
 
         if context.model_name:
             for model in context.artifact_context.models:
@@ -141,6 +148,11 @@ class ContentGenerator:
                     if model.params:
                         metrics_info += f"\nLogged Parameters: {dict(model.params)}"
                         has_real_data = True
+                    # Include all artifact data
+                    if model.artifact_data:
+                        for artifact_path, data in model.artifact_data.items():
+                            artifact_data_str += f"\n\n## {artifact_path}:\n{data}"
+                            has_real_data = True
                     break
 
         if not has_real_data:
@@ -157,6 +169,7 @@ class ContentGenerator:
             transformations=str(transformations),
             hyperparameters=str(context.code_context.hyperparameters or "Unknown"),
             metrics_info=metrics_info,
+            artifact_data=artifact_data_str,
         )
 
         result = await self.llm.complete_json(
@@ -181,11 +194,18 @@ class ContentGenerator:
         # Get actual metrics if available - with clear labeling
         metrics_hint = ""
         has_metrics = False
+        artifact_data_str = ""
         if context.model_name:
             for model in context.artifact_context.models:
-                if model.name == context.model_name and model.metrics:
-                    metrics_hint = f"\n\n## ACTUAL AVAILABLE METRICS (use only these values): {dict(model.metrics)}"
-                    has_metrics = True
+                if model.name == context.model_name:
+                    if model.metrics:
+                        metrics_hint = f"\n\n## ACTUAL AVAILABLE METRICS (use only these values): {dict(model.metrics)}"
+                        has_metrics = True
+                    # Include all artifact data for charts
+                    if model.artifact_data:
+                        for artifact_path, data in model.artifact_data.items():
+                            artifact_data_str += f"\n\n## {artifact_path}:\n{data}"
+                            has_metrics = True
                     break
 
         if not has_metrics:
@@ -198,6 +218,7 @@ class ContentGenerator:
             model_classes=", ".join(context.code_context.model_classes),
             ml_task_type=context.code_context.ml_task_type or "Unknown",
             metrics_hint=metrics_hint,
+            artifact_data=artifact_data_str,
         )
 
         data = await self.llm.complete_json(

@@ -232,6 +232,9 @@ class ArtifactScanner:
                             if experiment.name not in target_experiments:
                                 continue
 
+                        artifact_paths = self._list_artifacts(client, version.run_id)
+                        artifact_data = self._download_and_parse_artifacts(client, version.run_id, artifact_paths)
+
                         model_info = ModelInfo(
                             name=rm.name,
                             version=version.version,
@@ -239,7 +242,8 @@ class ArtifactScanner:
                             run_id=version.run_id,
                             metrics=dict(run.data.metrics),
                             params=dict(run.data.params),
-                            artifacts=self._list_artifacts(client, version.run_id),
+                            artifacts=artifact_paths,
+                            artifact_data=artifact_data,
                         )
                         
                         # For latest_only filtering, track versions by model name
@@ -275,6 +279,45 @@ class ArtifactScanner:
             return [a.path for a in artifacts]
         except Exception:
             return []
+
+    def _download_and_parse_artifacts(
+        self, client, run_id: str, artifact_paths: list[str]
+    ) -> dict[str, any]:
+        """Download and parse CSV/text artifacts, skip images.
+
+        Args:
+            client: MLflow client instance.
+            run_id: The run ID to download artifacts from.
+            artifact_paths: List of artifact paths to process.
+
+        Returns:
+            Dict mapping artifact path to parsed content.
+        """
+        import tempfile
+
+        import pandas as pd
+
+        artifact_data = {}
+
+        for path in artifact_paths:
+            try:
+                if path.endswith('.csv'):
+                    # Download to temp directory
+                    local_path = client.download_artifacts(run_id, path, tempfile.gettempdir())
+                    df = pd.read_csv(local_path)
+                    artifact_data[path] = df.to_dict('records')
+                    os.remove(local_path)
+                elif path.endswith('.txt'):
+                    local_path = client.download_artifacts(run_id, path, tempfile.gettempdir())
+                    with open(local_path, 'r') as f:
+                        artifact_data[path] = f.read()
+                    os.remove(local_path)
+                # Skip images (.png, .jpg) - redundant with CSV data
+            except Exception as e:
+                logger.debug(f"Could not parse artifact {path}: {e}")
+                continue  # Skip artifacts that can't be parsed
+
+        return artifact_data
 
     def _get_experiment_metadata(self, client) -> dict:
         """Get experiment metadata."""

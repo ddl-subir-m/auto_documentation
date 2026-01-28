@@ -120,6 +120,7 @@ class ModelInfo:
     metrics: Dict[str, float] = field(default_factory=dict)
     params: Dict[str, Any] = field(default_factory=dict)
     artifacts: List[str] = field(default_factory=list)
+    artifact_data: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
