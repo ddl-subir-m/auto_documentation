@@ -245,6 +245,59 @@ class ArtifactScanner:
             
         return target_experiments
 
+    def _get_models_from_experiments(
+        self,
+        client,
+        target_experiments: dict,
+    ) -> set[str]:
+        """Get unique model names from runs in target experiments."""
+        model_names = set()
+        
+        logger.info(f"📋 Extracting models from {len(target_experiments)} target experiment(s)...")
+        
+        for exp_name, exp_id in target_experiments.items():
+            try:
+                logger.info(f"  🔍 Scanning experiment '{exp_name}' for models...")
+                
+                # Get all runs from this experiment
+                runs = client.search_runs(
+                    experiment_ids=[exp_id],
+                    max_results=10000  # Large number to get all runs
+                )
+                
+                exp_model_count = 0
+                for run in runs:
+                    # Look for model registry references in run tags
+                    if hasattr(run.data, 'tags') and run.data.tags:
+                        # Check for MLflow model registry tags
+                        for tag_key, tag_value in run.data.tags.items():
+                            if 'mlflow.log-model' in tag_key and tag_value:
+                                # This run logged a model
+                                # Try to find registered model versions that reference this run
+                                try:
+                                    # Search for model versions with this run_id
+                                    versions = client.search_model_versions(f"run_id='{run.info.run_id}'")
+                                    for version in versions:
+                                        model_names.add(version.name)
+                                        exp_model_count += 1
+                                        logger.debug(f"    ✓ Found model '{version.name}' (version {version.version})")
+                                except Exception as e:
+                                    logger.debug(f"    Error searching model versions for run {run.info.run_id}: {e}")
+                                    continue
+                
+                logger.info(f"  📄 Found {exp_model_count} model version(s) in experiment '{exp_name}'")
+                
+            except Exception as e:
+                logger.warning(f"  ⚠ Error scanning experiment '{exp_name}': {e}")
+                continue
+        
+        unique_models = len(model_names)
+        logger.info(f"📊 Total unique models found across target experiments: {unique_models}")
+        if unique_models > 0:
+            logger.info(f"    Models: {', '.join(sorted(model_names))}")
+        
+        return model_names
+
     def _scan_registered_models(
         self,
         client,
@@ -267,27 +320,66 @@ class ArtifactScanner:
                 on_progress(scaled_progress)
 
         try:
-            # First pass: collect all registered models to count them
-            registered_models = list(client.search_registered_models())
-
-            # Filter to matching models
-            matching_models = []
-            for rm in registered_models:
-                if self.model_names:
-                    matched = False
+            # Optimization: Use experiment-based pre-filtering when both experiment and model filters are specified
+            if target_experiments and self.model_names:
+                logger.info("🚀 Using optimized experiment-based model pre-filtering")
+                
+                # Get models from target experiments first
+                experiment_models = self._get_models_from_experiments(client, target_experiments)
+                
+                if not experiment_models:
+                    logger.info("📭 No models found in target experiments")
+                    report_progress(1.0)
+                    return models
+                
+                # Filter experiment models by model name patterns
+                matching_model_names = set()
+                for model_name in experiment_models:
                     for pattern in self.model_names:
                         if '*' in pattern or '?' in pattern:
-                            if fnmatch.fnmatch(rm.name, pattern):
-                                matched = True
+                            if fnmatch.fnmatch(model_name, pattern):
+                                matching_model_names.add(model_name)
                                 break
                         else:
-                            if rm.name == pattern:
-                                matched = True
+                            if model_name == pattern:
+                                matching_model_names.add(model_name)
                                 break
-                    if matched:
+                
+                logger.info(f"🎯 Pre-filtered to {len(matching_model_names)} model(s) from experiments and patterns")
+                
+                # Get registered model objects for the matching names
+                matching_models = []
+                for model_name in matching_model_names:
+                    try:
+                        rm = client.get_registered_model(model_name)
                         matching_models.append(rm)
-                else:
-                    matching_models.append(rm)
+                    except Exception as e:
+                        logger.warning(f"⚠ Could not fetch registered model '{model_name}': {e}")
+                        continue
+                        
+            else:
+                # Original approach: get all registered models first, then filter
+                logger.info("📋 Using standard model filtering approach")
+                registered_models = list(client.search_registered_models())
+
+                # Filter to matching models
+                matching_models = []
+                for rm in registered_models:
+                    if self.model_names:
+                        matched = False
+                        for pattern in self.model_names:
+                            if '*' in pattern or '?' in pattern:
+                                if fnmatch.fnmatch(rm.name, pattern):
+                                    matched = True
+                                    break
+                            else:
+                                if rm.name == pattern:
+                                    matched = True
+                                    break
+                        if matched:
+                            matching_models.append(rm)
+                    else:
+                        matching_models.append(rm)
 
             total_models = len(matching_models)
             if total_models == 0:
