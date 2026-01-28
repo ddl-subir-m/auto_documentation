@@ -353,6 +353,9 @@ check_and_install_packages(REQUIRED_PACKAGES)'''
         elif content.block_type == ContentType.CHART:
             return self._create_chart_cell(content.metadata)
 
+        elif content.block_type == ContentType.IMAGE:
+            return self._create_image_cell(content.content, content.metadata)
+
         elif content.block_type in (ContentType.BULLET_LIST, ContentType.NUMBERED_LIST):
             return self._create_list_cell(content.content, content.block_type)
 
@@ -361,6 +364,31 @@ check_and_install_packages(REQUIRED_PACKAGES)'''
     def _create_narrative_cell(self, text: str) -> nbformat.NotebookNode:
         """Create a markdown cell for narrative text."""
         return new_markdown_cell(source=self._sanitize_for_notebook(text))
+
+    def _create_image_cell(
+        self, image_bytes: bytes, metadata: Dict[str, Any]
+    ) -> nbformat.NotebookNode:
+        """Create a code cell that displays an embedded MLflow image."""
+        import base64
+
+        title = metadata.get("title", "MLflow Artifact")
+        path = metadata.get("path", "")
+        image_format = metadata.get("format", "png")
+
+        # Encode image bytes to base64
+        b64_data = base64.b64encode(image_bytes).decode("utf-8")
+
+        code = f'''# {title}
+# Source: {path}
+from IPython.display import Image, display
+import base64
+
+# Embedded image data from MLflow artifact
+image_data = "{b64_data}"
+
+# Display the image
+display(Image(data=base64.b64decode(image_data), format="{image_format}"))'''
+        return new_code_cell(source=code)
 
     def _create_table_cell(self, data: Dict[str, Any]) -> nbformat.NotebookNode:
         """Create a code cell for table display using pandas."""

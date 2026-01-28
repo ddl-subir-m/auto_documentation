@@ -4,10 +4,13 @@ import asyncio
 import fnmatch
 import logging
 import os
-from typing import List, Optional, Set
+from typing import Callable, List, Optional, Set
 
 from autodoc.core.exceptions import ScannerError
 from autodoc.core.models import ArtifactContext, ModelInfo
+
+# Type alias for progress callback
+ProgressCallback = Callable[[float], None]
 
 logger = logging.getLogger(__name__)
 
@@ -61,29 +64,49 @@ class ArtifactScanner:
                 return None
         return self._client
 
-    async def scan(self) -> ArtifactContext:
+    async def scan(
+        self, on_progress: Optional[ProgressCallback] = None
+    ) -> ArtifactContext:
         """Scan MLflow for registered models and metrics.
+
+        Args:
+            on_progress: Optional callback for progress updates (0.0 to 1.0).
 
         Returns:
             ArtifactContext with model information.
         """
-        return await asyncio.to_thread(self._scan_sync)
+        return await asyncio.to_thread(self._scan_sync, on_progress)
 
-    def _scan_sync(self) -> ArtifactContext:
+    def _scan_sync(
+        self, on_progress: Optional[ProgressCallback] = None
+    ) -> ArtifactContext:
         models = []
         datasets = []
         project_metadata = {}
 
+        def report_progress(progress: float) -> None:
+            """Report progress if callback is provided."""
+            if on_progress:
+                on_progress(progress)
+
+        report_progress(0.0)
+
         client = self._get_client()
         if client is None:
             # MLflow not available, return empty context
+            logger.warning("MLflow client not available - check MLflow installation and tracking URI")
+            report_progress(1.0)
             return ArtifactContext(
                 models=models,
                 datasets=datasets,
                 project_metadata={"mlflow_available": False},
             )
 
+        logger.info(f"MLflow client connected: {self.tracking_uri or 'default'}")
+
         try:
+            report_progress(0.05)
+
             # Get current Domino project info
             domino_project_id = None
             if not self.disable_project_filtering:
@@ -93,9 +116,13 @@ class ArtifactScanner:
                     project_metadata["domino_project_id"] = domino_project_id
                     project_metadata["domino_project_name"] = os.environ.get("DOMINO_PROJECT_NAME")
 
+            report_progress(0.1)
+
             # Get target experiments based on filtering
             target_experiments = self._get_target_experiments(client, domino_project_id)
-            
+
+            report_progress(0.15)
+
             # Log filtering info
             if target_experiments:
                 logger.info(f"Target experiments: {list(target_experiments.keys())}")
@@ -104,8 +131,12 @@ class ArtifactScanner:
             if self.latest_only:
                 logger.info("Including only latest versions of each model")
 
-            # Get registered models with filtering
-            models = self._scan_registered_models(client, target_experiments)
+            # Get registered models with filtering (progress 0.2 to 0.95)
+            models = self._scan_registered_models(
+                client, target_experiments, on_progress=on_progress
+            )
+
+            report_progress(0.95)
 
             # Get experiment info if specified (backward compatibility)
             if self.experiment_name:
@@ -127,6 +158,7 @@ class ArtifactScanner:
             project_metadata["mlflow_error"] = str(e)
             project_metadata["mlflow_available"] = False
 
+        report_progress(1.0)
         return ArtifactContext(
             models=models,
             datasets=datasets,
@@ -186,33 +218,60 @@ class ArtifactScanner:
             
         return target_experiments
 
-    def _scan_registered_models(self, client, target_experiments: Optional[dict] = None) -> list[ModelInfo]:
+    def _scan_registered_models(
+        self,
+        client,
+        target_experiments: Optional[dict] = None,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> list[ModelInfo]:
         """Scan MLflow model registry for registered models."""
         models = []
         model_versions_by_name = {}  # For latest_only filtering
 
+        # Progress range for model scanning: 0.2 to 0.95
+        progress_start = 0.2
+        progress_end = 0.95
+        progress_range = progress_end - progress_start
+
+        def report_progress(fraction: float) -> None:
+            """Report progress scaled to the model scanning range."""
+            if on_progress:
+                scaled_progress = progress_start + (fraction * progress_range)
+                on_progress(scaled_progress)
+
         try:
-            # Search for all registered models
-            for rm in client.search_registered_models():
-                # Apply model name filtering
+            # First pass: collect all registered models to count them
+            registered_models = list(client.search_registered_models())
+
+            # Filter to matching models
+            matching_models = []
+            for rm in registered_models:
                 if self.model_names:
-                    # Check if any pattern matches this model name
                     matched = False
                     for pattern in self.model_names:
-                        # Use wildcard matching if pattern contains wildcards
                         if '*' in pattern or '?' in pattern:
                             if fnmatch.fnmatch(rm.name, pattern):
                                 matched = True
                                 break
                         else:
-                            # Exact match for non-wildcard patterns
                             if rm.name == pattern:
                                 matched = True
                                 break
-                    
-                    if not matched:
-                        continue
-                    
+                    if matched:
+                        matching_models.append(rm)
+                else:
+                    matching_models.append(rm)
+
+            total_models = len(matching_models)
+            if total_models == 0:
+                report_progress(1.0)
+                return models
+
+            # Process each model
+            for i, rm in enumerate(matching_models):
+                # Report progress based on models processed
+                report_progress(i / total_models)
+
                 # Get all versions of this model
                 versions = client.search_model_versions(f"name='{rm.name}'")
 
@@ -228,7 +287,8 @@ class ArtifactScanner:
                             continue
 
                         # Apply experiment filtering if specified
-                        if target_experiments is not None:
+                        # Only filter if we have target experiments (empty dict is falsy)
+                        if target_experiments:
                             if experiment.name not in target_experiments:
                                 continue
 
@@ -245,10 +305,9 @@ class ArtifactScanner:
                             artifacts=artifact_paths,
                             artifact_data=artifact_data,
                         )
-                        
-                        # Log metrics for debugging
-                        if run.data.metrics:
-                            logger.info(f"Found metrics for {rm.name} v{version.version}: {list(run.data.metrics.keys())}")
+
+                        # Log model info for debugging
+                        logger.info(f"Model {rm.name} v{version.version}: {len(run.data.metrics)} metrics, {len(artifact_paths)} artifacts")
                         
                         # For latest_only filtering, track versions by model name
                         if self.latest_only:
@@ -270,24 +329,43 @@ class ArtifactScanner:
                     models.append(latest_model)
                     logger.debug(f"Selected latest version of {model_name}: v{latest_model.version}")
 
+            report_progress(1.0)
+
         except Exception as e:
             logger.warning(f"Error scanning registered models: {e}")
 
         logger.info(f"Found {len(models)} models after filtering")
         return models
 
-    def _list_artifacts(self, client, run_id: str) -> list[str]:
-        """List artifacts for a run."""
+    def _list_artifacts(self, client, run_id: str, path: str = "") -> list[str]:
+        """Recursively list all artifacts for a run.
+
+        Args:
+            client: MLflow client instance.
+            run_id: The run ID to list artifacts from.
+            path: The artifact path to start from (for recursion).
+
+        Returns:
+            List of artifact paths.
+        """
+        artifact_paths = []
         try:
-            artifacts = client.list_artifacts(run_id)
-            return [a.path for a in artifacts]
-        except Exception:
-            return []
+            artifacts = client.list_artifacts(run_id, path)
+            for artifact in artifacts:
+                if artifact.is_dir:
+                    # Recursively list artifacts in subdirectories
+                    nested = self._list_artifacts(client, run_id, artifact.path)
+                    artifact_paths.extend(nested)
+                else:
+                    artifact_paths.append(artifact.path)
+        except Exception as e:
+            logger.debug(f"Error listing artifacts for run {run_id}: {e}")
+        return artifact_paths
 
     def _download_and_parse_artifacts(
         self, client, run_id: str, artifact_paths: list[str]
     ) -> dict[str, any]:
-        """Download and parse CSV/text artifacts, skip images.
+        """Download and parse CSV/text/image artifacts.
 
         Args:
             client: MLflow client instance.
@@ -297,6 +375,7 @@ class ArtifactScanner:
         Returns:
             Dict mapping artifact path to parsed content.
         """
+        import base64
         import tempfile
 
         import pandas as pd
@@ -316,7 +395,18 @@ class ArtifactScanner:
                     with open(local_path, 'r') as f:
                         artifact_data[path] = f.read()
                     os.remove(local_path)
-                # Skip images (.png, .jpg) - redundant with CSV data
+                elif path.endswith(('.png', '.jpg', '.jpeg')):
+                    # Download and embed images as base64
+                    local_path = client.download_artifacts(run_id, path, tempfile.gettempdir())
+                    with open(local_path, 'rb') as f:
+                        image_bytes = f.read()
+                    artifact_data[path] = {
+                        "type": "image",
+                        "format": path.split('.')[-1].lower(),
+                        "data": base64.b64encode(image_bytes).decode('utf-8'),
+                    }
+                    logger.info(f"Embedded image artifact: {path}")
+                    os.remove(local_path)
             except Exception as e:
                 logger.debug(f"Could not parse artifact {path}: {e}")
                 continue  # Skip artifacts that can't be parsed

@@ -64,13 +64,29 @@ class SectionPlanner:
             registered_models = ", ".join(context.artifact_context.model_names) or "None"
             data_sources = ", ".join(context.code_context.data_sources) or "Unknown"
 
-            # Get metrics if this is a per-model section
+            # Get metrics and artifacts if this is a per-model section
             metrics_info = ""
+            artifacts_info = ""
             if context.model_name:
                 for model in context.artifact_context.models:
-                    if model.name == context.model_name:
+                    # Match by run_id first (more precise), fallback to name
+                    if (context.model_run_id and model.run_id == context.model_run_id) or \
+                       (not context.model_run_id and model.name == context.model_name):
                         if model.metrics:
                             metrics_info = f"\n- Available Metrics: {', '.join(model.metrics.keys())}"
+                        if model.artifact_data:
+                            # Categorize artifacts by type
+                            image_artifacts = []
+                            data_artifacts = []
+                            for path, data in model.artifact_data.items():
+                                if isinstance(data, dict) and data.get("type") == "image":
+                                    image_artifacts.append(path)
+                                else:
+                                    data_artifacts.append(path)
+                            if image_artifacts:
+                                artifacts_info += f"\n- Available Image Artifacts: {', '.join(image_artifacts)}"
+                            if data_artifacts:
+                                artifacts_info += f"\n- Available Data Artifacts: {', '.join(data_artifacts)}"
                         break
 
             prompt = build_section_planning_prompt(
@@ -84,6 +100,7 @@ class SectionPlanner:
                 registered_models=registered_models,
                 data_sources=data_sources,
                 metrics_info=metrics_info,
+                artifacts_info=artifacts_info,
             )
 
             logger.info(f"Calling LLM for section planning: {section.name}{model_suffix}")
@@ -95,7 +112,22 @@ class SectionPlanner:
             logger.info(f"LLM planning completed for: {section.name}{model_suffix}")
         except Exception as e:
             logger.error(f"Failed to plan section {section.name}{model_suffix}: {e}")
-            raise
+            # Return a minimal fallback plan instead of crashing
+            logger.warning(f"Using fallback plan for section {section.name}{model_suffix}")
+            return SectionPlan(
+                number="",
+                name=section.name,
+                title=section.name if not context.model_name else f"{section.name} - {context.model_name}",
+                model_name=context.model_name,
+                model_run_id=context.model_run_id,
+                content_blocks=[
+                    ContentBlock(
+                        type=ContentType.NARRATIVE,
+                        purpose=f"Describe {section.name}",
+                        data_needed="Available context",
+                    )
+                ],
+            )
 
         # Convert result to SectionPlan
         content_blocks = []

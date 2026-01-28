@@ -50,6 +50,7 @@ class Orchestrator:
         output_dir: Path = Path("./output"),
         mlflow_tracking_uri: Optional[str] = None,
         parallel_workers: int = 4,
+        planning_workers: int = 1,
         max_files: int = 50,
         max_file_size: int = 50000,
         generate_notebook: bool = False,
@@ -68,6 +69,7 @@ class Orchestrator:
             output_dir: Output directory for generated documents.
             mlflow_tracking_uri: MLflow tracking server URI.
             parallel_workers: Number of parallel content generation workers.
+            planning_workers: Number of parallel planning workers.
             max_files: Maximum files to scan.
             max_file_size: Maximum file size in characters.
             generate_notebook: Whether to also generate an editable Jupyter notebook.
@@ -111,8 +113,10 @@ class Orchestrator:
                 notebook_path=notebook_path,
             )
 
-        # Semaphore for limiting concurrent LLM calls
+        # Semaphore for limiting concurrent LLM calls during content generation
         self.semaphore = asyncio.Semaphore(parallel_workers)
+        # Semaphore for limiting concurrent LLM calls during planning
+        self.planning_semaphore = asyncio.Semaphore(planning_workers)
 
     async def generate(
         self,
@@ -134,11 +138,42 @@ class Orchestrator:
         if on_progress:
             on_progress("Scanning", 0.0)
 
-        code_task = asyncio.create_task(self.code_scanner.scan())
+        # Track progress from both scanners
+        # Weight: artifact scanner = 60%, code scanner = 40% (artifact is typically slower)
+        artifact_weight = 0.6
+        code_weight = 0.4
+        artifact_progress = 0.0
+        code_progress = 0.0
+
+        def update_scanning_progress() -> None:
+            """Combine progress from both scanners and report."""
+            if on_progress:
+                combined = (artifact_progress * artifact_weight) + (
+                    code_progress * code_weight
+                )
+                on_progress("Scanning", combined)
+
+        def on_artifact_progress(progress: float) -> None:
+            """Callback for artifact scanner progress."""
+            nonlocal artifact_progress
+            artifact_progress = progress
+            update_scanning_progress()
+
+        def on_code_progress(progress: float) -> None:
+            """Callback for code scanner progress."""
+            nonlocal code_progress
+            code_progress = progress
+            update_scanning_progress()
+
+        code_task = asyncio.create_task(
+            self.code_scanner.scan(on_progress=on_code_progress)
+        )
         artifact_start = time.monotonic()
         if on_status:
             on_status("Scanning MLflow artifacts...")
-        artifact_task = asyncio.create_task(self.artifact_scanner.scan())
+        artifact_task = asyncio.create_task(
+            self.artifact_scanner.scan(on_progress=on_artifact_progress)
+        )
         artifact_ctx = await artifact_task
         if on_status:
             on_status(
@@ -146,6 +181,14 @@ class Orchestrator:
                 f"in {time.monotonic() - artifact_start:.1f}s."
             )
         code_ctx = await code_task
+
+        # Log scan summary for debugging
+        logger.info("=== SCAN SUMMARY ===")
+        logger.info(f"Models found: {len(artifact_ctx.models)}")
+        for m in artifact_ctx.models:
+            metrics_list = list(m.metrics.keys()) if m.metrics else []
+            artifacts_list = m.artifacts if m.artifacts else []
+            logger.info(f"  {m.name} v{m.version}: metrics={metrics_list}, artifacts={len(artifacts_list)}")
 
         if on_progress:
             on_progress("Scanning", 1.0)
@@ -389,24 +432,12 @@ class Orchestrator:
         on_progress: Optional[ProgressCallback] = None,
     ) -> List[SectionPlan]:
         """Plan all sections in the document."""
-        plans: List[SectionPlan] = []
+        # Build list of (section, context, section_number) tuples for all planning tasks
+        planning_tasks: List[tuple[SectionSpec, GenerationContext, str]] = []
         section_num = 1
-        
-        # Calculate total number of planning operations for accurate progress
-        total_planning_operations = 0
+
         for section in spec.sections:
             if section.per_model:
-                models = artifact_ctx.models or []
-                total_planning_operations += max(1, len(models))  # At least 1 for generic section
-            else:
-                total_planning_operations += 1
-        
-        logger.info(f"Planning {total_planning_operations} sections/subsections across {len(spec.sections)} document sections")
-        completed_operations = 0
-
-        for i, section in enumerate(spec.sections):
-            if section.per_model:
-                # Create a subsection for each registered model
                 models = artifact_ctx.models or []
 
                 if not models:
@@ -417,10 +448,7 @@ class Orchestrator:
                         section_name=section.name,
                         hint=spec.hints.get(section.name),
                     )
-                    plan = await self.planner.plan_section(section, context)
-                    plan.number = str(section_num)
-                    plans.append(plan)
-                    completed_operations += 1
+                    planning_tasks.append((section, context, str(section_num)))
                 else:
                     for j, model in enumerate(models, 1):
                         context = GenerationContext(
@@ -431,15 +459,7 @@ class Orchestrator:
                             model_run_id=model.run_id,
                             hint=spec.hints.get(section.name),
                         )
-                        plan = await self.planner.plan_section(section, context)
-                        plan.number = f"{section_num}.{j}"
-                        plans.append(plan)
-                        completed_operations += 1
-                        
-                        # Update progress after each model subsection
-                        if on_progress:
-                            progress = completed_operations / total_planning_operations
-                            on_progress("Planning", progress)
+                        planning_tasks.append((section, context, f"{section_num}.{j}"))
             else:
                 # Regular section
                 context = GenerationContext(
@@ -448,17 +468,48 @@ class Orchestrator:
                     section_name=section.name,
                     hint=spec.hints.get(section.name),
                 )
-                plan = await self.planner.plan_section(section, context)
-                plan.number = str(section_num)
-                plans.append(plan)
-                completed_operations += 1
-                
-                # Update progress after each regular section
-                if on_progress:
-                    progress = completed_operations / total_planning_operations
-                    on_progress("Planning", progress)
+                planning_tasks.append((section, context, str(section_num)))
 
             section_num += 1
+
+        total_planning_operations = len(planning_tasks)
+        logger.info(f"Planning {total_planning_operations} sections/subsections across {len(spec.sections)} document sections")
+
+        async def plan_one_section(
+            section: SectionSpec, context: GenerationContext, number: str
+        ) -> SectionPlan:
+            """Plan a single section with semaphore control."""
+            async with self.planning_semaphore:
+                plan = await self.planner.plan_section(section, context)
+                plan.number = number
+                return plan
+
+        # Create tasks for all planning operations
+        tasks = [
+            plan_one_section(section, context, number)
+            for section, context, number in planning_tasks
+        ]
+
+        # Execute with progress tracking
+        plans: List[SectionPlan] = []
+        completed = 0
+
+        for coro in asyncio.as_completed(tasks):
+            plan = await coro
+            plans.append(plan)
+            completed += 1
+
+            if on_progress:
+                progress = completed / total_planning_operations
+                on_progress("Planning", progress)
+
+        # Sort plans back to original order by section number
+        def sort_key(plan: SectionPlan) -> tuple:
+            # Parse section number like "1" or "2.3" for proper sorting
+            parts = plan.number.split(".")
+            return tuple(int(p) for p in parts)
+
+        plans.sort(key=sort_key)
 
         return plans
 
@@ -488,12 +539,15 @@ class Orchestrator:
                 for block in plan.content_blocks:
                     try:
                         content = await self.generator.generate(block, context)
-                        # Skip None content (e.g., charts with no data)
                         if content is not None:
                             contents.append(content)
+                        else:
+                            # Track skipped content as a warning (not error)
+                            logger.warning(f"Content skipped for {block.type.value}: {block.purpose}")
                     except Exception as e:
                         error_msg = f"{block.type.value}: {str(e)}"
                         errors.append(error_msg)
+                        logger.error(f"Content generation failed for {block.type.value}: {e}")
 
                 return SectionResult(
                     plan=plan,

@@ -164,6 +164,9 @@ class DocumentBuilder:
         elif content.block_type == ContentType.CHART:
             self._add_chart(doc, content.content, content.metadata)
 
+        elif content.block_type == ContentType.IMAGE:
+            self._add_embedded_image(doc, content.content, content.metadata)
+
         elif content.block_type in (ContentType.BULLET_LIST, ContentType.NUMBERED_LIST):
             self._add_list(doc, content)
 
@@ -242,11 +245,58 @@ class DocumentBuilder:
         # Add spacing
         doc.add_paragraph()
 
+    def _add_embedded_image(self, doc: Document, image_bytes: bytes, metadata: dict) -> None:
+        """Add an embedded MLflow image to the document."""
+        if not image_bytes:
+            return
+
+        # Add image title if available
+        title = metadata.get("title", "")
+        if title:
+            title_para = doc.add_paragraph()
+            title_run = title_para.add_run(title)
+            title_run.bold = True
+            title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # Add source path as caption
+        path = metadata.get("path", "")
+        if path:
+            caption_para = doc.add_paragraph()
+            caption_run = caption_para.add_run(f"Source: {path}")
+            caption_run.italic = True
+            caption_run.font.size = Pt(9)
+            caption_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # Add the image
+        image_stream = io.BytesIO(image_bytes)
+        doc.add_picture(image_stream, width=Inches(6))
+
+        # Center the image
+        last_paragraph = doc.paragraphs[-1]
+        last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # Add spacing
+        doc.add_paragraph()
+
     def _add_list(self, doc: Document, content: GeneratedContent) -> None:
         """Add a list to the document."""
-        items = content.content
+        # Handle both dict format (with title) and list format (legacy)
+        if isinstance(content.content, dict):
+            items = content.content.get("items", [])
+            title = content.content.get("title", "")
+        else:
+            items = content.content
+            title = ""
+
         if not items:
             return
+
+        # Add title as subheading if provided
+        if title:
+            title_para = doc.add_paragraph()
+            title_run = title_para.add_run(title)
+            title_run.bold = True
+            title_para.paragraph_format.space_after = Pt(6)
 
         # Choose style based on list type
         style = (

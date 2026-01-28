@@ -25,7 +25,9 @@ SYSTEM_SECTION_PLANNER = (
 
 SYSTEM_NARRATIVE_WRITER = (
     "You are a technical documentation writer. "
-    "Write clear, informative content about machine learning models."
+    "Write clear, informative content about machine learning models. "
+    "Explain the 'why' behind technical decisions, not just the 'what'. "
+    "Do not repeat information that would typically be covered in other sections."
 )
 
 SYSTEM_TABLE_GENERATOR = (
@@ -153,6 +155,7 @@ def build_section_planning_prompt(
     registered_models: str,
     data_sources: str,
     metrics_info: str = "",
+    artifacts_info: str = "",
 ) -> str:
     """Build prompt for planning section content.
 
@@ -167,6 +170,7 @@ def build_section_planning_prompt(
         registered_models: Comma-separated registered model names.
         data_sources: Comma-separated data source names.
         metrics_info: Optional metrics information string.
+        artifacts_info: Optional MLflow artifacts information string.
 
     Returns:
         Formatted prompt string.
@@ -183,7 +187,7 @@ def build_section_planning_prompt(
 - ML Task Type: {ml_task_type}
 - Features: {features_preview}
 - Target Variable: {target_variable}
-- Registered Models: {registered_models}{metrics_info}
+- Registered Models: {registered_models}{metrics_info}{artifacts_info}
 - Data Sources: {data_sources}
 
 ## Task
@@ -195,6 +199,7 @@ Content block types available:
 - narrative: Explanatory paragraphs (2-4 paragraphs)
 - bullet_list: Bulleted list of items
 - numbered_list: Numbered/ordered list of steps
+- image: Embedded MLflow visualization (feature importance plots, confusion matrices, etc.)
 
 CRITICAL: Only plan content blocks that can be generated from the data provided above.
 - Do NOT request tables or charts of metrics that are not explicitly listed in the context
@@ -202,8 +207,12 @@ CRITICAL: Only plan content blocks that can be generated from the data provided 
 - Do NOT request visualizations of data that doesn't exist
 - Do NOT create both a table and chart showing the same data - choose the most effective format
 - If limited data is available, plan fewer content blocks focused on what IS known
+- For performance metrics: Use "chart" type to visualize numeric metrics (accuracy, precision, recall, etc.)
+- Use "image" type ONLY when specific image artifacts are listed in the artifacts_info above (e.g., confusion_matrix.png, feature_importance.png)
+- If metrics are available but no image artifacts, use "chart" to create bar charts showing metric values
+- Do NOT request image artifacts that are not explicitly listed in the artifacts_info above
 
-Consider what would be most valuable for documenting this section. Prefer visual content (charts, tables) when data allows. Include 2-4 content blocks."""
+Consider what would be most valuable for documenting this section. Prefer visual content (images, charts, tables) when data allows. Include 2-4 content blocks."""
 
 
 SECTION_PLANNING_SCHEMA: Dict[str, Any] = {
@@ -226,6 +235,7 @@ SECTION_PLANNING_SCHEMA: Dict[str, Any] = {
                             "chart",
                             "bullet_list",
                             "numbered_list",
+                            "image",
                         ],
                     },
                     "purpose": {
@@ -238,7 +248,7 @@ SECTION_PLANNING_SCHEMA: Dict[str, Any] = {
                     },
                     "specifics": {
                         "type": "object",
-                        "description": "Additional specifications (e.g., chart_type for charts)",
+                        "description": "Additional specifications (e.g., chart_type for charts, image_name for images)",
                     },
                 },
                 "required": ["type", "purpose"],
@@ -310,6 +320,7 @@ def build_narrative_prompt(
 ## Instructions
 - Write 2-4 paragraphs of clear, professional prose
 - Focus on insights and explanations, not just listing facts
+- Explain the "why" behind decisions, not just the "what"
 - Use a formal but accessible tone
 - Do NOT use markdown formatting (no headers, bullets, or bold)
 - Do NOT include a title or heading
@@ -498,19 +509,24 @@ CRITICAL: Only include information that is explicitly provided in the context ab
 Do NOT fabricate metrics, statistics, or claim methodologies that are not mentioned.
 If specific data is not available, focus on what IS known from the context.
 
-Generate 5-10 concise, informative items using ONLY the data provided above."""
+Generate a descriptive title for this list (e.g., "Key Limitations", "Recommended Actions", "Implementation Steps")
+and 5-10 concise, informative items using ONLY the data provided above."""
 
 
 LIST_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "properties": {
+        "title": {
+            "type": "string",
+            "description": "A brief, descriptive title for this list section (e.g., 'Key Limitations', 'Recommended Actions')",
+        },
         "items": {
             "type": "array",
             "items": {"type": "string"},
             "description": "List items",
             "minItems": 3,
             "maxItems": 15,
-        }
+        },
     },
-    "required": ["items"],
+    "required": ["items"],  # title optional for backward compatibility
 }

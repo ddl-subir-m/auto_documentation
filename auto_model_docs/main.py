@@ -53,7 +53,7 @@ console = Console()
 @click.option(
     "--provider",
     "-p",
-    default="anthropic",
+    default="openai",
     type=click.Choice(["anthropic", "openai"]),
     help="LLM provider to use",
 )
@@ -100,11 +100,17 @@ console = Console()
     help="Maximum number of files to scan",
 )
 @click.option(
-    "--workers",
+    "--generation-workers",
     "-w",
     default=4,
     type=int,
     help="Number of parallel workers for content generation",
+)
+@click.option(
+    "--planning-workers",
+    default=1,
+    type=int,
+    help="Number of parallel workers for section planning",
 )
 @click.option(
     "--notebook",
@@ -160,6 +166,7 @@ def main(
     verbose: bool,
     max_files: int,
     workers: int,
+    planning_workers: int,
     notebook: bool,
     notebook_from_cache: bool,
     notebook_path: str | None,
@@ -219,6 +226,8 @@ def main(
             settings.max_files = max_files
         if workers:
             settings.parallel_workers = workers
+        if planning_workers:
+            settings.planning_workers = planning_workers
 
         # Use settings for paths with defaults
         output_dir = settings.output_dir if settings.output_dir.exists() else _get_default_output_dir()
@@ -254,7 +263,8 @@ def main(
             console.print(f"[dim]Provider:[/] {settings.llm_provider}")
             console.print(f"[dim]Model:[/] {settings.get_model_name()}")
             console.print(f"[dim]Max files:[/] {settings.max_files}")
-            console.print(f"[dim]Workers:[/] {settings.parallel_workers}")
+            console.print(f"[dim]Generation workers:[/] {settings.parallel_workers}")
+            console.print(f"[dim]Planning workers:[/] {settings.planning_workers}")
             console.print(f"[dim]Notebook:[/] {notebook}")
             console.print(f"[dim]Max retries:[/] {settings.llm_max_retries}")
             console.print(f"[dim]Initial backoff:[/] {settings.llm_initial_backoff}")
@@ -284,6 +294,7 @@ def main(
             provider=settings.llm_provider,
             model=settings.get_model_name(),
             api_key=api_key,
+            base_url=settings.openai_base_url,
             max_retries=settings.llm_max_retries,
             initial_backoff=settings.llm_initial_backoff,
             max_backoff=settings.llm_max_backoff,
@@ -298,6 +309,7 @@ def main(
             output_dir=output_dir,
             mlflow_tracking_uri=settings.mlflow_tracking_uri,
             parallel_workers=settings.parallel_workers,
+            planning_workers=settings.planning_workers,
             max_files=settings.max_files,
             generate_notebook=notebook or bool(notebook_path),
             notebook_path=Path(notebook_path) if notebook_path else None,

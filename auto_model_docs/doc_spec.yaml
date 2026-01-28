@@ -15,6 +15,7 @@ sections:
   - "Model Performance: per_model"
   - Validation Results
   - Deployment Considerations
+  - Conclusion
   - Appendix
 
 # Optional hints to guide content generation for specific sections
@@ -49,3 +50,10 @@ hints:
   "Deployment Considerations": >
     Address inference latency, resource requirements, monitoring strategy,
     and model refresh cadence.
+
+  "Conclusion": >
+    Summarize the key model capabilities and performance highlights.
+    Describe recommended monitoring approach based on the model type.
+    Suggest model refresh considerations based on the ML task type.
+    Note any limitations observed in the validation results.
+    Do not introduce new technical details - synthesize what was covered.

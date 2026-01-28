@@ -1,7 +1,7 @@
 """LLM-based code scanner for semantic analysis of ML codebases."""
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 from autodoc.core.exceptions import ScannerError
 from autodoc.core.models import CodeContext
@@ -12,6 +12,9 @@ from autodoc.llm.prompts import (
     build_code_analysis_prompt,
 )
 from autodoc.scanning.sanitizer import ContentSanitizer
+
+# Type alias for progress callback
+ProgressCallback = Callable[[float], None]
 
 
 class CodeScanner:
@@ -61,8 +64,13 @@ class CodeScanner:
         self.max_files = max_files
         self.max_file_size = max_file_size
 
-    async def scan(self) -> CodeContext:
+    async def scan(
+        self, on_progress: Optional[ProgressCallback] = None
+    ) -> CodeContext:
         """Scan the codebase and extract context using LLM.
+
+        Args:
+            on_progress: Optional callback for progress updates (0.0 to 1.0).
 
         Returns:
             CodeContext with extracted information.
@@ -70,11 +78,22 @@ class CodeScanner:
         Raises:
             ScannerError: If scanning fails.
         """
+
+        def report_progress(progress: float) -> None:
+            """Report progress if callback is provided."""
+            if on_progress:
+                on_progress(progress)
+
         try:
+            report_progress(0.0)
+
             # Find Python files
             files = self._find_python_files()
 
+            report_progress(0.1)
+
             if not files:
+                report_progress(1.0)
                 return CodeContext(
                     files=[],
                     insights="No Python files found in codebase.",
@@ -83,7 +102,10 @@ class CodeScanner:
             # Read and sanitize code
             code_contents = self._read_files(files)
 
+            report_progress(0.3)
+
             if not code_contents:
+                report_progress(1.0)
                 return CodeContext(
                     files=[str(f) for f in files],
                     insights="Could not read any Python files.",
@@ -92,9 +114,13 @@ class CodeScanner:
             # Check for README
             readme_content = self._read_readme()
 
-            # Analyze with LLM
+            report_progress(0.4)
+
+            # Analyze with LLM (this is the slowest part)
             context = await self._analyze_code(code_contents)
             context.readme = readme_content
+
+            report_progress(1.0)
 
             return context
 

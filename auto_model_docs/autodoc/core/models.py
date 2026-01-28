@@ -21,6 +21,7 @@ class ContentType(Enum):
     CHART = "chart"
     BULLET_LIST = "bullet_list"
     NUMBERED_LIST = "numbered_list"
+    IMAGE = "image"  # For embedded MLflow images (feature importance plots, etc.)
 
 
 # =============================================================================

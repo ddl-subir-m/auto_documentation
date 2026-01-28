@@ -35,6 +35,7 @@ class LLMClient:
         provider: str = "anthropic",
         model: Optional[str] = None,
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         max_retries: int = 3,
         initial_backoff: float = 1.0,
         max_backoff: float = 20.0,
@@ -47,6 +48,7 @@ class LLMClient:
             provider: LLM provider ("anthropic" or "openai").
             model: Model name override. If None, uses provider defaults.
             api_key: API key. If None, reads from environment variable.
+            base_url: OpenAI-compatible API base URL. If None, reads from environment.
             max_retries: Max retries for transient or rate-limit errors.
             initial_backoff: Initial backoff delay in seconds.
             max_backoff: Maximum backoff delay in seconds.
@@ -76,7 +78,8 @@ class LLMClient:
             key = api_key or os.environ.get("OPENAI_API_KEY")
             if not key:
                 raise LLMError("OPENAI_API_KEY not set")
-            self.client = AsyncOpenAI(api_key=key)
+            url = base_url or os.environ.get("OPENAI_BASE_URL")
+            self.client = AsyncOpenAI(api_key=key, base_url=url)
 
         else:
             raise LLMError(f"Unknown provider: {provider}")
@@ -254,7 +257,7 @@ class LLMClient:
                     raise LLMError(
                         f"LLM request timed out after {self.timeout_seconds}s "
                         f"and {attempt + 1} attempts. Consider reducing concurrency "
-                        f"with --workers or increasing timeout."
+                        f"with --generation-workers or increasing timeout."
                     ) from e
             except Exception as e:
                 retryable = self._is_retryable_error(e)
@@ -318,7 +321,7 @@ class LLMClient:
         if self._is_rate_limit_error(error):
             return (
                 f"{prefix}: rate limit exceeded{retry_suffix}. "
-                "Reduce concurrency with --workers (or AUTODOC_PARALLEL_WORKERS) "
+                "Reduce concurrency with --generation-workers (or AUTODOC_PARALLEL_WORKERS) "
                 "or retry after a short delay."
             )
 

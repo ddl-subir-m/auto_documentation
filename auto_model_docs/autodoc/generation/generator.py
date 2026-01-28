@@ -1,9 +1,12 @@
 """Content generators for different block types."""
 
 import io
+import logging
 from typing import Any, Dict
 
 from autodoc.core.exceptions import GenerationError
+
+logger = logging.getLogger(__name__)
 from autodoc.core.models import (
     ContentBlock,
     ContentType,
@@ -65,6 +68,8 @@ class ContentGenerator:
                 return await self._generate_table(block, context)
             elif block.type == ContentType.CHART:
                 return await self._generate_chart(block, context)
+            elif block.type == ContentType.IMAGE:
+                return await self._generate_image(block, context)
             elif block.type in (ContentType.BULLET_LIST, ContentType.NUMBERED_LIST):
                 return await self._generate_list(block, context)
             else:
@@ -95,10 +100,14 @@ class ContentGenerator:
                         )
                         model_info = f"\n- ACTUAL Logged Metrics (use only these): {metrics_str}"
                         has_metrics = True
-                    # Include all artifact data for narratives
+                    # Include non-image artifact data for narratives
                     if model.artifact_data:
                         for artifact_path, data in model.artifact_data.items():
-                            artifact_data_str += f"\n\n## {artifact_path}:\n{data}"
+                            # Skip image artifacts
+                            if isinstance(data, dict) and data.get("type") == "image":
+                                artifact_data_str += f"\n\n## {artifact_path}: [Image Available]"
+                            else:
+                                artifact_data_str += f"\n\n## {artifact_path}:\n{data}"
                     break
 
         if not has_metrics:
@@ -152,9 +161,12 @@ class ContentGenerator:
                     if model.params:
                         metrics_info += f"\nLogged Parameters: {dict(model.params)}"
                         has_real_data = True
-                    # Include all artifact data
+                    # Include non-image artifact data
                     if model.artifact_data:
                         for artifact_path, data in model.artifact_data.items():
+                            # Skip image artifacts
+                            if isinstance(data, dict) and data.get("type") == "image":
+                                continue
                             artifact_data_str += f"\n\n## {artifact_path}:\n{data}"
                             has_real_data = True
                     break
@@ -223,15 +235,34 @@ class ContentGenerator:
                             metrics_hint = f"\n\n## ACTUAL AVAILABLE METRICS: {dict(model.metrics)}"
                             has_metrics = True
                     
-                    # Include all artifact data for charts
+                    # Include non-image artifact data for charts (CSV/TXT data)
                     if model.artifact_data:
                         for artifact_path, data in model.artifact_data.items():
-                            artifact_data_str += f"\n\n## {artifact_path}:\n{data}"
-                            has_metrics = True
+                            # Skip image artifacts - only include parseable data
+                            if isinstance(data, dict) and data.get("type") == "image":
+                                continue
+                            # For CSV data (list of dicts), format nicely
+                            if isinstance(data, list) and len(data) > 0:
+                                # Check for feature importance data
+                                if 'feature' in artifact_path.lower() or 'importance' in artifact_path.lower():
+                                    first_record = data[0]
+                                    keys = list(first_record.keys())
+                                    if len(keys) >= 2:
+                                        artifact_data_str += f"\n\n## FEATURE IMPORTANCE DATA from {artifact_path}:\n"
+                                        for r in data[:15]:  # Top 15 features
+                                            artifact_data_str += f"  - {r[keys[0]]}: {r[keys[1]]}\n"
+                                        has_metrics = True
+                                else:
+                                    artifact_data_str += f"\n\n## {artifact_path}:\n{data[:10]}"
+                                    has_metrics = True
+                            elif isinstance(data, str):
+                                artifact_data_str += f"\n\n## {artifact_path}:\n{data}"
+                                has_metrics = True
                     break
 
         if not has_metrics:
-            # Skip chart generation when no data is available
+            # Log that we're skipping chart generation
+            logger.warning(f"Skipping chart generation for '{block.purpose}': no metrics available")
             return None
 
         prompt = build_chart_prompt(
@@ -276,7 +307,7 @@ class ContentGenerator:
         values = data.get("values", [])
 
         if not labels or not values:
-            # Skip chart generation if no data
+            logger.warning(f"Chart has no data: labels={labels}, values={values}")
             plt.close(fig)  # Clean up the figure
             return None
         elif chart_type == "bar":
@@ -305,6 +336,92 @@ class ContentGenerator:
         buf.seek(0)
 
         return buf.read()
+
+    async def _generate_image(
+        self,
+        block: ContentBlock,
+        context: GenerationContext,
+    ) -> GeneratedContent:
+        """Generate image content from MLflow artifacts."""
+        import base64
+
+        # Find the matching model's artifact data
+        for model in context.artifact_context.models:
+            # Match by run_id first (more precise), fallback to name
+            if (context.model_run_id and model.run_id == context.model_run_id) or \
+               (not context.model_run_id and context.model_name and model.name == context.model_name):
+                # Look for image artifacts
+                for path, data in model.artifact_data.items():
+                    if isinstance(data, dict) and data.get("type") == "image":
+                        # Check if image matches the purpose
+                        if self._image_matches_purpose(path, block.purpose, block.specifics):
+                            # Decode base64 to bytes
+                            image_bytes = base64.b64decode(data["data"])
+                            return GeneratedContent(
+                                block_type=ContentType.IMAGE,
+                                content=image_bytes,
+                                metadata={
+                                    "path": path,
+                                    "format": data["format"],
+                                    "title": self._generate_image_title(path, block.purpose),
+                                },
+                            )
+                # If no specific match found, return the first available image
+                for path, data in model.artifact_data.items():
+                    if isinstance(data, dict) and data.get("type") == "image":
+                        image_bytes = base64.b64decode(data["data"])
+                        return GeneratedContent(
+                            block_type=ContentType.IMAGE,
+                            content=image_bytes,
+                            metadata={
+                                "path": path,
+                                "format": data["format"],
+                                "title": self._generate_image_title(path, block.purpose),
+                            },
+                        )
+                break
+        logger.warning(f"No matching image artifact found for '{block.purpose}'")
+        return None
+
+    def _image_matches_purpose(self, path: str, purpose: str, specifics: dict) -> bool:
+        """Check if an image artifact matches the intended purpose."""
+        path_lower = path.lower()
+        purpose_lower = purpose.lower()
+
+        # Check if a specific image name was requested
+        if specifics and specifics.get("image_name"):
+            requested_name = specifics["image_name"].lower()
+            if requested_name in path_lower:
+                return True
+
+        # Match based on common patterns
+        keyword_mappings = {
+            "feature": ["feature", "importance", "shap"],
+            "importance": ["feature", "importance", "shap"],
+            "confusion": ["confusion", "matrix"],
+            "roc": ["roc", "auc", "curve"],
+            "precision": ["precision", "recall", "pr_curve"],
+            "learning": ["learning", "curve", "training"],
+            "performance": ["performance", "metrics", "roc", "confusion"],
+            "distribution": ["distribution", "histogram"],
+            "residual": ["residual", "error"],
+        }
+
+        for keyword, patterns in keyword_mappings.items():
+            if keyword in purpose_lower:
+                for pattern in patterns:
+                    if pattern in path_lower:
+                        return True
+
+        return False
+
+    def _generate_image_title(self, path: str, purpose: str) -> str:
+        """Generate a human-readable title for an image."""
+        # Extract filename without extension
+        filename = path.split("/")[-1].rsplit(".", 1)[0]
+        # Convert underscores/hyphens to spaces and title case
+        title = filename.replace("_", " ").replace("-", " ").title()
+        return title
 
     async def _generate_list(
         self,

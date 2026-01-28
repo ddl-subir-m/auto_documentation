@@ -56,10 +56,12 @@ class JobRequest:
     provider: str
     model: Optional[str]
     api_key: Optional[str]
+    base_url: Optional[str]
     code_root: Optional[str]
     output_dir: Optional[str]
     max_files: Optional[int]
     workers: Optional[int]
+    planning_workers: Optional[int]
     timeout: Optional[float]
     notebook: bool
     notebook_path: Optional[str]
@@ -321,7 +323,7 @@ def _render_status(job: Optional[JobState]) -> FT:
     
     return Div(
         Div(
-            H3("Terminal"),
+            H3("Logs"),
             Div(
                 stop_link,
                 clear_link,
@@ -355,6 +357,8 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             settings.max_files = request.max_files
         if request.workers is not None:
             settings.parallel_workers = request.workers
+        if request.planning_workers is not None:
+            settings.planning_workers = request.planning_workers
 
         output_dir = (
             Path(request.output_dir)
@@ -397,10 +401,12 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         if request.api_key:
             LAST_API_KEY = request.api_key
         api_key = LAST_API_KEY or settings.get_api_key()
+        base_url = request.base_url or settings.openai_base_url
         llm = LLMClient(
             provider=settings.llm_provider,
             model=settings.get_model_name(),
             api_key=api_key,
+            base_url=base_url,
             max_retries=settings.llm_max_retries,
             initial_backoff=settings.llm_initial_backoff,
             max_backoff=settings.llm_max_backoff,
@@ -414,6 +420,7 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             code_root=code_root,
             output_dir=output_dir,
             parallel_workers=settings.parallel_workers,
+            planning_workers=settings.planning_workers,
             max_files=settings.max_files,
             generate_notebook=request.notebook or bool(request.notebook_path),
             notebook_path=Path(request.notebook_path)
@@ -535,10 +542,12 @@ async def _parse_request(req: Request) -> JobRequest:
         provider=form.get("provider", "anthropic"),
         model=form.get("model") or None,
         api_key=form.get("api_key") or None,
+        base_url=form.get("base_url") or None,
         code_root=form.get("code_root") or None,
         output_dir=form.get("output_dir") or None,
         max_files=_sanitize_optional_int(form.get("max_files")),
         workers=_sanitize_optional_int(form.get("workers")),
+        planning_workers=_sanitize_optional_int(form.get("planning_workers")),
         timeout=_sanitize_optional_float(form.get("timeout")),
         notebook=form.get("notebook") in ("on", "true", "1", "yes"),
         notebook_path=form.get("notebook_path") or None,
@@ -688,9 +697,9 @@ app, rt = fast_app(
                 --panel: #101827;
                 --panel-border: #1f2937;
                 --terminal: #0b1220;
-                --accent: #6366f1;
-                --accent-hover: #818cf8;
-                --accent-glow: rgba(99, 102, 241, 0.15);
+                --accent: #3b82f6;
+                --accent-hover: #60a5fa;
+                --accent-glow: rgba(59, 130, 246, 0.08);
                 --text-primary: #f9fafb;
                 --text-secondary: #e5e7eb;
                 --text-muted: #94a3b8;
@@ -699,14 +708,14 @@ app, rt = fast_app(
                 margin: 0;
                 padding: 0;
                 min-height: 100%;
-                background: linear-gradient(135deg, #0b0f19 0%, #0f172a 100%);
+                background: #0f172a;
             }
             body {
                 color: var(--text-secondary);
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             }
             h1, h2, h3, h4 { color: var(--text-primary); margin: 0; }
-            a { color: #a5b4fc; text-decoration: none; transition: color 0.2s ease; }
+            a { color: #60a5fa; text-decoration: none; transition: color 0.2s ease; }
             a:hover { color: var(--accent-hover); }
             
             /* Page Layout */
@@ -730,10 +739,7 @@ app, rt = fast_app(
                 font-size: 1.75rem;
                 font-weight: 700;
                 margin-bottom: 0.5rem;
-                background: linear-gradient(135deg, #f9fafb 0%, #a5b4fc 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
+                color: #f9fafb;
             }
             .hero p {
                 color: var(--text-muted);
@@ -764,7 +770,7 @@ app, rt = fast_app(
                 transition: border-color 0.2s ease, transform 0.2s ease;
             }
             .card:hover {
-                border-color: rgba(99, 102, 241, 0.3);
+                border-color: rgba(59, 130, 246, 0.3);
             }
             .card-title {
                 font-size: 0.75rem;
@@ -918,7 +924,7 @@ app, rt = fast_app(
             }
             .advanced-grid {
                 display: grid;
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(4, 1fr);
                 gap: 0.75rem;
             }
             .advanced-grid .field {
@@ -968,11 +974,10 @@ app, rt = fast_app(
                 font-weight: 600;
                 cursor: pointer;
                 transition: all 0.2s ease;
-                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
             }
             button.primary:hover {
-                transform: translateY(-1px);
-                box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
             }
             button.primary:active {
                 transform: translateY(0);
@@ -1037,23 +1042,8 @@ app, rt = fast_app(
                 color: var(--text-muted);
             }
             .terminal-status-running {
-                background: rgba(99, 102, 241, 0.15);
+                background: rgba(59, 130, 246, 0.15);
                 color: var(--accent);
-                display: inline-flex;
-                align-items: center;
-                gap: 0.5rem;
-            }
-            .terminal-status-running::before {
-                content: '';
-                width: 12px;
-                height: 12px;
-                border: 2px solid rgba(99, 102, 241, 0.3);
-                border-top-color: var(--accent);
-                border-radius: 50%;
-                animation: spin 0.8s linear infinite;
-            }
-            @keyframes spin {
-                to { transform: rotate(360deg); }
             }
             .terminal-status-completed {
                 background: rgba(34, 197, 94, 0.15);
@@ -1111,18 +1101,31 @@ app, rt = fast_app(
             }
             .phase-bar-fill {
                 height: 100%;
-                background: linear-gradient(90deg, var(--accent), #8b5cf6);
+                background: #3b82f6;
                 border-radius: 2px;
                 transition: width 0.3s ease;
             }
             .phase-bar-complete .phase-bar-fill {
-                background: linear-gradient(90deg, #22c55e, #16a34a);
+                background: #22c55e;
+            }
+            @keyframes shimmer {
+                0% { background-position: 100% center; }
+                100% { background-position: 0% center; }
             }
             .phase-active .phase-name {
-                color: #a5b4fc;
-            }
-            .phase-active .phase-bar-fill {
-                animation: pulse-glow 2s ease-in-out infinite;
+                background: linear-gradient(
+                    90deg,
+                    rgba(96, 165, 250, 0.5) 0%,
+                    rgba(96, 165, 250, 0.5) 40%,
+                    rgba(96, 165, 250, 1) 50%,
+                    rgba(96, 165, 250, 0.5) 60%,
+                    rgba(96, 165, 250, 0.5) 100%
+                );
+                background-size: 200% 100%;
+                background-clip: text;
+                -webkit-background-clip: text;
+                color: transparent;
+                animation: shimmer 2s linear infinite;
             }
             .phase-complete .phase-name {
                 color: #22c55e;
@@ -1130,11 +1133,6 @@ app, rt = fast_app(
             .phase-pending .phase-name {
                 color: #334155;
             }
-            @keyframes pulse-glow {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.7; }
-            }
-            
             /* Terminal Output */
             .terminal {
                 background: var(--terminal);
@@ -1172,18 +1170,17 @@ app, rt = fast_app(
                 align-items: center;
                 gap: 0.5rem;
                 padding: 0.625rem 1rem;
-                background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+                background: #22c55e;
                 color: white;
                 border-radius: 6px;
                 font-size: 0.85rem;
                 font-weight: 600;
                 text-decoration: none;
                 transition: all 0.2s ease;
-                box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
             }
             .download-btn:hover {
-                transform: translateY(-1px);
-                box-shadow: 0 4px 12px rgba(34, 197, 94, 0.4);
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
                 color: white;
             }
             .download-btn::before {
@@ -1192,7 +1189,7 @@ app, rt = fast_app(
             }
             /* Terminal line styling */
             .terminal-line-active {
-                color: #a5b4fc;
+                color: #60a5fa;
             }
             .terminal-line-complete {
                 color: #22c55e;
@@ -1204,16 +1201,31 @@ app, rt = fast_app(
             document.addEventListener('DOMContentLoaded', function() {
                 const notebookCheckbox = document.getElementById('field-notebook');
                 const notebookHint = document.getElementById('notebook-path-hint');
-                
+
                 function toggleNotebookHint() {
                     if (notebookCheckbox && notebookHint) {
                         notebookHint.classList.toggle('hidden', !notebookCheckbox.checked);
                     }
                 }
-                
+
                 if (notebookCheckbox) {
                     notebookCheckbox.addEventListener('change', toggleNotebookHint);
                     toggleNotebookHint();
+                }
+
+                // Toggle base URL field based on provider selection
+                const providerSelect = document.getElementById('field-provider');
+                const baseUrlField = document.getElementById('base-url-field');
+
+                function toggleBaseUrlField() {
+                    if (providerSelect && baseUrlField) {
+                        baseUrlField.style.display = providerSelect.value === 'openai' ? 'flex' : 'none';
+                    }
+                }
+
+                if (providerSelect) {
+                    providerSelect.addEventListener('change', toggleBaseUrlField);
+                    toggleBaseUrlField();
                 }
                 
                 // Handle file upload and update spec path display
@@ -1288,9 +1300,20 @@ app, rt = fast_app(
                     
                     terminal.innerHTML = styledHtml;
                 }
-                
+
+                // Auto-scroll terminal to bottom to show latest logs
+                function scrollTerminalToBottom() {
+                    const terminal = document.querySelector('.terminal:not(.terminal-idle)');
+                    if (terminal) {
+                        terminal.scrollTop = terminal.scrollHeight;
+                    }
+                }
+
                 // Run on load and whenever htmx swaps content
-                document.body.addEventListener('htmx:afterSwap', styleTerminalLines);
+                document.body.addEventListener('htmx:afterSwap', function() {
+                    styleTerminalLines();
+                    scrollTerminalToBottom();
+                });
                 setInterval(styleTerminalLines, 500);
             });
             """
@@ -1393,6 +1416,20 @@ def index():
                             ),
                             cls="field",
                         ),
+                        # Base URL (only shown for OpenAI provider)
+                        Div(
+                            Label("Base URL", for_="field-base_url"),
+                            Input(
+                                name="base_url",
+                                id="field-base_url",
+                                type="text",
+                                placeholder="https://api.openai.com/v1 (optional)",
+                            ),
+                            Span("For OpenAI-compatible APIs (e.g., Moonshot, Azure)", cls="field-hint-text"),
+                            cls="field",
+                            id="base-url-field",
+                            style="display: none;",
+                        ),
                         # Generate notebook checkbox (checked by default)
                         Label(
                             Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
@@ -1421,7 +1458,17 @@ def index():
                                         cls="field",
                                     ),
                                     Div(
-                                        Label("Workers", for_="field-workers"),
+                                        Label("Planning workers", for_="field-planning_workers"),
+                                        Input(
+                                            name="planning_workers",
+                                            id="field-planning_workers",
+                                            type="number",
+                                            value="1",
+                                        ),
+                                        cls="field",
+                                    ),
+                                    Div(
+                                        Label("Generation workers", for_="field-workers"),
                                         Input(
                                             name="workers",
                                             id="field-workers",

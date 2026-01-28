@@ -74,6 +74,11 @@ class Settings(BaseSettings):
         description="OpenAI API key (can use OPENAI_API_KEY or AUTODOC_OPENAI_API_KEY)",
         validation_alias=AliasChoices("AUTODOC_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
+    openai_base_url: Optional[str] = Field(
+        default=None,
+        description="OpenAI-compatible API base URL (e.g., https://api.moonshot.ai/v1)",
+        validation_alias=AliasChoices("AUTODOC_OPENAI_BASE_URL", "OPENAI_BASE_URL"),
+    )
 
     # Paths
     code_root: Path = Field(
@@ -110,6 +115,13 @@ class Settings(BaseSettings):
         le=10,
         description="Number of parallel content generation workers",
         validation_alias=AliasChoices("AUTODOC_PARALLEL_WORKERS", "PARALLEL_WORKERS"),
+    )
+    planning_workers: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Number of parallel planning workers",
+        validation_alias=AliasChoices("AUTODOC_PLANNING_WORKERS", "PLANNING_WORKERS"),
     )
 
     # MLflow Configuration
