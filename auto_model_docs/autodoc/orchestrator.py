@@ -428,6 +428,7 @@ class Orchestrator:
                             artifact_context=artifact_ctx,
                             section_name=section.name,
                             model_name=model.name,
+                            model_run_id=model.run_id,
                             hint=spec.hints.get(section.name),
                         )
                         plan = await self.planner.plan_section(section, context)
@@ -478,6 +479,7 @@ class Orchestrator:
                     artifact_context=artifact_ctx,
                     section_name=plan.name,
                     model_name=plan.model_name,
+                    model_run_id=plan.model_run_id,
                 )
 
                 contents = []

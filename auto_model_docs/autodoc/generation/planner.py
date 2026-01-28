@@ -122,6 +122,7 @@ class SectionPlanner:
             name=section.name,
             title=title,
             model_name=context.model_name,
+            model_run_id=context.model_run_id,
             content_blocks=content_blocks,
         )
         

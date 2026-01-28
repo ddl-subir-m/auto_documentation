@@ -145,6 +145,7 @@ class GenerationContext:
     artifact_context: ArtifactContext
     section_name: str
     model_name: Optional[str] = None
+    model_run_id: Optional[str] = None
     hint: Optional[str] = None
 
 
@@ -172,6 +173,7 @@ class SectionPlan:
     name: str
     title: str
     model_name: Optional[str] = None
+    model_run_id: Optional[str] = None
     content_blocks: List[ContentBlock] = field(default_factory=list)
 
 

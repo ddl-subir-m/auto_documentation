@@ -84,9 +84,11 @@ class ContentGenerator:
         model_info = ""
         has_metrics = False
         artifact_data_str = ""
-        if context.model_name:
+        if context.model_run_id or context.model_name:
             for model in context.artifact_context.models:
-                if model.name == context.model_name:
+                # Match by run_id first (more precise), fallback to name
+                if (context.model_run_id and model.run_id == context.model_run_id) or \
+                   (not context.model_run_id and context.model_name and model.name == context.model_name):
                     if model.metrics:
                         metrics_str = ", ".join(
                             f"{k}: {v:.4f}" for k, v in list(model.metrics.items())[:5]
@@ -139,9 +141,11 @@ class ContentGenerator:
         has_real_data = False
         artifact_data_str = ""
 
-        if context.model_name:
+        if context.model_run_id or context.model_name:
             for model in context.artifact_context.models:
-                if model.name == context.model_name:
+                # Match by run_id first (more precise), fallback to name
+                if (context.model_run_id and model.run_id == context.model_run_id) or \
+                   (not context.model_run_id and context.model_name and model.name == context.model_name):
                     if model.metrics:
                         metrics_info += f"\nLogged Metrics: {dict(model.metrics)}"
                         has_real_data = True
@@ -197,9 +201,11 @@ class ContentGenerator:
         artifact_data_str = ""
         formatted_metrics = []
         
-        if context.model_name:
+        if context.model_run_id or context.model_name:
             for model in context.artifact_context.models:
-                if model.name == context.model_name:
+                # Match by run_id first (more precise), fallback to name
+                if (context.model_run_id and model.run_id == context.model_run_id) or \
+                   (not context.model_run_id and context.model_name and model.name == context.model_name):
                     if model.metrics:
                         # Format metrics for easier chart generation
                         for key, value in model.metrics.items():
