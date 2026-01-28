@@ -296,6 +296,7 @@ def main(
             sanitizer=sanitizer,
             code_root=code_dir,
             output_dir=output_dir,
+            mlflow_tracking_uri=settings.mlflow_tracking_uri,
             parallel_workers=settings.parallel_workers,
             max_files=settings.max_files,
             generate_notebook=notebook or bool(notebook_path),
