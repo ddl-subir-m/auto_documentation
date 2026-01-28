@@ -368,14 +368,10 @@ class Orchestrator:
             "metadata": content.metadata,
         }
 
-        # Handle different content types
-        if content.block_type == ContentType.CHART:
-            # Encode bytes as base64
-            if isinstance(content.content, bytes):
-                serialized["content"] = base64.b64encode(content.content).decode("ascii")
-                serialized["content_encoding"] = "base64"
-            else:
-                serialized["content"] = content.content
+        # Handle bytes content for any content type (CHART, IMAGE, etc.)
+        if isinstance(content.content, bytes):
+            serialized["content"] = base64.b64encode(content.content).decode("ascii")
+            serialized["content_encoding"] = "base64"
         else:
             serialized["content"] = content.content
 
@@ -414,7 +410,7 @@ class Orchestrator:
         block_type = ContentType(data["block_type"])
         content = data["content"]
 
-        # Decode base64 for chart content
+        # Decode base64 content back to bytes (for any content type)
         if data.get("content_encoding") == "base64":
             content = base64.b64decode(content)
 
