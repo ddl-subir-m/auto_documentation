@@ -191,16 +191,32 @@ class ContentGenerator:
         """Generate chart as PNG image bytes."""
         chart_type = block.specifics.get("chart_type", "bar")
 
-        # Get actual metrics if available - with clear labeling
+        # Get actual metrics if available - with clear labeling and formatting
         metrics_hint = ""
         has_metrics = False
         artifact_data_str = ""
+        formatted_metrics = []
+        
         if context.model_name:
             for model in context.artifact_context.models:
                 if model.name == context.model_name:
                     if model.metrics:
-                        metrics_hint = f"\n\n## ACTUAL AVAILABLE METRICS (use only these values): {dict(model.metrics)}"
-                        has_metrics = True
+                        # Format metrics for easier chart generation
+                        for key, value in model.metrics.items():
+                            # Skip train metrics for performance charts (focus on test/validation)
+                            if not key.startswith('train_'):
+                                formatted_metrics.append(f"  - {key}: {value:.4f}")
+                        
+                        if formatted_metrics:
+                            metrics_hint = "\n\n## ACTUAL AVAILABLE METRICS (use these exact values for the chart):\n"
+                            metrics_hint += "\n".join(formatted_metrics)
+                            metrics_hint += "\n\nIMPORTANT: Create a chart showing these specific metrics with their exact values."
+                            has_metrics = True
+                        else:
+                            # All metrics were training metrics
+                            metrics_hint = f"\n\n## ACTUAL AVAILABLE METRICS: {dict(model.metrics)}"
+                            has_metrics = True
+                    
                     # Include all artifact data for charts
                     if model.artifact_data:
                         for artifact_path, data in model.artifact_data.items():
@@ -209,7 +225,8 @@ class ContentGenerator:
                     break
 
         if not has_metrics:
-            metrics_hint = "\n\nNOTE: No metrics data available. Do NOT fabricate values for the chart."
+            # Skip chart generation when no data is available
+            return None
 
         prompt = build_chart_prompt(
             purpose=block.purpose,
@@ -253,8 +270,9 @@ class ContentGenerator:
         values = data.get("values", [])
 
         if not labels or not values:
-            # Return empty chart if no data
-            ax.text(0.5, 0.5, "No data available", ha="center", va="center")
+            # Skip chart generation if no data
+            plt.close(fig)  # Clean up the figure
+            return None
         elif chart_type == "bar":
             ax.bar(labels, values, color="#4361ee")
         elif chart_type == "line":

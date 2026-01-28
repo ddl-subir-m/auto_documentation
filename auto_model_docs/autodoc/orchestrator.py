@@ -486,7 +486,9 @@ class Orchestrator:
                 for block in plan.content_blocks:
                     try:
                         content = await self.generator.generate(block, context)
-                        contents.append(content)
+                        # Skip None content (e.g., charts with no data)
+                        if content is not None:
+                            contents.append(content)
                     except Exception as e:
                         error_msg = f"{block.type.value}: {str(e)}"
                         errors.append(error_msg)
