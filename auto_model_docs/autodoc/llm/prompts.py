@@ -13,12 +13,14 @@ from typing import Any, Dict, List, Optional
 
 SYSTEM_CODE_ANALYZER = (
     "You are an expert at analyzing machine learning code. "
-    "Extract all relevant information about the ML pipeline."
+    "Extract only information that is explicitly present in the provided code. "
+    "Do not infer, assume, or fabricate any techniques, libraries, or methods not directly shown in the code."
 )
 
 SYSTEM_SECTION_PLANNER = (
     "You are a technical documentation expert. "
-    "Plan clear, informative content for ML model documentation."
+    "Plan content blocks based only on data that is actually available in the provided context. "
+    "Do not plan content that would require fabricating metrics or methodologies."
 )
 
 SYSTEM_NARRATIVE_WRITER = (
@@ -72,7 +74,14 @@ Extract the following information:
 5. ML task type (classification, regression, clustering, etc.)
 6. Hyperparameters and their values
 7. Data sources (files, databases, APIs)
-8. Any other insights about the model architecture and training"""
+8. Any other insights about the model architecture and training
+
+CRITICAL INSTRUCTIONS:
+- ONLY report techniques, methods, and libraries that are EXPLICITLY present in the code above
+- Do NOT infer or assume techniques that are not imported or used in the code
+- If you see imbalanced data handling (like class_weight or scale_pos_weight), report ONLY what is actually used
+- Do NOT claim SMOTE, cross-validation, or other techniques unless they are explicitly imported and used
+- For the "insights" field, only describe what is demonstrably in the code - no assumptions or common practices"""
 
 
 CODE_ANALYSIS_SCHEMA: Dict[str, Any] = {
@@ -186,6 +195,12 @@ Content block types available:
 - chart: Visual representation (bar, line, or scatter)
 - bullet_list: Bulleted list of items
 - numbered_list: Numbered/ordered list of steps
+
+CRITICAL: Only plan content blocks that can be generated from the data provided above.
+- Do NOT request tables or charts of metrics that are not explicitly listed in the context
+- Do NOT request content about cross-validation unless CV metrics are provided
+- Do NOT request visualizations of data that doesn't exist
+- If limited data is available, plan fewer content blocks focused on what IS known
 
 Consider what would be most valuable for documenting this section. Include 2-4 content blocks."""
 
@@ -400,8 +415,11 @@ def build_chart_prompt(
 
 CRITICAL: Only visualize data that is explicitly provided above.
 Do NOT fabricate or estimate any values. If the requested visualization
-cannot be created with available data, use placeholder labels like "Metric 1", "Metric 2"
-with the actual values from the metrics provided, or indicate what data would be needed.
+cannot be created with available data, return a chart with:
+- title: "Data Not Available"
+- labels: ["No data"]
+- values: [0]
+This clearly indicates missing data rather than using placeholder labels that could confuse readers.
 
 Provide labels and values for the chart using ONLY the data provided above."""
 
