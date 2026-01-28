@@ -246,6 +246,10 @@ class ArtifactScanner:
                             artifact_data=artifact_data,
                         )
                         
+                        # Log metrics for debugging
+                        if run.data.metrics:
+                            logger.info(f"Found metrics for {rm.name} v{version.version}: {list(run.data.metrics.keys())}")
+                        
                         # For latest_only filtering, track versions by model name
                         if self.latest_only:
                             if rm.name not in model_versions_by_name:
