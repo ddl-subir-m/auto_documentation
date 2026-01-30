@@ -681,6 +681,8 @@ app, rt = fast_app(
     # Disable default CDN headers and use permissive settings for Domino
     pico=False,  # Disable pico CSS CDN if causing issues
     hdrs=(
+        # Load Inter font for Domino design system
+        Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"),
         # Load htmx synchronously to ensure it's ready before user interaction
         Script(src="https://unpkg.com/htmx.org@1.9.10"),
         # Fallback vanilla JS polling if htmx fails to load
@@ -804,29 +806,60 @@ app, rt = fast_app(
         Style(
             """
             :root {
-                --panel: #101827;
-                --panel-border: #1f2937;
-                --terminal: #0b1220;
-                --accent: #3b82f6;
-                --accent-hover: #60a5fa;
-                --accent-glow: rgba(59, 130, 246, 0.08);
-                --text-primary: #f9fafb;
-                --text-secondary: #e5e7eb;
-                --text-muted: #94a3b8;
+                /* Backgrounds */
+                --bg-page: #FAFAFA;
+                --panel: #FFFFFF;
+                --panel-border: #E0E0E0;
+                --terminal: #1E1E1E;  /* Keep dark for terminal output */
+
+                /* Accent (Domino Purple) */
+                --accent: #543FDE;
+                --accent-hover: #3B23D1;
+                --accent-active: #311EAE;
+                --accent-glow: rgba(84, 63, 222, 0.08);
+
+                /* Text */
+                --text-primary: #2E2E38;
+                --text-secondary: #65657B;
+                --text-muted: #8F8FA3;
+
+                /* Status Colors */
+                --success: #28A464;
+                --warning: #CCB718;
+                --error: #C20A29;
+                --info: #0070CC;
+
+                /* Domino Header */
+                --header-bg: #2E2E38;
             }
             html, body {
                 margin: 0;
                 padding: 0;
                 min-height: 100%;
-                background: #0f172a;
+                background: var(--bg-page);
             }
             body {
-                color: var(--text-secondary);
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                color: var(--text-primary);
+                font-family: Inter, Lato, 'Helvetica Neue', Helvetica, Arial, sans-serif;
             }
             h1, h2, h3, h4 { color: var(--text-primary); margin: 0; }
-            a { color: #60a5fa; text-decoration: none; transition: color 0.2s ease; }
+            a { color: var(--accent); text-decoration: none; transition: color 0.2s ease; }
             a:hover { color: var(--accent-hover); }
+
+            /* Domino Header */
+            .domino-header {
+                background: var(--header-bg);
+                height: 44px;
+                display: flex;
+                align-items: center;
+                padding: 0 1.5rem;
+            }
+            .domino-header-title {
+                color: #FFFFFF;
+                font-size: 0.95rem;
+                font-weight: 600;
+                margin: 0;
+            }
             
             /* Page Layout */
             .page {
@@ -849,10 +882,10 @@ app, rt = fast_app(
                 font-size: 1.75rem;
                 font-weight: 700;
                 margin-bottom: 0.5rem;
-                color: #f9fafb;
+                color: var(--text-primary);
             }
             .hero p {
-                color: var(--text-muted);
+                color: var(--text-secondary);
                 font-size: 0.95rem;
                 margin: 0;
             }
@@ -874,20 +907,20 @@ app, rt = fast_app(
             .card {
                 background: var(--panel);
                 border: 1px solid var(--panel-border);
-                border-radius: 10px;
+                border-radius: 8px;
                 padding: 1.25rem;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
                 transition: border-color 0.2s ease, transform 0.2s ease;
             }
             .card:hover {
-                border-color: rgba(59, 130, 246, 0.3);
+                border-color: rgba(84, 63, 222, 0.3);
             }
             .card-title {
                 font-size: 0.75rem;
                 font-weight: 600;
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
-                color: var(--text-muted);
+                color: var(--text-secondary);
                 margin-bottom: 1rem;
             }
             
@@ -902,18 +935,18 @@ app, rt = fast_app(
                 margin-bottom: 0;
             }
             .field label {
-                color: #cbd5e1;
+                color: var(--text-secondary);
                 font-size: 0.8rem;
                 font-weight: 500;
             }
             .field input[type="text"],
             .field input[type="number"],
             .field select {
-                background: #0f172a;
+                background: var(--panel);
                 border: 1px solid var(--panel-border);
-                border-radius: 6px;
+                border-radius: 4px;
                 padding: 0.625rem 0.75rem;
-                color: var(--text-secondary);
+                color: var(--text-primary);
                 font-size: 0.875rem;
                 transition: border-color 0.2s ease, box-shadow 0.2s ease;
             }
@@ -924,7 +957,7 @@ app, rt = fast_app(
                 box-shadow: 0 0 0 3px var(--accent-glow);
             }
             .field input::placeholder {
-                color: #64748b;
+                color: var(--text-muted);
             }
             .field select {
                 cursor: pointer;
@@ -940,11 +973,11 @@ app, rt = fast_app(
                 flex: 1;
             }
             .upload-btn {
-                background: #1e293b;
+                background: var(--bg-page);
                 border: 1px solid var(--panel-border);
-                border-radius: 6px;
+                border-radius: 4px;
                 padding: 0 0.875rem;
-                color: var(--text-muted);
+                color: var(--text-secondary);
                 font-size: 0.8rem;
                 font-weight: 500;
                 cursor: pointer;
@@ -954,9 +987,9 @@ app, rt = fast_app(
                 gap: 0.35rem;
             }
             .upload-btn:hover {
-                background: #334155;
-                color: var(--text-secondary);
+                background: var(--panel);
                 border-color: var(--accent);
+                color: var(--text-primary);
             }
             .hidden-upload {
                 display: none;
@@ -982,7 +1015,7 @@ app, rt = fast_app(
                 cursor: pointer;
             }
             .checkbox-field span {
-                color: var(--text-secondary);
+                color: var(--text-primary);
                 font-size: 0.875rem;
                 font-weight: 500;
             }
@@ -993,7 +1026,7 @@ app, rt = fast_app(
             }
             .notebook-path-hint {
                 font-size: 0.75rem;
-                color: #64748b;
+                color: var(--text-muted);
                 font-family: ui-monospace, monospace;
             }
             
@@ -1027,7 +1060,7 @@ app, rt = fast_app(
                 transform: rotate(90deg);
             }
             .advanced-section summary:hover {
-                color: var(--text-secondary);
+                color: var(--text-primary);
             }
             .advanced-content {
                 padding-top: 0.75rem;
@@ -1077,29 +1110,29 @@ app, rt = fast_app(
             button.primary {
                 background: var(--accent);
                 border: none;
-                border-radius: 8px;
+                border-radius: 4px;
                 padding: 0.75rem 2rem;
                 color: white;
                 font-size: 0.9rem;
                 font-weight: 600;
                 cursor: pointer;
                 transition: all 0.2s ease;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                box-shadow: none;
             }
             button.primary:hover {
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+                background: var(--accent-hover);
             }
             button.primary:active {
-                transform: translateY(0);
+                background: var(--accent-active);
             }
             
             /* Terminal Card */
             .terminal-card {
                 background: var(--panel);
                 border: 1px solid var(--panel-border);
-                border-radius: 10px;
+                border-radius: 8px;
                 padding: 1rem 1.25rem;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
             }
             .terminal-header {
                 display: flex;
@@ -1117,27 +1150,27 @@ app, rt = fast_app(
             }
             .terminal-action {
                 font-size: 0.75rem;
-                color: #e2e8f0;
+                color: var(--text-primary);
                 text-decoration: none;
                 cursor: pointer;
                 padding: 0.375rem 0.875rem;
-                border-radius: 5px;
-                background: #334155;
-                border: 1px solid #475569;
+                border-radius: 4px;
+                background: var(--bg-page);
+                border: 1px solid var(--panel-border);
                 transition: all 0.2s ease;
                 font-weight: 500;
             }
             .terminal-action:hover {
-                color: #fff;
-                background: #475569;
+                color: var(--text-primary);
+                background: var(--panel);
                 border-color: var(--accent);
             }
             .terminal-action-disabled {
                 opacity: 0.4;
                 pointer-events: none;
-                background: #1e293b;
+                background: var(--bg-page);
                 border-color: var(--panel-border);
-                color: #64748b;
+                color: var(--text-muted);
             }
             .terminal-status {
                 display: inline-block;
@@ -1148,24 +1181,24 @@ app, rt = fast_app(
                 margin-bottom: 0.75rem;
             }
             .terminal-status-idle {
-                background: #1e293b;
+                background: var(--bg-page);
                 color: var(--text-muted);
             }
             .terminal-status-running {
-                background: rgba(59, 130, 246, 0.15);
-                color: var(--accent);
+                background: rgba(0, 112, 204, 0.1);
+                color: var(--info);
             }
             .terminal-status-completed {
-                background: rgba(34, 197, 94, 0.15);
-                color: #22c55e;
+                background: rgba(40, 164, 100, 0.1);
+                color: var(--success);
             }
             .terminal-status-failed {
-                background: rgba(239, 68, 68, 0.15);
-                color: #ef4444;
+                background: rgba(194, 10, 41, 0.1);
+                color: var(--error);
             }
             .terminal-status-cancelled {
-                background: rgba(245, 158, 11, 0.15);
-                color: #f59e0b;
+                background: rgba(204, 183, 24, 0.1);
+                color: var(--warning);
             }
             
             /* Progress Phases */
@@ -1174,8 +1207,8 @@ app, rt = fast_app(
                 gap: 0.375rem;
                 margin-bottom: 0.75rem;
                 padding: 0.625rem;
-                background: var(--terminal);
-                border-radius: 6px;
+                background: var(--bg-page);
+                border-radius: 4px;
             }
             .phase-item {
                 flex: 1;
@@ -1190,7 +1223,7 @@ app, rt = fast_app(
             .phase-name {
                 font-size: 0.65rem;
                 font-weight: 600;
-                color: #475569;
+                color: var(--text-muted);
                 text-transform: uppercase;
                 letter-spacing: 0.03em;
             }
@@ -1200,23 +1233,23 @@ app, rt = fast_app(
                 font-family: ui-monospace, monospace;
             }
             .phase-check {
-                color: #22c55e;
+                color: var(--success);
                 font-size: 0.65rem;
             }
             .phase-bar {
                 height: 4px;
-                background: #1e293b;
+                background: #E0E0E0;
                 border-radius: 2px;
                 overflow: hidden;
             }
             .phase-bar-fill {
                 height: 100%;
-                background: #3b82f6;
+                background: var(--accent);
                 border-radius: 2px;
                 transition: width 0.3s ease;
             }
             .phase-bar-complete .phase-bar-fill {
-                background: #22c55e;
+                background: var(--success);
             }
             @keyframes shimmer {
                 0% { background-position: 100% center; }
@@ -1225,11 +1258,11 @@ app, rt = fast_app(
             .phase-active .phase-name {
                 background: linear-gradient(
                     90deg,
-                    rgba(96, 165, 250, 0.5) 0%,
-                    rgba(96, 165, 250, 0.5) 40%,
-                    rgba(96, 165, 250, 1) 50%,
-                    rgba(96, 165, 250, 0.5) 60%,
-                    rgba(96, 165, 250, 0.5) 100%
+                    rgba(84, 63, 222, 0.5) 0%,
+                    rgba(84, 63, 222, 0.5) 40%,
+                    rgba(84, 63, 222, 1) 50%,
+                    rgba(84, 63, 222, 0.5) 60%,
+                    rgba(84, 63, 222, 0.5) 100%
                 );
                 background-size: 200% 100%;
                 background-clip: text;
@@ -1238,20 +1271,20 @@ app, rt = fast_app(
                 animation: shimmer 2s linear infinite;
             }
             .phase-complete .phase-name {
-                color: #22c55e;
+                color: var(--success);
             }
             .phase-pending .phase-name {
-                color: #334155;
+                color: #D0D0D0;
             }
             /* Terminal Output */
             .terminal {
-                background: var(--terminal);
-                border-radius: 6px;
+                background: #1E1E1E;
+                border-radius: 4px;
                 padding: 0.875rem;
                 font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
                 font-size: 0.8rem;
                 line-height: 1.5;
-                color: #cbd5e1;
+                color: #E0E0E0;
                 min-height: 120px;
                 max-height: 300px;
                 overflow-y: auto;
@@ -1260,7 +1293,7 @@ app, rt = fast_app(
             }
             .terminal-idle {
                 min-height: 80px;
-                color: #475569;
+                color: #808080;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -1280,17 +1313,17 @@ app, rt = fast_app(
                 align-items: center;
                 gap: 0.5rem;
                 padding: 0.625rem 1rem;
-                background: #22c55e;
+                background: var(--success);
                 color: white;
-                border-radius: 6px;
+                border-radius: 4px;
                 font-size: 0.85rem;
                 font-weight: 600;
                 text-decoration: none;
                 transition: all 0.2s ease;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                box-shadow: none;
             }
             .download-btn:hover {
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+                filter: brightness(0.9);
                 color: white;
             }
             .download-btn::before {
@@ -1299,10 +1332,10 @@ app, rt = fast_app(
             }
             /* Terminal line styling */
             .terminal-line-active {
-                color: #60a5fa;
+                color: #80AFFF;
             }
             .terminal-line-complete {
-                color: #22c55e;
+                color: #4ADE80;
             }
             """
         ),
@@ -1442,6 +1475,11 @@ def index():
     default_spec = _get_default_spec_path()
     return Titled(
         "Auto Model Docs Studio",
+        # Domino Header
+        Div(
+            H2("Auto Model Docs Studio", cls="domino-header-title"),
+            cls="domino-header",
+        ),
         Div(
             # Hero Section
             Div(
