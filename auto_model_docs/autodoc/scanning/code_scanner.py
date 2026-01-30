@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from autodoc.core.exceptions import ScannerError
-from autodoc.core.models import CodeContext
+from autodoc.core.models import CodeContext, CodeEvidence
 from autodoc.llm import LLMClient
 from autodoc.llm.prompts import (
     CODE_ANALYSIS_SCHEMA,
@@ -204,6 +204,20 @@ class CodeScanner:
             system=SYSTEM_CODE_ANALYZER,
         )
 
+        evidence_items = []
+        for item in result.get("code_evidence", []) or []:
+            try:
+                evidence_items.append(
+                    CodeEvidence(
+                        path=item.get("file", ""),
+                        symbol=item.get("symbol", ""),
+                        statement=item.get("statement", ""),
+                        snippet=item.get("snippet", ""),
+                    )
+                )
+            except Exception:
+                continue
+
         return CodeContext(
             files=[c["file"] for c in code_contents],
             model_classes=result.get("model_classes", []),
@@ -214,4 +228,5 @@ class CodeScanner:
             hyperparameters=result.get("hyperparameters", {}),
             data_sources=result.get("data_sources", []),
             insights=result.get("insights", ""),
+            code_evidence=evidence_items,
         )

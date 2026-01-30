@@ -138,6 +138,7 @@ class NotebookExporter:
         title = default_title
         authors = default_authors
         results: List[SectionResult] = []
+        citation_details: Dict[str, Dict[str, Any]] = {}
 
         current_section: Optional[Dict[str, Any]] = None
         current_contents: List[GeneratedContent] = []
@@ -178,6 +179,9 @@ class NotebookExporter:
             if cell.cell_type == "markdown":
                 if source.startswith("# ") and "Authors:" in source:
                     continue
+                if source.strip().startswith("## References"):
+                    citation_details.update(self._parse_references_cell(source))
+                    continue
                 if "Export to Word Document" in source:
                     continue
                 if "---" in source and len(source.strip()) < 10:
@@ -189,7 +193,7 @@ class NotebookExporter:
 
             # Process content cells within a section
             if current_section:
-                content = self._parse_content_cell(cell)
+                content = self._parse_content_cell(cell, citation_details)
                 if content:
                     current_contents.append(content)
 
@@ -225,17 +229,21 @@ class NotebookExporter:
         return metadata
 
     def _parse_content_cell(
-        self, cell: nbformat.NotebookNode
+        self,
+        cell: nbformat.NotebookNode,
+        citation_details: Dict[str, Dict[str, Any]],
     ) -> Optional[GeneratedContent]:
         """Parse a cell into GeneratedContent."""
         if cell.cell_type == "markdown":
+            source = self._restore_citation_markers(cell.source)
             # Check if it's a list
-            lines = cell.source.strip().split("\n")
+            lines = source.strip().split("\n")
             if all(line.strip().startswith("- ") for line in lines if line.strip()):
                 items = [line.strip()[2:] for line in lines if line.strip()]
                 return GeneratedContent(
                     block_type=ContentType.BULLET_LIST,
                     content=items,
+                    metadata={"citation_details": citation_details},
                 )
             elif all(
                 re.match(r"^\d+\.\s", line.strip()) for line in lines if line.strip()
@@ -248,12 +256,14 @@ class NotebookExporter:
                 return GeneratedContent(
                     block_type=ContentType.NUMBERED_LIST,
                     content=items,
+                    metadata={"citation_details": citation_details},
                 )
             else:
                 # Regular narrative
                 return GeneratedContent(
                     block_type=ContentType.NARRATIVE,
-                    content=cell.source,
+                    content=source,
+                    metadata={"citation_details": citation_details},
                 )
 
         elif cell.cell_type == "code":
@@ -261,13 +271,48 @@ class NotebookExporter:
 
             # Check if it's a chart cell
             if "chart_data" in source and "plt." in source:
-                return self._parse_chart_cell(cell)
+                content = self._parse_chart_cell(cell)
+                content.metadata["citation_details"] = citation_details
+                return content
 
             # Check if it's a table cell
             if "pd.DataFrame" in source or "table_data" in source:
-                return self._parse_table_cell(cell)
+                content = self._parse_table_cell(cell)
+                content.metadata["citation_details"] = citation_details
+                return content
 
         return None
+
+    def _restore_citation_markers(self, text: str) -> str:
+        """Convert rendered notebook citations back to [@id] markers."""
+        # Pattern for new format: [CitationID](#ref-CitationID)<!-- @cite:id -->
+        pattern_new = re.compile(
+            r"\[([^\]]+)\]\(#ref-[^\)]+\)\s*<!--\s*@cite:([^\s]+)\s*-->"
+        )
+        # Pattern for old format: [1](#ref-1)<!-- @cite:id -->
+        pattern_old = re.compile(
+            r"\[(\d+)\]\(#ref-\1\)\s*<!--\s*@cite:([^\s]+)\s*-->"
+        )
+        result = pattern_new.sub(r"[@\2]", text or "")
+        result = pattern_old.sub(r"[@\2]", result)
+        return result
+
+    def _parse_references_cell(self, text: str) -> Dict[str, Dict[str, Any]]:
+        """Parse references cell to recover citation details."""
+        details: Dict[str, Dict[str, Any]] = {}
+        for line in text.splitlines():
+            match = re.search(r"@cite:([^\\s]+)", line)
+            if not match:
+                continue
+            citation_id = match.group(1)
+            run_url_match = re.search(r"/#/experiments/(\\d+)/runs/([A-Fa-f0-9]+)", line)
+            if run_url_match:
+                experiment_id, run_id = run_url_match.groups()
+                details[citation_id] = {
+                    "experiment_id": experiment_id,
+                    "run_id": run_id,
+                }
+        return details
 
     def _parse_chart_cell(self, cell: nbformat.NotebookNode) -> GeneratedContent:
         """Parse a chart code cell and render it to image bytes."""

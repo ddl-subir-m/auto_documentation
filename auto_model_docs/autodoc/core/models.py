@@ -44,6 +44,8 @@ class DocumentSpec(BaseModel):
     authors: str = "Data Science Team"
     sections: List[SectionSpec] = Field(..., min_length=1, max_length=50)
     hints: Dict[str, str] = Field(default_factory=dict)
+    citation_style: str = "numeric"
+    formatting: Dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_yaml(cls, path: str) -> "DocumentSpec":
@@ -86,12 +88,24 @@ class DocumentSpec(BaseModel):
             authors=data.get("authors", "Data Science Team"),
             sections=sections,
             hints=data.get("hints", {}),
+            citation_style=data.get("citation_style", "numeric"),
+            formatting=data.get("formatting", {}),
         )
 
 
 # =============================================================================
 # Context Models (Dataclasses for simplicity)
 # =============================================================================
+
+
+@dataclass
+class CodeEvidence:
+    """Evidence item linking a statement to code."""
+
+    path: str
+    symbol: str
+    statement: str
+    snippet: str
 
 
 @dataclass
@@ -108,6 +122,7 @@ class CodeContext:
     data_sources: List[str] = field(default_factory=list)
     insights: str = ""
     readme: Optional[str] = None
+    code_evidence: List[CodeEvidence] = field(default_factory=list)
 
 
 @dataclass
@@ -118,8 +133,11 @@ class ModelInfo:
     version: str
     stage: str
     run_id: str
+    experiment_id: Optional[str] = None
+    experiment_name: Optional[str] = None
     metrics: Dict[str, float] = field(default_factory=dict)
     params: Dict[str, Any] = field(default_factory=dict)
+    tags: Dict[str, str] = field(default_factory=dict)
     artifacts: List[str] = field(default_factory=list)
     artifact_data: Dict[str, Any] = field(default_factory=dict)
 
@@ -131,11 +149,31 @@ class ArtifactContext:
     models: List[ModelInfo] = field(default_factory=list)
     datasets: List[Dict[str, Any]] = field(default_factory=list)
     project_metadata: Dict[str, Any] = field(default_factory=dict)
+    mlflow_metrics: List[Dict[str, str]] = field(default_factory=list)
+    mlflow_params: List[Dict[str, str]] = field(default_factory=list)
+    mlflow_tags: List[Dict[str, str]] = field(default_factory=list)
+    mlflow_artifacts: List[Dict[str, str]] = field(default_factory=list)
 
     @property
     def model_names(self) -> List[str]:
         """Get list of registered model names."""
         return [m.name for m in self.models]
+
+
+@dataclass
+class Citation:
+    """Auto-derived citation entry."""
+
+    id: str
+    type: str
+    run_id: Optional[str] = None
+    source_key: Optional[str] = None
+    artifact_path: Optional[str] = None
+    code_path: Optional[str] = None
+    code_symbol: Optional[str] = None
+    evidence_text: Optional[str] = None
+    url: Optional[str] = None
+
 
 
 @dataclass

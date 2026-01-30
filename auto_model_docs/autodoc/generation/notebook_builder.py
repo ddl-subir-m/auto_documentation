@@ -1,6 +1,7 @@
 """Jupyter notebook builder for editable documentation."""
 
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,13 @@ from autodoc.core.models import (
     DocumentSpec,
     GeneratedContent,
     SectionResult,
+)
+from autodoc.generation.citations import (
+    CITATION_MARKER_PATTERN,
+    CitationRegistry,
+    build_mlflow_summary_citation_id,
+    parse_citation_id,
+    replace_markers_with_numbers,
 )
 
 # Regex pattern to match emojis and other problematic unicode
@@ -171,9 +179,15 @@ class NotebookBuilder:
             # Add title cell
             nb.cells.append(self._create_title_cell(spec))
 
+            registry = CitationRegistry(tracking_uri=os.environ.get("MLFLOW_TRACKING_URI"))
+
             # Add section cells
             for result in results:
-                self._add_section_cells(nb, result)
+                self._add_section_cells(nb, result, registry)
+
+            # Add references section
+            if registry.list_entries():
+                nb.cells.append(self._create_references_cell(registry))
 
             # Add export section
             nb.cells.append(self._create_export_instructions_cell())
@@ -248,6 +262,9 @@ class NotebookBuilder:
 
     def _create_setup_cell(self, spec: DocumentSpec) -> nbformat.NotebookNode:
         """Create the setup cell with imports and configuration."""
+        font_size = spec.formatting.get("narrative_font_size", 12)
+        title_size = spec.formatting.get("heading_font_size", 14)
+        axes_label_size = spec.formatting.get("axes_label_size", font_size)
         code = f'''# Document Configuration
 # Edit these values as needed
 
@@ -266,9 +283,9 @@ from pathlib import Path
 
 # Plot styling
 plt.rcParams['figure.figsize'] = (10, 6)
-plt.rcParams['font.size'] = 12
-plt.rcParams['axes.titlesize'] = 14
-plt.rcParams['axes.labelsize'] = 12
+plt.rcParams['font.size'] = {font_size}
+plt.rcParams['axes.titlesize'] = {title_size}
+plt.rcParams['axes.labelsize'] = {axes_label_size}
 
 print(f"Document: {{DOCUMENT_TITLE}}")
 print(f"Authors: {{DOCUMENT_AUTHORS}}")
@@ -320,18 +337,30 @@ check_and_install_packages(REQUIRED_PACKAGES)'''
         return new_markdown_cell(source=content)
 
     def _add_section_cells(
-        self, nb: nbformat.NotebookNode, result: SectionResult
+        self,
+        nb: nbformat.NotebookNode,
+        result: SectionResult,
+        registry: CitationRegistry,
     ) -> None:
         """Add cells for a section."""
         # Section header
         header_content = f"## {result.plan.number}. {result.plan.title}"
         nb.cells.append(new_markdown_cell(source=header_content))
 
+        section_citation_ids: List[str] = []
+        section_citation_details: dict = {}
+
         # Content cells
         for content in result.contents:
-            cell = self._create_content_cell(content)
-            if cell:
-                nb.cells.append(cell)
+            cleaned_content, citation_ids, citation_details = self._sanitize_content_for_section(
+                content
+            )
+            section_citation_ids.extend(citation_ids)
+            section_citation_details.update(citation_details)
+            cells = self._create_content_cells(cleaned_content, registry)
+            for cell in cells:
+                if cell:
+                    nb.cells.append(cell)
 
         # Add error notes if any
         if result.errors:
@@ -340,30 +369,243 @@ check_and_install_packages(REQUIRED_PACKAGES)'''
                 error_content += f"- {error}\n"
             nb.cells.append(new_markdown_cell(source=error_content))
 
-    def _create_content_cell(
+        # Register all section citations for the references (but don't add "Sources:" cell)
+        section_citation_ids, section_citation_details = self._normalize_section_citations(
+            section_citation_ids, section_citation_details
+        )
+        for cid in section_citation_ids:
+            registry.register(cid, section_citation_details.get(cid))
+
+    def _merge_citations(self, citations: List[str], extra: List[str]) -> List[str]:
+        merged: List[str] = []
+        seen = set()
+        for cid in list(citations or []) + list(extra or []):
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            merged.append(cid)
+        return merged
+
+    def _strip_citation_markers(self, text: str) -> tuple[str, List[str]]:
+        if not text:
+            return text, []
+
+        found_ids: List[str] = []
+
+        def _replace(match) -> str:
+            citation_id = match.group(1)
+            if citation_id:
+                found_ids.append(citation_id)
+            return ""
+
+        cleaned = CITATION_MARKER_PATTERN.sub(_replace, text)
+        cleaned = " ".join(cleaned.split())
+        return cleaned, found_ids
+
+    def _strip_markers_from_table(
+        self, table_data: dict, found_ids: List[str]
+    ) -> dict:
+        if not isinstance(table_data, dict):
+            return table_data
+
+        cleaned = dict(table_data)
+        caption = cleaned.get("caption")
+        if isinstance(caption, str):
+            cleaned_caption, found = self._strip_citation_markers(caption)
+            cleaned["caption"] = cleaned_caption
+            found_ids.extend(found)
+
+        columns = cleaned.get("columns")
+        if isinstance(columns, list):
+            cleaned_columns = []
+            for col in columns:
+                if isinstance(col, str):
+                    cleaned_col, found = self._strip_citation_markers(col)
+                    cleaned_columns.append(cleaned_col)
+                    found_ids.extend(found)
+                else:
+                    cleaned_columns.append(col)
+            cleaned["columns"] = cleaned_columns
+
+        rows = cleaned.get("rows")
+        if isinstance(rows, list):
+            cleaned_rows = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    cleaned_rows.append(row)
+                    continue
+                cleaned_row = {}
+                for key, value in row.items():
+                    if isinstance(value, str):
+                        cleaned_value, found = self._strip_citation_markers(value)
+                        cleaned_row[key] = cleaned_value
+                        found_ids.extend(found)
+                    else:
+                        cleaned_row[key] = value
+                cleaned_rows.append(cleaned_row)
+            cleaned["rows"] = cleaned_rows
+
+        return cleaned
+
+    def _sanitize_content_for_section(
         self, content: GeneratedContent
-    ) -> nbformat.NotebookNode | None:
-        """Create a cell for a content block."""
+    ) -> tuple[GeneratedContent, List[str], dict]:
+        metadata = dict(content.metadata or {})
+        citations = list(metadata.get("citations", []) or [])
+        details = dict(metadata.get("citation_details", {}) or {})
+        found_ids: List[str] = []
+
         if content.block_type == ContentType.NARRATIVE:
-            return self._create_narrative_cell(content.content)
+            cleaned_text, found = self._strip_citation_markers(content.content or "")
+            found_ids.extend(found)
+            safe_metadata = dict(metadata)
+            safe_metadata["citations"] = []
+            safe_metadata["citation_details"] = {}
+            safe_content = cleaned_text
+            block_citations = []
+            block_details = {}
+        elif content.block_type in (ContentType.BULLET_LIST, ContentType.NUMBERED_LIST):
+            cleaned_items: List[str] = []
+            for item in content.content or []:
+                cleaned_item, found = self._strip_citation_markers(item)
+                found_ids.extend(found)
+                cleaned_items.append(cleaned_item)
+            safe_metadata = dict(metadata)
+            safe_metadata["citations"] = []
+            safe_metadata["citation_details"] = {}
+            safe_content = cleaned_items
+            block_citations = []
+            block_details = {}
+        elif content.block_type == ContentType.TABLE:
+            safe_metadata = dict(metadata)
+            safe_content = self._strip_markers_from_table(
+                content.content or {}, found_ids
+            )
+            block_citations = self._merge_citations(citations, found_ids)
+            block_details = {
+                cid: details[cid] for cid in block_citations if cid in details
+            }
+            safe_metadata["citations"] = block_citations
+            safe_metadata["citation_details"] = block_details
+        elif content.block_type in (ContentType.CHART, ContentType.IMAGE):
+            safe_metadata = dict(metadata)
+            title = safe_metadata.get("title")
+            if isinstance(title, str):
+                cleaned_title, found = self._strip_citation_markers(title)
+                safe_metadata["title"] = cleaned_title
+                found_ids.extend(found)
+            safe_content = content.content
+            block_citations = self._merge_citations(citations, found_ids)
+            block_details = {
+                cid: details[cid] for cid in block_citations if cid in details
+            }
+            safe_metadata["citations"] = block_citations
+            safe_metadata["citation_details"] = block_details
+        else:
+            safe_metadata = dict(metadata)
+            safe_content = content.content
+            block_citations = self._merge_citations(citations, found_ids)
+            block_details = {
+                cid: details[cid] for cid in block_citations if cid in details
+            }
+            safe_metadata["citations"] = block_citations
+            safe_metadata["citation_details"] = block_details
+
+        section_citations = self._merge_citations(citations, found_ids)
+        section_details = {cid: details[cid] for cid in details}
+
+        cleaned_content = GeneratedContent(
+            block_type=content.block_type,
+            content=safe_content,
+            metadata=safe_metadata,
+        )
+
+        return cleaned_content, section_citations, section_details
+
+    def _normalize_section_citations(
+        self, citation_ids: List[str], citation_details: dict
+    ) -> tuple[List[str], dict]:
+        if not citation_ids:
+            return [], {}
+
+        experiment_by_run: dict = {}
+        for detail in citation_details.values():
+            run_id = detail.get("run_id")
+            experiment_id = detail.get("experiment_id")
+            if run_id and experiment_id:
+                experiment_by_run[run_id] = experiment_id
+
+        normalized_ids: List[str] = []
+        normalized_details: dict = {}
+        for citation_id in citation_ids:
+            parsed = parse_citation_id(citation_id)
+            if str(parsed.get("type", "")).startswith("mlflow_"):
+                run_id = parsed.get("run_id")
+                if run_id:
+                    summary_id = build_mlflow_summary_citation_id(run_id)
+                    normalized_ids.append(summary_id)
+                    if summary_id not in normalized_details:
+                        normalized_details[summary_id] = {
+                            "type": "mlflow_summary",
+                            "run_id": run_id,
+                            "experiment_id": experiment_by_run.get(run_id),
+                        }
+                    continue
+            normalized_ids.append(citation_id)
+            if citation_id in citation_details and citation_id not in normalized_details:
+                normalized_details[citation_id] = citation_details[citation_id]
+
+        deduped: List[str] = []
+        seen = set()
+        for cid in normalized_ids:
+            if cid in seen:
+                continue
+            seen.add(cid)
+            deduped.append(cid)
+
+        filtered_details = {
+            cid: normalized_details.get(cid, {})
+            for cid in deduped
+            if cid in normalized_details
+        }
+
+        return deduped, filtered_details
+
+    def _create_content_cells(
+        self, content: GeneratedContent, registry: CitationRegistry
+    ) -> List[nbformat.NotebookNode]:
+        """Create one or more cells for a content block."""
+        cells: List[nbformat.NotebookNode] = []
+
+        if content.block_type == ContentType.NARRATIVE:
+            cells.append(
+                self._create_narrative_cell(content.content, content.metadata, registry)
+            )
 
         elif content.block_type == ContentType.TABLE:
-            return self._create_table_cell(content.content)
+            cells.append(self._create_table_cell(content.content))
 
         elif content.block_type == ContentType.CHART:
-            return self._create_chart_cell(content.metadata)
+            cells.append(self._create_chart_cell(content.metadata))
 
         elif content.block_type == ContentType.IMAGE:
-            return self._create_image_cell(content.content, content.metadata)
+            cells.append(self._create_image_cell(content.content, content.metadata))
 
         elif content.block_type in (ContentType.BULLET_LIST, ContentType.NUMBERED_LIST):
-            return self._create_list_cell(content.content, content.block_type)
+            cells.append(
+                self._create_list_cell(
+                    content.content, content.block_type, content.metadata, registry
+                )
+            )
 
-        return None
+        return [cell for cell in cells if cell]
 
-    def _create_narrative_cell(self, text: str) -> nbformat.NotebookNode:
+    def _create_narrative_cell(
+        self, text: str, metadata: Dict[str, Any], registry: CitationRegistry
+    ) -> nbformat.NotebookNode:
         """Create a markdown cell for narrative text."""
-        return new_markdown_cell(source=self._sanitize_for_notebook(text))
+        rendered = self._render_markdown_with_citations(text, metadata, registry)
+        return new_markdown_cell(source=self._sanitize_for_notebook(rendered))
 
     def _create_image_cell(
         self, image_bytes: bytes, metadata: Dict[str, Any]
@@ -498,7 +740,11 @@ ax.set_xticks(x)
 ax.set_xticklabels(chart_data["labels"])'''
 
     def _create_list_cell(
-        self, items: List[str], list_type: ContentType
+        self,
+        items: List[str],
+        list_type: ContentType,
+        metadata: Dict[str, Any],
+        registry: CitationRegistry,
     ) -> nbformat.NotebookNode:
         """Create a markdown cell for a list."""
         if not items:
@@ -507,11 +753,119 @@ ax.set_xticklabels(chart_data["labels"])'''
         # Sanitize items to remove emojis
         items = [self._sanitize_for_notebook(item) for item in items]
 
-        if list_type == ContentType.NUMBERED_LIST:
-            lines = [f"{i+1}. {item}" for i, item in enumerate(items)]
-        else:
-            lines = [f"- {item}" for item in items]
+        lines = []
+        for i, item in enumerate(items):
+            rendered = self._render_markdown_with_citations(
+                item, metadata, registry, include_extra=False
+            )
+            if list_type == ContentType.NUMBERED_LIST:
+                lines.append(f"{i+1}. {rendered}")
+            else:
+                lines.append(f"- {rendered}")
 
+        return new_markdown_cell(source="\n".join(lines))
+
+    def _render_markdown_with_citations(
+        self,
+        text: str,
+        metadata: Dict[str, Any],
+        registry: CitationRegistry,
+        include_extra: bool = True,
+    ) -> str:
+        details = (metadata or {}).get("citation_details", {})
+        extra_ids = (metadata or {}).get("citations", []) if include_extra else []
+        rendered, _ = replace_markers_with_numbers(
+            text,
+            registry,
+            details_map=details,
+            extra_ids=extra_ids,
+            markdown=True,
+        )
+        return rendered
+
+    def _create_source_cell(
+        self, metadata: Dict[str, Any], registry: CitationRegistry
+    ) -> nbformat.NotebookNode | None:
+        if not metadata or not metadata.get("citations"):
+            return None
+        source_text = "Source:"
+        if metadata.get("path"):
+            source_text = f"Source: {metadata.get('path')}"
+        rendered, _ = replace_markers_with_numbers(
+            source_text,
+            registry,
+            details_map=metadata.get("citation_details", {}),
+            extra_ids=metadata.get("citations", []),
+            markdown=True,
+        )
+        return new_markdown_cell(source=rendered)
+
+    def _create_section_source_cell(
+        self,
+        citation_ids: List[str],
+        citation_details: Dict[str, Any],
+        registry: CitationRegistry,
+    ) -> nbformat.NotebookNode | None:
+        if not citation_ids:
+            return None
+        rendered, _ = replace_markers_with_numbers(
+            "Sources:",
+            registry,
+            details_map=citation_details,
+            extra_ids=citation_ids,
+            markdown=True,
+        )
+        return new_markdown_cell(source=rendered)
+
+    def _create_references_cell(self, registry: CitationRegistry) -> nbformat.NotebookNode:
+        lines = ["## References", ""]
+        for idx, (display_id, entry) in enumerate(registry.list_entries()):
+            anchor = f'<a id="ref-{display_id}"></a>'
+            # Build single-line reference
+            parts = []
+            if entry.type == "mlflow_artifact":
+                parts.append(display_id)
+                parts.append(f"Artifact: {entry.artifact_path}")
+            elif entry.type in {"mlflow_run", "mlflow_summary", "mlflow_metric", "mlflow_param", "mlflow_tag"}:
+                parts.append(display_id)
+                parts.append("Model Run")
+            elif entry.type == "code_file":
+                # Format code reference - strip __init__ and similar dunder methods
+                code_path = entry.code_path or ""
+                code_symbol = entry.code_symbol or ""
+
+                clean_symbol = code_symbol
+                clean_symbol = clean_symbol.replace(".__init__", "")
+                clean_symbol = clean_symbol.replace(".__call__", "")
+                clean_symbol = clean_symbol.replace(".__new__", "")
+
+                if code_path and clean_symbol:
+                    parts.append(f"Code: {code_path}#{clean_symbol}")
+                elif code_path:
+                    parts.append(f"Code: {code_path}")
+                else:
+                    # Fallback: clean up display_id
+                    clean_display = display_id
+                    clean_display = re.sub(r',\s*@?Code:', ', ', clean_display)
+                    clean_display = re.sub(r';\s*@?Code:', '; ', clean_display)
+                    clean_display = clean_display.replace(".__init__", "")
+                    parts.append(clean_display)
+            else:
+                # Clean up the display_id for unknown types
+                clean_display = display_id
+                clean_display = re.sub(r',\s*@?Code:', ', ', clean_display)
+                clean_display = re.sub(r';\s*@?Code:', '; ', clean_display)
+                clean_display = clean_display.replace(".__init__", "")
+                parts.append(clean_display)
+
+            if entry.experiment_name:
+                parts.append(f"Experiment: {entry.experiment_name}")
+            if entry.run_name:
+                parts.append(f"Run: {entry.run_name}")
+            if entry.run_url:
+                parts.append(f"[Link]({entry.run_url})")
+            line = f"{anchor}**[{idx + 1}]** {' | '.join(parts)} <!-- @cite:{entry.id} -->"
+            lines.append(line)
         return new_markdown_cell(source="\n".join(lines))
 
     def _create_export_instructions_cell(self) -> nbformat.NotebookNode:

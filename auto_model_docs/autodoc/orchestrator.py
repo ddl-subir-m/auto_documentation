@@ -292,6 +292,8 @@ class Orchestrator:
                     for s in spec.sections
                 ],
                 "hints": spec.hints,
+                "citation_style": spec.citation_style,
+                "formatting": spec.formatting,
             },
             "results": [self._serialize_section_result(r) for r in results],
         }
@@ -329,6 +331,8 @@ class Orchestrator:
                 for s in spec_data["sections"]
             ],
             hints=spec_data.get("hints", {}),
+            citation_style=spec_data.get("citation_style", "numeric"),
+            formatting=spec_data.get("formatting", {}),
         )
 
         # Reconstruct SectionResults

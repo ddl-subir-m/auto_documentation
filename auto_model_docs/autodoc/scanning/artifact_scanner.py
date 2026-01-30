@@ -159,10 +159,54 @@ class ArtifactScanner:
             project_metadata["mlflow_available"] = False
 
         report_progress(1.0)
+
+        mlflow_metrics: List[dict[str, str]] = []
+        mlflow_params: List[dict[str, str]] = []
+        mlflow_tags: List[dict[str, str]] = []
+        mlflow_artifacts: List[dict[str, str]] = []
+
+        for model in models:
+            for key in model.metrics.keys():
+                mlflow_metrics.append(
+                    {
+                        "run_id": model.run_id,
+                        "experiment_id": model.experiment_id or "",
+                        "key": key,
+                    }
+                )
+            for key in model.params.keys():
+                mlflow_params.append(
+                    {
+                        "run_id": model.run_id,
+                        "experiment_id": model.experiment_id or "",
+                        "key": key,
+                    }
+                )
+            for key in model.tags.keys():
+                mlflow_tags.append(
+                    {
+                        "run_id": model.run_id,
+                        "experiment_id": model.experiment_id or "",
+                        "key": key,
+                    }
+                )
+            for path in model.artifacts:
+                mlflow_artifacts.append(
+                    {
+                        "run_id": model.run_id,
+                        "experiment_id": model.experiment_id or "",
+                        "path": path,
+                    }
+                )
+
         return ArtifactContext(
             models=models,
             datasets=datasets,
             project_metadata=project_metadata,
+            mlflow_metrics=mlflow_metrics,
+            mlflow_params=mlflow_params,
+            mlflow_tags=mlflow_tags,
+            mlflow_artifacts=mlflow_artifacts,
         )
 
     def _get_target_experiments(self, client, domino_project_id: Optional[str]) -> dict:
@@ -437,8 +481,11 @@ class ArtifactScanner:
                             version=version.version,
                             stage=version.current_stage,
                             run_id=version.run_id,
+                            experiment_id=run.info.experiment_id,
+                            experiment_name=experiment.name if experiment else None,
                             metrics=dict(run.data.metrics),
                             params=dict(run.data.params),
+                            tags=dict(run.data.tags) if hasattr(run.data, "tags") else {},
                             artifacts=artifact_paths,
                             artifact_data=artifact_data,
                         )
