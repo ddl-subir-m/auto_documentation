@@ -102,13 +102,14 @@ console = Console()
 @click.option(
     "--generation-workers",
     "-w",
+    "workers",
     default=4,
     type=int,
     help="Number of parallel workers for content generation",
 )
 @click.option(
     "--planning-workers",
-    default=1,
+    default=4,
     type=int,
     help="Number of parallel workers for section planning",
 )
