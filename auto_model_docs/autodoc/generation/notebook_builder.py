@@ -681,11 +681,16 @@ df'''
         # Sanitize data to remove emojis
         data = self._sanitize_dict(data)
 
-        title = data.get("title", "Chart")
+        # Strip citation markers from title/labels for rendered chart
+        def strip_markers(value: str) -> str:
+            cleaned = CITATION_MARKER_PATTERN.sub("", value)
+            return " ".join(cleaned.split()).strip()
+
+        title = strip_markers(data.get("title", "Chart"))
         labels = data.get("labels", [])
         values = data.get("values", [])
-        xlabel = data.get("xlabel", "")
-        ylabel = data.get("ylabel", "")
+        xlabel = strip_markers(data.get("xlabel", ""))
+        ylabel = strip_markers(data.get("ylabel", ""))
 
         # Generate the data dictionary representation
         data_repr = json.dumps(

@@ -21,6 +21,7 @@ from autodoc.core.models import (
     SectionSpec,
 )
 from autodoc.generation.builder import DocumentBuilder
+from autodoc.generation.citations import CITATION_MARKER_PATTERN
 
 
 class NotebookExporter:
@@ -410,9 +411,9 @@ class NotebookExporter:
         else:
             ax.bar(labels, values, color="#4361ee")
 
-        ax.set_title(data.get("title", ""), fontsize=14, fontweight="bold")
-        ax.set_xlabel(data.get("xlabel", ""), fontsize=12)
-        ax.set_ylabel(data.get("ylabel", ""), fontsize=12)
+        ax.set_title(self._strip_citation_markers(data.get("title", "")), fontsize=14, fontweight="bold")
+        ax.set_xlabel(self._strip_citation_markers(data.get("xlabel", "")), fontsize=12)
+        ax.set_ylabel(self._strip_citation_markers(data.get("ylabel", "")), fontsize=12)
 
         plt.xticks(rotation=45, ha="right")
         plt.tight_layout()
@@ -475,6 +476,11 @@ class NotebookExporter:
         if lines and lines[0].startswith("#"):
             return lines[0][1:].strip()
         return "Table"
+
+    def _strip_citation_markers(self, value: str) -> str:
+        """Strip citation markers from a string for rendering in charts."""
+        cleaned = CITATION_MARKER_PATTERN.sub("", value)
+        return " ".join(cleaned.split()).strip()
 
     def _create_section_result(
         self,
