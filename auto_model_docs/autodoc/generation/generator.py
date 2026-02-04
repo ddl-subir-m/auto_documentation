@@ -418,7 +418,6 @@ class ContentGenerator:
         else:
             ax.bar(labels, values, color="#4361ee")
 
-        ax.set_title(self._strip_citation_markers(data.get("title", "")), fontsize=14, fontweight="bold")
         ax.set_xlabel(self._strip_citation_markers(data.get("xlabel", "")), fontsize=12)
         ax.set_ylabel(self._strip_citation_markers(data.get("ylabel", "")), fontsize=12)
 

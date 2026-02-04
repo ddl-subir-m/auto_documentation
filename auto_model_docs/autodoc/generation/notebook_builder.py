@@ -586,6 +586,15 @@ check_and_install_packages(REQUIRED_PACKAGES)'''
             cells.append(self._create_table_cell(content.content))
 
         elif content.block_type == ContentType.CHART:
+            # Add markdown title with citations above chart
+            title = content.metadata.get("title", "")
+            if title:
+                title_cell = self._render_markdown_with_citations(
+                    f"**{title}**",
+                    content.metadata,
+                    registry,
+                )
+                cells.append(new_markdown_cell(source=self._sanitize_for_notebook(title_cell)))
             cells.append(self._create_chart_cell(content.metadata))
 
         elif content.block_type == ContentType.IMAGE:
@@ -722,7 +731,6 @@ fig, ax = plt.subplots(figsize=(10, 6))
 
 {plot_code}
 
-ax.set_title(chart_data["title"], fontsize=14, fontweight="bold")
 ax.set_xlabel(chart_data["xlabel"])
 ax.set_ylabel(chart_data["ylabel"])
 plt.xticks(rotation=45, ha="right")
