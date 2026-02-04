@@ -1550,7 +1550,7 @@ def index():
                             Label("Provider", for_="field-provider"),
                             Select(
                                 Option("Anthropic", value="anthropic"),
-                                Option("OpenAI (Compatible)", value="openai"),
+                                Option("OpenAI (Compatible)", value="openai", selected=True),
                                 name="provider",
                                 id="field-provider",
                             ),
