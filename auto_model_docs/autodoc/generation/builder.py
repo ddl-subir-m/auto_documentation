@@ -574,18 +574,6 @@ class DocumentBuilder:
             )
             title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # Add source path as caption
-        path = metadata.get("path", "")
-        if path:
-            caption_para = doc.add_paragraph()
-            caption_run = caption_para.add_run(f"Source: {path}")
-            caption_run.italic = True
-            caption_run.font.size = Pt(9)
-            # Only add citations if no title (avoids duplication since title already has citations)
-            if not title:
-                self._append_citations_only(caption_para, metadata, registry)
-            caption_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
         # Add the image
         image_stream = io.BytesIO(image_bytes)
         doc.add_picture(image_stream, width=Inches(6))
