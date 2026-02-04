@@ -529,7 +529,7 @@ class ContentGenerator:
                                 metadata={
                                     "path": path,
                                     "format": data["format"],
-                                    "title": self._generate_image_title(path, block.purpose),
+                                    "title": self._generate_image_title(path, block.purpose, block.specifics),
                                     "citations": [citation_id],
                                     "citation_details": citation_details,
                                 },
@@ -557,7 +557,7 @@ class ContentGenerator:
                             metadata={
                                 "path": path,
                                 "format": data["format"],
-                                "title": self._generate_image_title(path, block.purpose),
+                                "title": self._generate_image_title(path, block.purpose, block.specifics),
                                 "citations": [citation_id],
                                 "citation_details": citation_details,
                             },
@@ -591,7 +591,7 @@ class ContentGenerator:
                                 metadata={
                                     "path": path,
                                     "format": data["format"],
-                                    "title": self._generate_image_title(path, block.purpose),
+                                    "title": self._generate_image_title(path, block.purpose, block.specifics),
                                     "citations": [citation_id],
                                     "citation_details": citation_details,
                                 },
@@ -620,7 +620,7 @@ class ContentGenerator:
                             metadata={
                                 "path": path,
                                 "format": data["format"],
-                                "title": self._generate_image_title(path, block.purpose),
+                                "title": self._generate_image_title(path, block.purpose, block.specifics),
                                 "citations": [citation_id],
                                 "citation_details": citation_details,
                             },
@@ -661,9 +661,21 @@ class ContentGenerator:
 
         return False
 
-    def _generate_image_title(self, path: str, purpose: str) -> str:
-        """Generate a human-readable title for an image."""
-        # Extract filename without extension
+    def _generate_image_title(self, path: str, purpose: str, specifics: dict | None = None) -> str:
+        """Generate a human-readable title for an image.
+
+        Args:
+            path: Path to the image artifact.
+            purpose: Purpose description for the image block.
+            specifics: Optional specifics dict that may contain an LLM-generated title.
+
+        Returns:
+            A descriptive title for the image.
+        """
+        # Use LLM-generated title if available
+        if specifics and specifics.get("title"):
+            return specifics["title"]
+        # Fall back to filename-based title
         filename = path.split("/")[-1].rsplit(".", 1)[0]
         # Convert underscores/hyphens to spaces and title case
         title = filename.replace("_", " ").replace("-", " ").title()

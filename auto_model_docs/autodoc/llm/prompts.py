@@ -232,6 +232,9 @@ CRITICAL: Only plan content blocks that can be generated from the data provided 
 - Use "image" type ONLY when specific image artifacts are listed in the artifacts_info above (e.g., confusion_matrix.png, feature_importance.png)
 - If metrics are available but no image artifacts, use "chart" to create bar charts showing metric values
 - Do NOT request image artifacts that are not explicitly listed in the artifacts_info above
+- For "image" blocks: Include a descriptive "title" in the specifics object that adds context beyond the filename
+  (e.g., "Feature Importance - XGBoost Credit Risk Model" instead of just "Feature Importance").
+  Include the model name, task context, or relevant metric when available.
 
 Consider what would be most valuable for documenting this section. Prefer visual content (images, charts, tables) when data allows. Include 2-4 content blocks."""
 
@@ -269,7 +272,7 @@ SECTION_PLANNING_SCHEMA: Dict[str, Any] = {
                     },
                     "specifics": {
                         "type": "object",
-                        "description": "Additional specifications (e.g., chart_type for charts, image_name for images)",
+                        "description": "Additional specifications. For charts: 'chart_type'. For images: 'image_name' and 'title' (a descriptive title with model context, e.g., 'Confusion Matrix - RandomForest Credit Risk Classifier')",
                     },
                 },
                 "required": ["type", "purpose"],
