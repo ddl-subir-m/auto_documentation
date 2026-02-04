@@ -241,14 +241,33 @@ class DocumentBuilder:
             block_details = {}
         elif content.block_type in (ContentType.BULLET_LIST, ContentType.NUMBERED_LIST):
             cleaned_items: List[str] = []
-            for item in content.content or []:
+            # Handle both dict format (with title) and list format (legacy)
+            if isinstance(content.content, dict):
+                raw_items = content.content.get("items", [])
+                raw_title = content.content.get("title", "")
+            else:
+                raw_items = content.content or []
+                raw_title = ""
+
+            for item in raw_items:
                 cleaned_item, found = self._strip_citation_markers(item)
                 found_ids.extend(found)
                 cleaned_items.append(cleaned_item)
+
+            # Also strip markers from title if present
+            cleaned_title = ""
+            if raw_title:
+                cleaned_title, found = self._strip_citation_markers(raw_title)
+                found_ids.extend(found)
+
             safe_metadata = dict(metadata)
             safe_metadata["citations"] = []
             safe_metadata["citation_details"] = {}
-            safe_content = cleaned_items
+            # Preserve dict format if original was dict
+            if isinstance(content.content, dict):
+                safe_content = {"items": cleaned_items, "title": cleaned_title}
+            else:
+                safe_content = cleaned_items
             block_citations = []
             block_details = {}
         elif content.block_type == ContentType.TABLE:
@@ -562,7 +581,9 @@ class DocumentBuilder:
             caption_run = caption_para.add_run(f"Source: {path}")
             caption_run.italic = True
             caption_run.font.size = Pt(9)
-            self._append_citations_only(caption_para, metadata, registry)
+            # Only add citations if no title (avoids duplication since title already has citations)
+            if not title:
+                self._append_citations_only(caption_para, metadata, registry)
             caption_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         # Add the image
