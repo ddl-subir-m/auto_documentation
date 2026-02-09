@@ -9,6 +9,8 @@ from typing import List
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
 from autodoc.core.exceptions import BuilderError
@@ -67,7 +69,7 @@ class DocumentBuilder:
             self._add_title_page(doc, spec)
 
             # Add table of contents placeholder
-            self._add_table_of_contents(doc)
+            self._add_table_of_contents(doc, results)
 
             # Add sections
             for result in results:
@@ -131,23 +133,62 @@ class DocumentBuilder:
         # Page break
         doc.add_page_break()
 
-    def _add_table_of_contents(self, doc: Document) -> None:
-        """Add table of contents placeholder."""
+    def _add_table_of_contents(self, doc: Document, results: List[SectionResult]) -> None:
+        """Add a Word TOC field pre-populated with section titles."""
         doc.add_heading("Table of Contents", level=1)
 
-        # Note about updating TOC
-        para = doc.add_paragraph()
-        para.add_run(
-            "To update the table of contents: Right-click and select 'Update Field' "
-            "or press Ctrl+A then F9 in Microsoft Word."
-        ).italic = True
+        # --- Field begin + instruction + separate (single paragraph) ---
+        paragraph = doc.add_paragraph()
+        run = paragraph.add_run()
+        fldChar_begin = OxmlElement("w:fldChar")
+        fldChar_begin.set(qn("w:fldCharType"), "begin")
+        run._r.append(fldChar_begin)
 
-        doc.add_paragraph()
+        run2 = paragraph.add_run()
+        instrText = OxmlElement("w:instrText")
+        instrText.set(qn("xml:space"), "preserve")
+        instrText.text = ' TOC \\o "1-3" \\h \\z \\u '
+        run2._r.append(instrText)
 
-        # Add TOC field (Word will populate this)
-        # This creates a placeholder that Word can update
-        para = doc.add_paragraph()
-        para.add_run("[Table of Contents - Update field to generate]")
+        run3 = paragraph.add_run()
+        fldChar_separate = OxmlElement("w:fldChar")
+        fldChar_separate.set(qn("w:fldCharType"), "separate")
+        run3._r.append(fldChar_separate)
+
+        # --- Pre-populated TOC entries (one paragraph per section) ---
+        for result in results:
+            heading_text = f"{result.plan.number}. {result.plan.title}"
+            bookmark_name = f"_Toc_Section{result.plan.number}"
+            toc_para = doc.add_paragraph()
+            try:
+                toc_para.style = doc.styles['TOC 1']
+            except KeyError:
+                toc_para.style = doc.styles['Normal']
+            # Wrap text in a hyperlink pointing to the section bookmark
+            hyperlink = OxmlElement("w:hyperlink")
+            hyperlink.set(qn("w:anchor"), bookmark_name)
+            run_el = OxmlElement("w:r")
+            rPr = OxmlElement("w:rPr")
+            color = OxmlElement("w:color")
+            color.set(qn("w:val"), "0563C1")
+            rPr.append(color)
+            underline = OxmlElement("w:u")
+            underline.set(qn("w:val"), "single")
+            rPr.append(underline)
+            run_el.append(rPr)
+            text_el = OxmlElement("w:t")
+            text_el.set(qn("xml:space"), "preserve")
+            text_el.text = heading_text
+            run_el.append(text_el)
+            hyperlink.append(run_el)
+            toc_para._p.append(hyperlink)
+
+        # --- Field end (separate paragraph) ---
+        end_paragraph = doc.add_paragraph()
+        run_end = end_paragraph.add_run()
+        fldChar_end = OxmlElement("w:fldChar")
+        fldChar_end.set(qn("w:fldCharType"), "end")
+        run_end._r.append(fldChar_end)
 
         doc.add_page_break()
 
@@ -369,9 +410,18 @@ class DocumentBuilder:
         self, doc: Document, result: SectionResult, registry: CitationRegistry
     ) -> None:
         """Add a section to the document."""
-        # Section heading with number
+        # Section heading with number and bookmark for TOC linking
         heading_text = f"{result.plan.number}. {result.plan.title}"
         heading_para = doc.add_heading(heading_text, level=1)
+        bookmark_name = f"_Toc_Section{result.plan.number}"
+        bookmark_id = str(result.plan.number)
+        bm_start = OxmlElement("w:bookmarkStart")
+        bm_start.set(qn("w:id"), bookmark_id)
+        bm_start.set(qn("w:name"), bookmark_name)
+        bm_end = OxmlElement("w:bookmarkEnd")
+        bm_end.set(qn("w:id"), bookmark_id)
+        heading_para._p.insert(0, bm_start)
+        heading_para._p.append(bm_end)
         heading_size = self.formatting.get("heading_font_size")
         if heading_size:
             for run in heading_para.runs:

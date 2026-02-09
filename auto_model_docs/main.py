@@ -345,7 +345,7 @@ def main(
         console.print(f"\n[bold green]Success![/] Document generated:")
         console.print(f"  [cyan]{output_path}[/]")
         if notebook or notebook_path:
-            actual_notebook_path = Path(notebook_path) if notebook_path else output_dir / "model_docs_notebook.ipynb"
+            actual_notebook_path = orchestrator.notebook_builder.notebook_path
             console.print(f"  [cyan]{actual_notebook_path}[/]")
         console.print()
 

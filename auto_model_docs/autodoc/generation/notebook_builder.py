@@ -179,6 +179,9 @@ class NotebookBuilder:
             # Add title cell
             nb.cells.append(self._create_title_cell(spec))
 
+            # Add table of contents cell
+            nb.cells.append(self._create_toc_cell(results))
+
             registry = CitationRegistry(tracking_uri=os.environ.get("MLFLOW_TRACKING_URI"))
 
             # Add section cells
@@ -335,6 +338,17 @@ check_and_install_packages(REQUIRED_PACKAGES)'''
 
 *This notebook contains editable documentation. Modify charts, tables, and text as needed, then run the export cell at the bottom to generate an updated Word document.*"""
         return new_markdown_cell(source=content)
+
+    def _create_toc_cell(self, results: List[SectionResult]) -> nbformat.NotebookNode:
+        """Create a markdown cell with a linked table of contents."""
+        lines = ["## Table of Contents", ""]
+        for result in results:
+            title = f"{result.plan.number}. {result.plan.title}"
+            # Build Jupyter-compatible anchor from heading text
+            anchor = title.lower().replace(" ", "-")
+            anchor = re.sub(r"[^\w\-]", "", anchor)
+            lines.append(f"- [{title}](#{anchor})")
+        return new_markdown_cell(source="\n".join(lines))
 
     def _add_section_cells(
         self,

@@ -224,6 +224,9 @@ class Orchestrator:
 
         # Phase 4b: Also build notebook if requested
         if self.generate_notebook:
+            # Sync notebook filename with docx when no custom path was provided
+            if not self.notebook_builder.notebook_path:
+                self.notebook_builder.notebook_path = output_path.with_suffix(".ipynb")
             await self.notebook_builder.build(spec, results)
 
         # Save results to cache for --notebook-from-cache rebuilds
