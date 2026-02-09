@@ -591,11 +591,7 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         
         job.output_path = output_path
         if request.notebook or request.notebook_path:
-            job.notebook_path = (
-                Path(request.notebook_path)
-                if request.notebook_path
-                else output_dir / "model_docs_notebook.ipynb"
-            )
+            job.notebook_path = orchestrator.notebook_builder.notebook_path
         job.status = "completed"
         
         console.print("\n[bold green]Generation complete![/bold green]")
@@ -1024,12 +1020,6 @@ app, rt = fast_app(
                 margin-bottom: 1rem;
                 padding-left: 1.625rem;
             }
-            .notebook-path-hint {
-                font-size: 0.75rem;
-                color: var(--text-muted);
-                font-family: ui-monospace, monospace;
-            }
-            
             /* Advanced Section (Collapsible) */
             .advanced-section {
                 margin-top: 0.5rem;
@@ -1342,19 +1332,6 @@ app, rt = fast_app(
         Script(
             r"""
             document.addEventListener('DOMContentLoaded', function() {
-                const notebookCheckbox = document.getElementById('field-notebook');
-                const notebookHint = document.getElementById('notebook-path-hint');
-
-                function toggleNotebookHint() {
-                    if (notebookCheckbox && notebookHint) {
-                        notebookHint.classList.toggle('hidden', !notebookCheckbox.checked);
-                    }
-                }
-
-                if (notebookCheckbox) {
-                    notebookCheckbox.addEventListener('change', toggleNotebookHint);
-                    toggleNotebookHint();
-                }
 
                 // Toggle base URL and model name fields based on provider selection
                 const providerSelect = document.getElementById('field-provider');
@@ -1602,12 +1579,6 @@ def index():
                             Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
                             Span("Generate notebook"),
                             cls="checkbox-field",
-                        ),
-                        # Notebook output path hint
-                        Div(
-                            Span(f"{_get_default_output_dir()}/model_docs_notebook.ipynb", cls="notebook-path-hint"),
-                            id="notebook-path-hint",
-                            cls="field-hint",
                         ),
                         # Advanced section (collapsible)
                         Details(
