@@ -25,6 +25,9 @@ aiofiles>=23.0.0
 # Web UI
 python-fasthtml>=0.12.39
 
+# Domino integration
+dominodatalab>=1.4.8
+
 # Notebook generation
 nbformat>=5.9.0
 nbclient>=0.8.0

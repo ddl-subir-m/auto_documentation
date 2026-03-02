@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import traceback
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from fasthtml.common import *
@@ -23,6 +24,14 @@ from autodoc.core.models import DocumentSpec
 from autodoc.llm import LLMClient
 from autodoc.orchestrator import Orchestrator
 from autodoc.scanning import ContentSanitizer
+
+try:
+    import domino_client
+    import domino_job_store
+    import spec_store
+    _DOMINO_AVAILABLE = True
+except ImportError:
+    _DOMINO_AVAILABLE = False
 
 # Rich console for terminal output
 console = Console()
@@ -123,11 +132,34 @@ class JobRequest:
     model_names: Optional[str]  # Comma-separated list
     latest_only: bool
     verbose: bool  # Enable verbose logging
+    # Domino job fields
+    execution_mode: str = "domino"      # "app" | "domino"
+    branch: Optional[str] = None
+    hardware_tier: Optional[str] = None
+    api_key_source: str = "domino_env"  # "domino_env" | "pass_now"
+    spec_filename: Optional[str] = None  # original uploaded filename
+
+
+@dataclass
+class DominoJobRecord:
+    id: str                              # local UUID
+    username: str
+    domino_run_id: Optional[str] = None
+    branch: Optional[str] = None
+    hardware_tier: Optional[str] = None
+    status: str = "queued"               # queued | submitted | running | succeeded | failed | cancelled
+    domino_status: Optional[str] = None
+    job_url: Optional[str] = None
+    spec_path: Optional[str] = None
+    submitted_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
 
 
 JOB_STORE: dict[str, JobState] = {}
 ACTIVE_JOB_ID: Optional[str] = None
 LAST_API_KEY: Optional[str] = None
+_POLL_TASK: Optional[asyncio.Task] = None
 
 
 def _timestamp() -> str:
@@ -644,9 +676,13 @@ async def _parse_request(req: Request) -> JobRequest:
     form = await req.form()
     spec_upload = form.get("spec_upload")
     spec_content = None
+    spec_filename = None
     if spec_upload and hasattr(spec_upload, "read"):
         content = await spec_upload.read()
         spec_content = content.decode("utf-8", errors="replace")
+        spec_filename = getattr(spec_upload, "filename", None)
+
+    execution_mode = form.get("execution_mode", "domino")
 
     return JobRequest(
         spec_path=form.get("spec_path") or None,
@@ -667,6 +703,11 @@ async def _parse_request(req: Request) -> JobRequest:
         model_names=form.get("model_names") or None,
         latest_only=form.get("latest_only") in ("on", "true", "1", "yes"),
         verbose=form.get("verbose") in ("on", "true", "1", "yes"),
+        execution_mode=execution_mode,
+        branch=form.get("branch") or None,
+        hardware_tier=form.get("hardware_tier") or None,
+        api_key_source=form.get("api_key_source", "domino_env"),
+        spec_filename=spec_filename,
     )
 
 
@@ -678,6 +719,323 @@ def _start_job(job_request: JobRequest) -> JobState:
 
     job.task = asyncio.create_task(_run_generation(job, job_request))
     return job
+
+
+def _get_username() -> str:
+    return os.environ.get("DOMINO_STARTING_USERNAME", "local_user")
+
+
+def _max_jobs() -> int:
+    return int(os.environ.get("AUTODOC_MAX_JOBS", "1"))
+
+
+def _db_record_to_dataclass(row: dict) -> DominoJobRecord:
+    return DominoJobRecord(
+        id=row["id"],
+        username=row["username"],
+        domino_run_id=row.get("domino_run_id"),
+        branch=row.get("branch"),
+        hardware_tier=row.get("hardware_tier"),
+        status=row.get("status", "queued"),
+        domino_status=row.get("domino_status"),
+        job_url=row.get("job_url"),
+        spec_path=row.get("spec_path"),
+        submitted_at=row.get("submitted_at"),
+        completed_at=row.get("completed_at"),
+    )
+
+
+def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
+    """Render the terminal panel for a Domino job."""
+    if not record:
+        return Div(
+            Div(
+                H3("Domino job"),
+                cls="terminal-header",
+            ),
+            Div(
+                "Submit in Domino Job mode to offload compute to a dedicated job container.",
+                cls="terminal terminal-idle",
+            ),
+            cls="terminal-card",
+        )
+
+    status = record.status
+    badge_cls = f"terminal-status terminal-status-{status}"
+
+    # Stop button
+    stop_btn = None
+    if status in ("submitted", "running"):
+        stop_btn = A(
+            "Stop",
+            hx_post="stop-domino",
+            hx_vals=f'{{"job_id": "{record.id}"}}',
+            hx_target="#status-panel",
+            hx_swap="innerHTML",
+            cls="terminal-action",
+        )
+    elif status in ("queued",):
+        stop_btn = A("Stop", href="#", cls="terminal-action terminal-action-disabled")
+
+    # Job link
+    job_link = None
+    if record.job_url:
+        job_link = A(
+            "View job in Domino →",
+            href=record.job_url,
+            target="_blank",
+            cls="domino-job-link",
+        )
+
+    # Status message
+    status_lines = []
+    if record.submitted_at:
+        status_lines.append(f"Submitted: {record.submitted_at[:19].replace('T', ' ')} UTC")
+    if record.domino_status:
+        status_lines.append(f"Domino status: {record.domino_status}")
+    if record.completed_at:
+        status_lines.append(f"Completed: {record.completed_at[:19].replace('T', ' ')} UTC")
+    if not status_lines:
+        status_lines.append("Waiting for status...")
+
+    status_text = "\n".join(status_lines)
+
+    return Div(
+        Div(
+            H3("Domino job"),
+            Div(
+                stop_btn,
+                cls="terminal-actions",
+            ) if stop_btn else Div(cls="terminal-actions"),
+            cls="terminal-header",
+        ),
+        Div(status.upper(), cls=badge_cls),
+        Div(job_link, cls="domino-job-link-row") if job_link else None,
+        Pre(status_text, cls="terminal"),
+        id="domino-status-inner",
+        cls="terminal-card",
+    )
+
+
+def _render_job_history_table(username: str) -> FT:
+    """Render the job history table for a user."""
+    if not _DOMINO_AVAILABLE:
+        return Div()
+    jobs = domino_job_store.get_user_jobs(username, limit=50)
+    if not jobs:
+        return Div(
+            P("No jobs submitted yet.", cls="history-empty"),
+            cls="job-history-content",
+        )
+
+    rows = []
+    for j in jobs:
+        status_cls = f"history-status history-status-{j.get('status', 'queued')}"
+        job_url = j.get("job_url")
+        link_cell = Td(
+            A("View →", href=job_url, target="_blank") if job_url else "—"
+        )
+        rows.append(
+            Tr(
+                Td(j.get("branch") or "—"),
+                Td(j.get("hardware_tier") or "—"),
+                Td(Span(j.get("status", "—").upper(), cls=status_cls)),
+                Td((j.get("submitted_at") or "—")[:16].replace("T", " ")),
+                link_cell,
+            )
+        )
+
+    return Div(
+        Table(
+            Thead(
+                Tr(
+                    Th("Branch"),
+                    Th("Hardware tier"),
+                    Th("Status"),
+                    Th("Submitted"),
+                    Th("Link"),
+                )
+            ),
+            Tbody(*rows),
+            cls="history-table",
+        ),
+        Div(
+            A(
+                "Clear completed",
+                hx_post="clear-job-history",
+                hx_target="#job-history-content",
+                hx_swap="innerHTML",
+                cls="terminal-action",
+            ),
+            cls="history-actions",
+        ),
+        id="job-history-content",
+        cls="job-history-content",
+    )
+
+
+async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
+    """Submit or queue a Domino job and persist it to SQLite."""
+    if not _DOMINO_AVAILABLE:
+        raise RuntimeError("Domino integration is not available.")
+
+    # Ensure DB is initialised
+    domino_job_store.init_db()
+
+    # Save spec file if uploaded in Domino mode
+    spec_path: Optional[str] = None
+    if req.spec_content and req.spec_filename:
+        saved = spec_store.save_spec(req.spec_filename, req.spec_content)
+        spec_path = str(saved)
+    elif req.spec_path:
+        spec_path = req.spec_path
+
+    # Create the DB row first (status=queued)
+    job_id = domino_job_store.create_job(
+        username=username,
+        branch=req.branch,
+        tier=req.hardware_tier,
+        spec_path=spec_path,
+    )
+
+    # count_active_jobs includes the row we just created (status=queued)
+    # so if active > max_jobs, at least one other job is already running/queued
+    active = domino_job_store.count_active_jobs(username)
+    if active > _max_jobs():
+        # Leave as queued; background loop will submit it when a slot opens
+        row = domino_job_store.get_job(job_id)
+        return _db_record_to_dataclass(row)
+
+    # Submit immediately
+    try:
+        extra_env: dict[str, str] = {}
+        if req.api_key_source == "pass_now" and req.api_key:
+            provider_upper = req.provider.upper()
+            extra_env[f"{provider_upper}_API_KEY"] = req.api_key
+
+        command = ["python", "/mnt/code/auto_model_docs/main.py"]
+        if spec_path:
+            command += ["--spec", spec_path]
+        if req.provider:
+            command += ["--provider", req.provider]
+        if req.model:
+            command += ["--model", req.model]
+        if req.code_root:
+            command += ["--code-root", req.code_root]
+        if req.output_dir:
+            command += ["--output-dir", req.output_dir]
+        if req.max_files:
+            command += ["--max-files", str(req.max_files)]
+
+        run_id = domino_client.submit_job(
+            command=command,
+            branch=req.branch,
+            tier_name=req.hardware_tier,
+            extra_env=extra_env or None,
+        )
+        job_url = domino_client.build_job_url(run_id)
+        domino_job_store.update_job(
+            job_id,
+            domino_run_id=run_id,
+            status="submitted",
+            job_url=job_url,
+            submitted_at=datetime.now(tz=timezone.utc).isoformat(),
+        )
+    except Exception as exc:
+        domino_job_store.update_job(job_id, status="failed", domino_status=str(exc))
+
+    row = domino_job_store.get_job(job_id)
+    return _db_record_to_dataclass(row)
+
+
+async def _poll_domino_jobs() -> None:
+    """Background loop: poll Domino for active job statuses every 10 s."""
+    while True:
+        try:
+            await asyncio.sleep(10)
+            if not _DOMINO_AVAILABLE:
+                continue
+
+            domino_job_store.init_db()
+            # Gather all active jobs (all users - we'll check per-user queues too)
+            import sqlite3
+            from pathlib import Path
+
+            db_path_str = str(domino_job_store._db_path())
+            con = sqlite3.connect(db_path_str, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            try:
+                rows = con.execute(
+                    "SELECT * FROM domino_jobs WHERE status IN ('submitted', 'running')"
+                ).fetchall()
+                active_jobs = [dict(r) for r in rows]
+
+                # Also check for queued jobs whose user has a free slot
+                queued_rows = con.execute(
+                    "SELECT DISTINCT username FROM domino_jobs WHERE status = 'queued'"
+                ).fetchall()
+                queued_users = [r["username"] for r in queued_rows]
+                con.commit()
+            finally:
+                con.close()
+
+            terminal_statuses = {"succeeded", "failed", "cancelled"}
+
+            for job in active_jobs:
+                if not job.get("domino_run_id"):
+                    continue
+                try:
+                    status_info = domino_client.get_job_status(job["domino_run_id"])
+                    local_status = status_info["local_status"]
+                    domino_status = status_info["domino_status"]
+
+                    update_fields: dict[str, Any] = {
+                        "status": local_status,
+                        "domino_status": domino_status,
+                    }
+                    if local_status in terminal_statuses:
+                        update_fields["completed_at"] = datetime.now(
+                            tz=timezone.utc
+                        ).isoformat()
+                    domino_job_store.update_job(job["id"], **update_fields)
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "Polling error for job %s: %s", job["id"], exc
+                    )
+
+            # Promote queued jobs
+            for username in queued_users:
+                active_count = domino_job_store.count_active_jobs(username)
+                if active_count < _max_jobs():
+                    oldest = domino_job_store.get_oldest_queued_job(username)
+                    if oldest:
+                        try:
+                            spec_path = oldest.get("spec_path")
+                            command = ["python", "/mnt/code/auto_model_docs/main.py"]
+                            if spec_path:
+                                command += ["--spec", spec_path]
+                            run_id = domino_client.submit_job(
+                                command=command,
+                                branch=oldest.get("branch"),
+                                tier_name=oldest.get("hardware_tier"),
+                            )
+                            job_url = domino_client.build_job_url(run_id)
+                            domino_job_store.update_job(
+                                oldest["id"],
+                                domino_run_id=run_id,
+                                status="submitted",
+                                job_url=job_url,
+                                submitted_at=datetime.now(tz=timezone.utc).isoformat(),
+                            )
+                        except Exception as exc:
+                            domino_job_store.update_job(
+                                oldest["id"], status="failed", domino_status=str(exc)
+                            )
+
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Poll loop error: %s", exc)
 
 
 app, rt = fast_app(
@@ -888,14 +1246,19 @@ app, rt = fast_app(
                 color: var(--text-primary);
             }
             
-            /* Grid Layout - 2 columns */
+            /* Grid Layout - 3 columns */
             .config-grid {
                 display: grid;
-                grid-template-columns: 1.5fr 1fr;
+                grid-template-columns: 1.3fr 1.1fr 1fr;
                 gap: 1rem;
                 margin-bottom: 1.5rem;
             }
-            @media (max-width: 700px) {
+            @media (max-width: 900px) {
+                .config-grid {
+                    grid-template-columns: 1fr 1fr;
+                }
+            }
+            @media (max-width: 600px) {
                 .config-grid {
                     grid-template-columns: 1fr;
                 }
@@ -915,6 +1278,12 @@ app, rt = fast_app(
                 font-weight: 600;
                 color: var(--text-secondary);
                 margin-bottom: 1rem;
+            }
+            .card-title-sub {
+                font-size: 0.75rem;
+                font-weight: 400;
+                color: var(--text-muted);
+                margin-left: 0.35rem;
             }
             
             /* Form Fields */
@@ -1054,7 +1423,7 @@ app, rt = fast_app(
             }
             .advanced-grid {
                 display: grid;
-                grid-template-columns: repeat(4, 1fr);
+                grid-template-columns: 1fr 1fr;
                 gap: 0.75rem;
             }
             .advanced-grid .field {
@@ -1355,17 +1724,350 @@ app, rt = fast_app(
             .terminal-line-complete {
                 color: #4ADE80;
             }
+
+            /* Execution mode toggle */
+            .mode-toggle {
+                display: inline-flex;
+                background: var(--bg-page);
+                border: 1px solid var(--panel-border);
+                border-radius: 6px;
+                padding: 3px;
+                margin-bottom: 1.25rem;
+                gap: 2px;
+            }
+            .mode-toggle-option {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 0.5rem 1.125rem;
+                border-radius: 4px;
+                font-size: 0.85rem;
+                font-weight: 500;
+                color: var(--text-secondary);
+                cursor: pointer;
+                transition: background 0.15s ease, color 0.15s ease;
+                user-select: none;
+                white-space: nowrap;
+            }
+            .mode-toggle-option input[type="radio"] {
+                display: none;
+            }
+            .mode-toggle-option.active {
+                background: #EDECFB;
+                color: #1820A0;
+                font-weight: 600;
+                box-shadow: 0 1px 2px rgba(84,63,222,0.12);
+            }
+            .mode-toggle-option:not(.active):hover {
+                background: rgba(84,63,222,0.04);
+                color: var(--text-primary);
+            }
+
+            /* Domino-specific fields */
+            .domino-fields {
+                display: flex;
+                flex-direction: column;
+                gap: 0;
+            }
+
+            /* API key source radio */
+            .api-key-source {
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+                margin-bottom: 0.5rem;
+            }
+            .api-key-source-option {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                font-size: 0.85rem;
+                color: var(--text-primary);
+                cursor: pointer;
+            }
+            .api-key-source-option input[type="radio"] {
+                accent-color: var(--accent);
+                cursor: pointer;
+            }
+            .api-key-callout {
+                background: rgba(204, 183, 24, 0.08);
+                border: 1px solid rgba(204, 183, 24, 0.4);
+                border-radius: 4px;
+                padding: 0.5rem 0.75rem;
+                font-size: 0.8rem;
+                color: #9a7a00;
+                margin-top: 0.5rem;
+                display: none;
+            }
+
+            /* Domino job link */
+            .domino-job-link-row {
+                margin-bottom: 0.5rem;
+            }
+            .domino-job-link {
+                font-size: 0.85rem;
+                font-weight: 500;
+                color: var(--accent);
+            }
+
+            /* Domino status colors */
+            .terminal-status-queued {
+                background: rgba(204, 183, 24, 0.1);
+                color: var(--warning);
+            }
+            .terminal-status-submitted {
+                background: rgba(0, 112, 204, 0.1);
+                color: var(--info);
+            }
+            .terminal-status-running {
+                background: rgba(0, 112, 204, 0.1);
+                color: var(--info);
+            }
+            .terminal-status-succeeded {
+                background: rgba(40, 164, 100, 0.1);
+                color: var(--success);
+            }
+            .terminal-status-failed {
+                background: rgba(194, 10, 41, 0.1);
+                color: var(--error);
+            }
+
+            /* Uploaded spec filename (Domino mode) */
+            .spec-saved-name {
+                font-size: 0.75rem;
+                color: var(--accent);
+                margin-top: 0.25rem;
+            }
+
+            /* Job history */
+            .job-history-section {
+                margin-top: 1rem;
+            }
+            .job-history-section summary {
+                font-size: 0.875rem;
+                font-weight: 600;
+                color: var(--text-secondary);
+                cursor: pointer;
+                padding: 0.75rem 1.25rem;
+                background: var(--panel);
+                border: 1px solid var(--panel-border);
+                border-radius: 8px;
+                list-style: none;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+            .job-history-section summary::-webkit-details-marker { display: none; }
+            .job-history-section summary::before {
+                content: '▶';
+                font-size: 0.6rem;
+                transition: transform 0.2s ease;
+            }
+            .job-history-section[open] summary::before { transform: rotate(90deg); }
+            .job-history-section[open] summary {
+                border-radius: 8px 8px 0 0;
+                border-bottom: 1px solid var(--panel-border);
+            }
+            .job-history-content {
+                background: var(--panel);
+                border: 1px solid var(--panel-border);
+                border-top: none;
+                border-radius: 0 0 8px 8px;
+                padding: 1rem 1.25rem;
+            }
+            .history-empty {
+                color: var(--text-muted);
+                font-size: 0.85rem;
+                margin: 0;
+            }
+            .history-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 0.8rem;
+            }
+            .history-table th {
+                text-align: left;
+                color: var(--text-secondary);
+                font-weight: 600;
+                font-size: 0.75rem;
+                padding: 0 0.75rem 0.5rem 0;
+                border-bottom: 1px solid var(--panel-border);
+            }
+            .history-table td {
+                padding: 0.5rem 0.75rem 0.5rem 0;
+                color: var(--text-primary);
+                border-bottom: 1px solid var(--panel-border);
+            }
+            .history-table tr:last-child td { border-bottom: none; }
+            .history-status {
+                display: inline-block;
+                font-size: 0.7rem;
+                font-weight: 600;
+                padding: 0.15rem 0.5rem;
+                border-radius: 3px;
+            }
+            .history-status-queued { background: rgba(204,183,24,0.1); color: var(--warning); }
+            .history-status-submitted { background: rgba(0,112,204,0.1); color: var(--info); }
+            .history-status-running { background: rgba(0,112,204,0.1); color: var(--info); }
+            .history-status-succeeded { background: rgba(40,164,100,0.1); color: var(--success); }
+            .history-status-failed { background: rgba(194,10,41,0.1); color: var(--error); }
+            .history-status-cancelled { background: rgba(204,183,24,0.1); color: var(--warning); }
+            .history-actions {
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 0.75rem;
+            }
+
+            /* Spec manage link */
+            .spec-manage-link {
+                font-size: 0.75rem;
+                color: var(--accent);
+                cursor: pointer;
+                display: none;
+            }
+            .spec-list-modal {
+                background: var(--panel);
+                border: 1px solid var(--panel-border);
+                border-radius: 8px;
+                padding: 1rem;
+                margin-top: 0.5rem;
+                display: none;
+            }
+            .spec-list-item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0.4rem 0;
+                border-bottom: 1px solid var(--panel-border);
+                font-size: 0.8rem;
+            }
+            .spec-list-item:last-child { border-bottom: none; }
             """
         ),
         Script(
             r"""
             document.addEventListener('DOMContentLoaded', function() {
 
-                // Toggle base URL and model name fields based on provider selection
-                const providerSelect = document.getElementById('field-provider');
-                const baseUrlField = document.getElementById('base-url-field');
-                const modelNameField = document.getElementById('model-name-field');
+                // ── All DOM references declared up-front to avoid TDZ errors ──────
+                const modeDominoLabel   = document.getElementById('mode-domino-label');
+                const modeAppLabel      = document.getElementById('mode-app-label');
+                const uploadBtnLabel    = document.querySelector('label.upload-btn');
+                const specSavedName     = document.getElementById('spec-saved-name');
+                const appModeNote       = document.getElementById('app-mode-note');
+                const jobHistorySection = document.getElementById('job-history-section');
+                const appNoteHint       = document.getElementById('app-mode-notebook-hint');
+                const apiKeyPassField   = document.getElementById('api-key-pass-field');
+                const apiKeyCallout     = document.getElementById('api-key-callout');
+                const apiKeySourceRadios = document.querySelectorAll('input[name="api_key_source"]');
+                const providerSelect    = document.getElementById('field-provider');
+                const baseUrlField      = document.getElementById('base-url-field');
+                const modelNameField    = document.getElementById('model-name-field');
 
+                // ── Execution mode toggle ──────────────────────────────────────────
+                function applyExecutionMode(mode) {
+                    const isDomino = mode === 'domino';
+
+                    // Highlight the active toggle pill
+                    if (modeDominoLabel) modeDominoLabel.classList.toggle('active', isDomino);
+                    if (modeAppLabel)    modeAppLabel.classList.toggle('active', !isDomino);
+
+                    // Show/hide Domino-specific fields
+                    document.querySelectorAll('.domino-fields').forEach(function(el) {
+                        el.style.display = isDomino ? '' : 'none';
+                    });
+
+                    // App-mode upload button (label-based file picker)
+                    if (uploadBtnLabel) uploadBtnLabel.style.display = isDomino ? 'none' : '';
+
+                    // App-mode-only elements
+                    if (appModeNote)  appModeNote.style.display  = isDomino ? 'none' : '';
+                    if (appNoteHint)  appNoteHint.style.display  = isDomino ? 'none' : '';
+
+                    // Job history
+                    if (jobHistorySection) jobHistorySection.style.display = isDomino ? '' : 'none';
+
+                    // API key visibility
+                    if (!isDomino) {
+                        if (apiKeyPassField) apiKeyPassField.style.display = '';
+                    } else {
+                        const src = document.querySelector('input[name="api_key_source"]:checked');
+                        applyApiKeySource(src ? src.value : 'domino_env');
+                    }
+
+                    // Update HTMX polling on status panel
+                    const panel = document.getElementById('status-panel');
+                    if (panel) {
+                        panel.setAttribute('hx-get', isDomino ? 'domino-status' : 'status');
+                        panel.setAttribute('hx-trigger', isDomino ? 'every 10s' : 'every 2s');
+                        if (typeof htmx !== 'undefined') htmx.process(panel);
+                    }
+                }
+
+                // Wire clicks on the label elements directly (radio is hidden)
+                if (modeDominoLabel) {
+                    modeDominoLabel.addEventListener('click', function() {
+                        applyExecutionMode('domino');
+                    });
+                }
+                if (modeAppLabel) {
+                    modeAppLabel.addEventListener('click', function() {
+                        applyExecutionMode('app');
+                    });
+                }
+
+                // Apply on load based on which radio is checked
+                const checkedMode = document.querySelector('input[name="execution_mode"]:checked');
+                applyExecutionMode(checkedMode ? checkedMode.value : 'domino');
+
+                // ── API key source radio ───────────────────────────────────────────
+                function applyApiKeySource(src) {
+                    const show = src === 'pass_now';
+                    if (apiKeyPassField) apiKeyPassField.style.display = show ? '' : 'none';
+                    if (apiKeyCallout) {
+                        apiKeyCallout.style.display = show ? 'block' : 'none';
+                        if (!apiKeyCallout.textContent.trim()) {
+                            apiKeyCallout.textContent = '\u26a0 This key will be visible in the Domino job\u2019s environment metadata to project admins.';
+                        }
+                    }
+                }
+
+                apiKeySourceRadios.forEach(function(r) {
+                    r.addEventListener('change', function() { applyApiKeySource(this.value); });
+                });
+
+                const checkedSrc = document.querySelector('input[name="api_key_source"]:checked');
+                applyApiKeySource(checkedSrc ? checkedSrc.value : 'domino_env');
+
+                // ── Domino mode: spec auto-save via HTMX ─────────────────────────
+                const dominoSpecUpload = document.getElementById('domino-spec-upload');
+                if (dominoSpecUpload) {
+                    dominoSpecUpload.addEventListener('change', function(e) {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = function(evt) {
+                            const content = evt.target.result;
+                            // Send to /save-spec endpoint
+                            const fd = new FormData();
+                            fd.append('spec_filename', file.name);
+                            fd.append('spec_content', content);
+                            fetch('save-spec', { method: 'POST', body: fd })
+                                .then(function(r) { return r.text(); })
+                                .then(function(path) {
+                                    // Update hidden inputs and display name
+                                    const pathInput = document.getElementById('field-spec_path');
+                                    if (pathInput) pathInput.value = path.trim();
+                                    if (specSavedName) specSavedName.textContent = 'Saved: ' + file.name;
+                                    // Clear the content input since path is now used
+                                    const contentInput = document.getElementById('domino-spec-content');
+                                    if (contentInput) contentInput.value = '';
+                                });
+                        };
+                        reader.readAsText(file);
+                    });
+                }
+
+                // ── Toggle base URL and model name fields based on provider selection
                 function toggleOpenAIFields() {
                     const isOpenAI = providerSelect && providerSelect.value === 'openai';
                     if (baseUrlField) {
@@ -1478,6 +2180,23 @@ app, rt = fast_app(
 @rt("/")
 def index():
     default_spec = _get_default_spec_path()
+    username = _get_username()
+
+    # Determine initial status panel content based on latest Domino job
+    initial_status_panel: FT
+    latest_domino: Optional[DominoJobRecord] = None
+    if _DOMINO_AVAILABLE:
+        try:
+            domino_job_store.init_db()
+            jobs = domino_job_store.get_user_jobs(username, limit=1)
+            if jobs:
+                latest_domino = _db_record_to_dataclass(jobs[0])
+        except Exception:
+            pass
+
+    # Default to Domino mode if Domino is available
+    default_mode = "domino" if _DOMINO_AVAILABLE else "app"
+
     return Titled(
         "Auto Model Docs Studio",
         # Domino Header
@@ -1492,7 +2211,33 @@ def index():
                 cls="hero",
             ),
             Form(
-                # Two-column config grid
+                # Execution mode toggle (above config grid)
+                Div(
+                    Label(
+                        Input(
+                            type="radio",
+                            name="execution_mode",
+                            value="domino",
+                            checked=(default_mode == "domino"),
+                        ),
+                        "Run as Domino Job",
+                        cls="mode-toggle-option" + (" active" if default_mode == "domino" else ""),
+                        id="mode-domino-label",
+                    ),
+                    Label(
+                        Input(
+                            type="radio",
+                            name="execution_mode",
+                            value="app",
+                            checked=(default_mode == "app"),
+                        ),
+                        "Run in App",
+                        cls="mode-toggle-option" + (" active" if default_mode == "app" else ""),
+                        id="mode-app-label",
+                    ),
+                    cls="mode-toggle",
+                ),
+                # Three-column config grid
                 Div(
                     # Left card: Main Configuration
                     Div(
@@ -1508,6 +2253,7 @@ def index():
                                     value=str(default_spec),
                                     placeholder=str(default_spec),
                                 ),
+                                # App-mode upload button (hidden in Domino mode by JS)
                                 Label(
                                     "Upload",
                                     Input(
@@ -1522,6 +2268,24 @@ def index():
                             ),
                             Div(id="upload-filename", cls="upload-filename"),
                             cls="field",
+                        ),
+                        # Domino-mode spec upload (auto-save to /mnt/data)
+                        Div(
+                            # Hidden file input for Domino mode
+                            Label(
+                                Input(
+                                    type="file",
+                                    accept=".yaml,.yml",
+                                    id="domino-spec-upload",
+                                    cls="hidden-upload",
+                                ),
+                                "Upload spec",
+                                cls="upload-btn",
+                                style="margin-top: 0.35rem; display: inline-flex;",
+                            ),
+                            Span(id="spec-saved-name", cls="spec-saved-name"),
+                            Span("Upload to save the spec file to Domino dataset storage for the job to access.", cls="field-hint-text"),
+                            cls="domino-fields",
                         ),
                         # Code root
                         Div(
@@ -1545,11 +2309,134 @@ def index():
                             ),
                             cls="field",
                         ),
+                        # Domino-only: Branch selector
+                        Div(
+                            Label("Branch", for_="field-branch"),
+                            Select(
+                                Option("Loading branches...", value=""),
+                                name="branch",
+                                id="field-branch",
+                                hx_get="api/branches",
+                                hx_trigger="load",
+                                hx_swap="outerHTML",
+                            ),
+                            Span("Git branch to analyze in the Domino job.", cls="field-hint-text"),
+                            cls="field domino-fields",
+                        ),
                         cls="card",
                     ),
-                    # Right card: Options
+                    # Middle card: Options (limits, workers, artifact filters)
                     Div(
-                        Div("Options", cls="card-title"),
+                        Div(
+                            "Options",
+                            Span(" · Limits, workers, and artifact filters", cls="card-title-sub"),
+                            cls="card-title",
+                        ),
+                        # Artifact filtering
+                        Div(
+                            Div("Artifact filtering", cls="filter-section-title"),
+                            P("Limit which MLflow models and experiments to include. Leave blank to process all.", cls="filter-section-desc"),
+                            Div(
+                                Label("Model names", for_="field-model_names"),
+                                Input(
+                                    name="model_names",
+                                    id="field-model_names",
+                                    type="text",
+                                    placeholder="model1, churn*, fraud-*",
+                                ),
+                                Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
+                                cls="field",
+                            ),
+                            Div(
+                                Label("Experiment names", for_="field-experiment_names"),
+                                Input(
+                                    name="experiment_names",
+                                    id="field-experiment_names",
+                                    type="text",
+                                    placeholder="exp1, exp2, my-experiment*",
+                                ),
+                                Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
+                                cls="field",
+                            ),
+                            Label(
+                                Input(type="checkbox", name="latest_only", id="field-latest_only"),
+                                Span("Latest version only"),
+                                cls="checkbox-field",
+                            ),
+                            cls="filter-section",
+                        ),
+                        # Numeric options grid
+                        Div(
+                            Div(
+                                Label("Max files", for_="field-max_files"),
+                                Input(
+                                    name="max_files",
+                                    id="field-max_files",
+                                    type="number",
+                                    value="50",
+                                ),
+                                cls="field",
+                            ),
+                            Div(
+                                Label("Planning workers", for_="field-planning_workers"),
+                                Input(
+                                    name="planning_workers",
+                                    id="field-planning_workers",
+                                    type="number",
+                                    value="1",
+                                ),
+                                Span("Parallel LLM calls in the planning phase.", cls="field-hint-text"),
+                                cls="field",
+                            ),
+                            Div(
+                                Label("Generation workers", for_="field-workers"),
+                                Input(
+                                    name="workers",
+                                    id="field-workers",
+                                    type="number",
+                                    value="4",
+                                ),
+                                Span("Sections generated in parallel.", cls="field-hint-text"),
+                                cls="field",
+                            ),
+                            Div(
+                                Label("Timeout (s)", for_="field-timeout"),
+                                Input(
+                                    name="timeout",
+                                    id="field-timeout",
+                                    type="number",
+                                    value="120",
+                                ),
+                                Span("Seconds before a single LLM call times out.", cls="field-hint-text"),
+                                cls="field",
+                            ),
+                            cls="advanced-grid",
+                        ),
+                        # Verbose logging
+                        Label(
+                            Input(type="checkbox", name="verbose", id="field-verbose", checked=True),
+                            Span("Show detailed progress"),
+                            cls="checkbox-field",
+                        ),
+                        cls="card",
+                    ),
+                    # Right card: LLM & execution settings
+                    Div(
+                        Div("Settings", cls="card-title"),
+                        # Hardware tier (Domino only)
+                        Div(
+                            Label("Hardware tier", for_="field-hardware_tier"),
+                            Select(
+                                Option("Loading tiers...", value=""),
+                                name="hardware_tier",
+                                id="field-hardware_tier",
+                                hx_get="api/hardware-tiers",
+                                hx_trigger="load",
+                                hx_swap="outerHTML",
+                            ),
+                            Span("Compute tier for the Domino job.", cls="field-hint-text"),
+                            cls="field domino-fields",
+                        ),
                         # Provider dropdown
                         Div(
                             Label("Provider", for_="field-provider"),
@@ -1561,7 +2448,36 @@ def index():
                             ),
                             cls="field",
                         ),
-                        # API key (in-memory only while app is open)
+                        # API key source (Domino mode) — hidden by JS in app mode
+                        Div(
+                            Label("API key"),
+                            Div(
+                                Label(
+                                    Input(
+                                        type="radio",
+                                        name="api_key_source",
+                                        value="domino_env",
+                                        checked=True,
+                                    ),
+                                    "Domino environment variable (recommended)",
+                                    cls="api-key-source-option",
+                                ),
+                                Label(
+                                    Input(
+                                        type="radio",
+                                        name="api_key_source",
+                                        value="pass_now",
+                                    ),
+                                    "Set key",
+                                    cls="api-key-source-option",
+                                ),
+                                cls="api-key-source",
+                            ),
+                            Div(id="api-key-callout", cls="api-key-callout"),
+                            cls="field domino-fields",
+                            id="api-key-source-field",
+                        ),
+                        # API key input (shown for app mode, or Domino "pass_now")
                         Div(
                             Label("API key", Span(" *", cls="required-star"), for_="field-api_key"),
                             Input(
@@ -1573,6 +2489,8 @@ def index():
                                 spellcheck="false",
                             ),
                             cls="field",
+                            id="api-key-pass-field",
+                            style="display: none;" if default_mode == "domino" else "",
                         ),
                         # Model name (only shown for OpenAI provider)
                         Div(
@@ -1602,109 +2520,14 @@ def index():
                             id="base-url-field",
                             style="display: none;",
                         ),
-                        # Generate notebook checkbox (checked by default)
+                        # Generate notebook checkbox — app mode only
                         Label(
                             Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
                             Span("Generate notebook"),
                             cls="checkbox-field",
+                            id="app-mode-note",
                         ),
-                        Div("Saved alongside your document in the output directory.", cls="field-hint-text notebook-hint"),
-                        # Advanced section (collapsible)
-                        Details(
-                            Summary("Advanced options", Span("  ·  Limits, workers, and artifact filters", cls="advanced-summary-desc")),
-                            Div(
-                                Div(
-                                    Div(
-                                        Label("Max files", for_="field-max_files"),
-                                        Input(
-                                            name="max_files",
-                                            id="field-max_files",
-                                            type="number",
-                                            value="50",
-                                        ),
-                                        cls="field",
-                                    ),
-                                    Div(
-                                        Label("Planning workers", for_="field-planning_workers"),
-                                        Input(
-                                            name="planning_workers",
-                                            id="field-planning_workers",
-                                            type="number",
-                                            value="1",
-                                        ),
-                                        Span("Number of parallel LLM calls in the planning phase.", cls="field-hint-text"),
-                                        cls="field",
-                                    ),
-                                    Div(
-                                        Label("Generation workers", for_="field-workers"),
-                                        Input(
-                                            name="workers",
-                                            id="field-workers",
-                                            type="number",
-                                            value="4",
-                                        ),
-                                        Span("Number of sections generated in parallel.", cls="field-hint-text"),
-                                        cls="field",
-                                    ),
-                                    Div(
-                                        Label("Timeout (s)", for_="field-timeout"),
-                                        Input(
-                                            name="timeout",
-                                            id="field-timeout",
-                                            type="number",
-                                            value="120",
-                                        ),
-                                        Span("Seconds before a single LLM call times out.", cls="field-hint-text"),
-                                        cls="field",
-                                    ),
-                                    cls="advanced-grid",
-                                ),
-                                # Logging section
-                                Div(
-                                    Label(
-                                        Input(type="checkbox", name="verbose", id="field-verbose", checked=True),
-                                        Span("Show detailed progress"),
-                                        cls="checkbox-field",
-                                    ),
-                                    cls="field",
-                                ),
-                                # Filtering subsection
-                                Div(
-                                    Div("Artifact filtering", cls="filter-section-title"),
-                                    P("Limit which MLflow models and experiments to include. Leave blank to process all.", cls="filter-section-desc"),
-                                    Div(
-                                        Label("Model names", for_="field-model_names"),
-                                        Input(
-                                            name="model_names",
-                                            id="field-model_names",
-                                            type="text",
-                                            placeholder="model1, churn*, fraud-*",
-                                        ),
-                                        Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
-                                        cls="field",
-                                    ),
-                                    Div(
-                                        Label("Experiment names", for_="field-experiment_names"),
-                                        Input(
-                                            name="experiment_names",
-                                            id="field-experiment_names",
-                                            type="text",
-                                            placeholder="exp1, exp2, my-experiment*",
-                                        ),
-                                        Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
-                                        cls="field",
-                                    ),
-                                    Label(
-                                        Input(type="checkbox", name="latest_only", id="field-latest_only"),
-                                        Span("Latest version only"),
-                                        cls="checkbox-field",
-                                    ),
-                                    cls="filter-section",
-                                ),
-                                cls="advanced-content",
-                            ),
-                            cls="advanced-section",
-                        ),
+                        Div("Saved alongside your document in the output directory.", cls="field-hint-text notebook-hint", id="app-mode-notebook-hint"),
                         cls="card",
                     ),
                     cls="config-grid",
@@ -1720,13 +2543,27 @@ def index():
                 hx_encoding="multipart/form-data",
                 enctype="multipart/form-data",
             ),
-            # Terminal panel - render initial state directly, then poll for updates
+            # Terminal / status panel
             Div(
-                _render_status(_resolve_job(ACTIVE_JOB_ID)),
+                _render_domino_status(latest_domino) if (default_mode == "domino") else _render_status(_resolve_job(ACTIVE_JOB_ID)),
                 id="status-panel",
-                hx_get="status",
-                hx_trigger="every 2s",
+                hx_get="domino-status" if default_mode == "domino" else "status",
+                hx_trigger="every 10s" if default_mode == "domino" else "every 2s",
                 hx_swap="innerHTML",
+            ),
+            # Job history (Domino mode only)
+            Details(
+                Summary("My job history"),
+                Div(
+                    _render_job_history_table(username),
+                    id="job-history-content",
+                    hx_get="job-history",
+                    hx_trigger="every 15s",
+                    hx_swap="innerHTML",
+                ),
+                cls="job-history-section",
+                id="job-history-section",
+                style="" if default_mode == "domino" else "display: none;",
             ),
             cls="page",
         ),
@@ -1735,12 +2572,28 @@ def index():
 
 @rt("/run")
 async def run(req: Request):
+    job_request = await _parse_request(req)
+
+    if job_request.execution_mode == "domino" and _DOMINO_AVAILABLE:
+        username = _get_username()
+        try:
+            record = await _submit_domino_job(job_request, username)
+        except Exception as exc:
+            err_record = DominoJobRecord(
+                id=str(uuid4()),
+                username=username,
+                status="failed",
+                domino_status=str(exc),
+            )
+            return _render_domino_status(err_record)
+        return _render_domino_status(record)
+
+    # App mode (or Domino unavailable)
     active = _resolve_job(ACTIVE_JOB_ID)
     if active and active.status == "running":
         _log(active, "A job is already running. Please wait for completion.")
         return _render_status(active)
 
-    job_request = await _parse_request(req)
     job = _start_job(job_request)
     _log(job, "Job submitted.")
     return _render_status(job)
@@ -1799,7 +2652,137 @@ def download(job_id: str, artifact: str):
     return FileResponse(path, filename=path.name)
 
 
-import os
+@rt("/api/branches")
+def api_branches():
+    """Return an HTML <select> fragment with available git branches."""
+    if not _DOMINO_AVAILABLE:
+        return Select(Option("(Domino not available)", value=""), name="branch", id="field-branch")
+    branches = domino_client.list_branches()
+    options = [Option(b.get("name", ""), value=b.get("name", "")) for b in branches]
+    if not options:
+        options = [Option("main", value="main"), Option("master", value="master")]
+    return Select(*options, name="branch", id="field-branch")
+
+
+@rt("/api/hardware-tiers")
+def api_hardware_tiers():
+    """Return an HTML <select> fragment with available hardware tiers."""
+    if not _DOMINO_AVAILABLE:
+        return Select(Option("(Domino not available)", value=""), name="hardware_tier", id="field-hardware_tier")
+    tiers = domino_client.list_hardware_tiers()
+    default_tier = domino_client.get_project_default_tier()
+    options = []
+    for t in tiers:
+        name = t.get("name", "") or t.get("id", "")
+        is_default = name == default_tier
+        options.append(Option(name, value=name, selected=is_default))
+    if not options:
+        options = [Option("Small", value="Small")]
+    return Select(*options, name="hardware_tier", id="field-hardware_tier")
+
+
+@rt("/stop-domino")
+async def stop_domino(req: Request):
+    form = await req.form()
+    job_id = form.get("job_id")
+    username = _get_username()
+    if job_id and _DOMINO_AVAILABLE:
+        row = domino_job_store.get_job(job_id)
+        if row and row.get("domino_run_id"):
+            try:
+                domino_client.stop_job(row["domino_run_id"])
+            except Exception:
+                pass
+        if row:
+            domino_job_store.update_job(job_id, status="cancelled")
+            row = domino_job_store.get_job(job_id)
+            return _render_domino_status(_db_record_to_dataclass(row))
+    return _render_domino_status(None)
+
+
+@rt("/domino-status")
+def domino_status():
+    """Return the Domino job status panel for the latest active job of the current user."""
+    username = _get_username()
+    if not _DOMINO_AVAILABLE:
+        return _render_domino_status(None)
+    domino_job_store.init_db()
+    jobs = domino_job_store.get_user_jobs(username, limit=1)
+    if not jobs:
+        return _render_domino_status(None)
+    return _render_domino_status(_db_record_to_dataclass(jobs[0]))
+
+
+@rt("/job-history")
+def job_history():
+    username = _get_username()
+    return _render_job_history_table(username)
+
+
+@rt("/clear-job-history")
+def clear_job_history():
+    username = _get_username()
+    if _DOMINO_AVAILABLE:
+        domino_job_store.clear_terminal_jobs(username)
+    return _render_job_history_table(username)
+
+
+@rt("/save-spec")
+async def save_spec_route(req: Request):
+    """Auto-save an uploaded spec file and return the saved path."""
+    if not _DOMINO_AVAILABLE:
+        return Response("Domino not available", status_code=400)
+    form = await req.form()
+    filename = form.get("spec_filename", "spec.yaml")
+    content = form.get("spec_content", "")
+    saved = spec_store.save_spec(filename, content)
+    return Response(str(saved), media_type="text/plain")
+
+
+@rt("/spec-list")
+def spec_list():
+    """Return HTML list of saved spec files."""
+    if not _DOMINO_AVAILABLE:
+        return Div(P("Domino not available.", cls="history-empty"))
+    specs = spec_store.list_specs()
+    if not specs:
+        return Div(P("No saved spec files.", cls="history-empty"), id="spec-list-content")
+    items = []
+    for s in specs:
+        items.append(
+            Div(
+                Span(s["name"], style="font-family: monospace;"),
+                Span(f"{s['size_kb']} KB", style="color: var(--text-muted); margin: 0 0.75rem;"),
+                A(
+                    "Delete",
+                    hx_post="delete-spec",
+                    hx_vals=f'{{"filename": "{s["name"]}"}}',
+                    hx_target="#spec-list-content",
+                    hx_swap="innerHTML",
+                    style="color: var(--error); font-size: 0.75rem; cursor: pointer;",
+                ),
+                cls="spec-list-item",
+            )
+        )
+    return Div(*items, id="spec-list-content", cls="spec-list-modal")
+
+
+@rt("/delete-spec")
+async def delete_spec_route(req: Request):
+    form = await req.form()
+    filename = form.get("filename", "")
+    if filename and _DOMINO_AVAILABLE:
+        spec_store.delete_spec(filename)
+    return spec_list()
+
+
+@rt("/cleanup-specs")
+def cleanup_specs():
+    if _DOMINO_AVAILABLE:
+        spec_store.delete_all_specs()
+    return Response("OK", media_type="text/plain")
+
+
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Domino Apps run on 0.0.0.0:8888 by default
@@ -1823,5 +2806,20 @@ async def add_security_headers(request, call_next):
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "HX-Request, HX-Target, HX-Current-URL, Content-Type"
     return response
+
+@app.on_event("startup")
+async def _on_startup():
+    global _POLL_TASK
+    if _DOMINO_AVAILABLE:
+        domino_job_store.init_db()
+        _POLL_TASK = asyncio.create_task(_poll_domino_jobs())
+
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    global _POLL_TASK
+    if _POLL_TASK:
+        _POLL_TASK.cancel()
+
 
 serve(host=HOST, port=PORT)
