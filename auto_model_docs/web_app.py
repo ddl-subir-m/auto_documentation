@@ -310,7 +310,7 @@ def _render_status(job: Optional[JobState]) -> FT:
                 ),
                 cls="terminal-header",
             ),
-            Div("Awaiting your first run...", cls="terminal terminal-idle"),
+            Div("Configure your settings above and click Generate Documentation to create your first document.", cls="terminal terminal-idle"),
             cls="terminal-card",
         )
 
@@ -326,17 +326,23 @@ def _render_status(job: Optional[JobState]) -> FT:
         status_text = "CANCELLED"
 
     is_running = job.status == "running"
-    stop_link = A(
-        "Stop",
-        hx_post="stop",
-        hx_target="#status-panel",
-        hx_swap="innerHTML",
-        cls="terminal-action",
-    ) if is_running else A(
-        "Stop",
-        href="#",
-        cls="terminal-action terminal-action-disabled",
-    )
+    is_terminal = job.status in ("completed", "failed", "cancelled")
+    if is_running:
+        stop_link = A(
+            "Stop",
+            hx_post="stop",
+            hx_target="#status-panel",
+            hx_swap="innerHTML",
+            cls="terminal-action",
+        )
+    elif is_terminal:
+        stop_link = None
+    else:
+        stop_link = A(
+            "Stop",
+            href="#",
+            cls="terminal-action terminal-action-disabled",
+        )
 
     clear_link = A(
         "Clear",
@@ -369,7 +375,7 @@ def _render_status(job: Optional[JobState]) -> FT:
                 A(
                     "Download Notebook (.ipynb)",
                     href=f"download/{job.id}/notebook",
-                    cls="download-btn",
+                    cls="download-btn download-btn-secondary",
                     download=True,
                 )
             )
@@ -596,6 +602,7 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         
         console.print("\n[bold green]Generation complete![/bold green]")
         _log(job, "Generation complete.")
+        _log(job, "Use the download buttons above to save files to your machine.")
         if job.output_path:
             console.print(f"[cyan]Document:[/cyan] {job.output_path}")
             _log(job, f"Document: {job.output_path}")
@@ -880,11 +887,6 @@ app, rt = fast_app(
                 margin-bottom: 0.5rem;
                 color: var(--text-primary);
             }
-            .hero p {
-                color: var(--text-secondary);
-                font-size: 0.95rem;
-                margin: 0;
-            }
             
             /* Grid Layout - 2 columns */
             .config-grid {
@@ -908,14 +910,9 @@ app, rt = fast_app(
                 box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
                 transition: border-color 0.2s ease, transform 0.2s ease;
             }
-            .card:hover {
-                border-color: rgba(84, 63, 222, 0.3);
-            }
             .card-title {
-                font-size: 0.75rem;
+                font-size: 0.875rem;
                 font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
                 color: var(--text-secondary);
                 margin-bottom: 1rem;
             }
@@ -1071,10 +1068,8 @@ app, rt = fast_app(
                 border-top: 1px solid var(--panel-border);
             }
             .filter-section-title {
-                font-size: 0.7rem;
+                font-size: 0.875rem;
                 font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
                 color: var(--text-muted);
                 margin-bottom: 0.75rem;
             }
@@ -1084,13 +1079,32 @@ app, rt = fast_app(
             .filter-section .checkbox-field {
                 margin-top: 0.5rem;
             }
+            .required-star {
+                color: var(--error);
+                font-weight: 600;
+            }
             .field-hint-text {
                 display: block;
-                font-size: 0.7rem;
+                font-size: 0.75rem;
                 color: var(--text-muted);
                 margin-top: 0.25rem;
             }
             
+            .advanced-summary-desc {
+                font-weight: 400;
+                font-size: 0.75rem;
+                color: var(--text-muted);
+            }
+            .filter-section-desc {
+                font-size: 0.8rem;
+                color: var(--text-secondary);
+                margin-bottom: 0.75rem;
+                margin-top: -0.5rem;
+            }
+            .notebook-hint {
+                padding-left: 1.625rem;
+                margin-top: -0.5rem;
+            }
             /* Primary Button */
             .btn-row {
                 display: flex;
@@ -1211,14 +1225,14 @@ app, rt = fast_app(
                 margin-bottom: 0.3rem;
             }
             .phase-name {
-                font-size: 0.65rem;
+                font-size: 0.75rem;
                 font-weight: 600;
                 color: var(--text-muted);
                 text-transform: uppercase;
                 letter-spacing: 0.03em;
             }
             .phase-pct {
-                font-size: 0.6rem;
+                font-size: 0.7rem;
                 color: var(--text-muted);
                 font-family: ui-monospace, monospace;
             }
@@ -1227,7 +1241,7 @@ app, rt = fast_app(
                 font-size: 0.65rem;
             }
             .phase-bar {
-                height: 4px;
+                height: 6px;
                 background: #E0E0E0;
                 border-radius: 2px;
                 overflow: hidden;
@@ -1317,6 +1331,20 @@ app, rt = fast_app(
                 color: white;
             }
             .download-btn::before {
+                content: '↓';
+                font-size: 1rem;
+            }
+            .download-btn-secondary {
+                background: white;
+                color: var(--success);
+                border: 1.5px solid var(--success);
+            }
+            .download-btn-secondary:hover {
+                background: rgba(40, 164, 100, 0.05);
+                color: var(--success);
+                filter: none;
+            }
+            .download-btn-secondary::before {
                 content: '↓';
                 font-size: 1rem;
             }
@@ -1460,7 +1488,7 @@ def index():
         Div(
             # Hero Section
             Div(
-                P("Generate model documentation with a single, guided workflow."),
+                H1("Generate model documentation with a single, guided workflow."),
                 cls="hero",
             ),
             Form(
@@ -1471,7 +1499,7 @@ def index():
                         Div("Configuration", cls="card-title"),
                         # Spec file with inline upload
                         Div(
-                            Label("Spec file", for_="field-spec_path"),
+                            Label("Spec file", Span(" *", cls="required-star"), for_="field-spec_path"),
                             Div(
                                 Input(
                                     name="spec_path",
@@ -1535,7 +1563,7 @@ def index():
                         ),
                         # API key (in-memory only while app is open)
                         Div(
-                            Label("API key", for_="field-api_key"),
+                            Label("API key", Span(" *", cls="required-star"), for_="field-api_key"),
                             Input(
                                 name="api_key",
                                 id="field-api_key",
@@ -1580,9 +1608,10 @@ def index():
                             Span("Generate notebook"),
                             cls="checkbox-field",
                         ),
+                        Div("Saved alongside your document in the output directory.", cls="field-hint-text notebook-hint"),
                         # Advanced section (collapsible)
                         Details(
-                            Summary("Advanced options"),
+                            Summary("Advanced options", Span("  ·  Limits, workers, and artifact filters", cls="advanced-summary-desc")),
                             Div(
                                 Div(
                                     Div(
@@ -1603,6 +1632,7 @@ def index():
                                             type="number",
                                             value="1",
                                         ),
+                                        Span("Number of parallel LLM calls in the planning phase.", cls="field-hint-text"),
                                         cls="field",
                                     ),
                                     Div(
@@ -1613,16 +1643,18 @@ def index():
                                             type="number",
                                             value="4",
                                         ),
+                                        Span("Number of sections generated in parallel.", cls="field-hint-text"),
                                         cls="field",
                                     ),
                                     Div(
-                                        Label("Timeout", for_="field-timeout"),
+                                        Label("Timeout (s)", for_="field-timeout"),
                                         Input(
                                             name="timeout",
                                             id="field-timeout",
                                             type="number",
                                             value="120",
                                         ),
+                                        Span("Seconds before a single LLM call times out.", cls="field-hint-text"),
                                         cls="field",
                                     ),
                                     cls="advanced-grid",
@@ -1638,7 +1670,8 @@ def index():
                                 ),
                                 # Filtering subsection
                                 Div(
-                                    Div("Artifact Filtering", cls="filter-section-title"),
+                                    Div("Artifact filtering", cls="filter-section-title"),
+                                    P("Limit which MLflow models and experiments to include. Leave blank to process all.", cls="filter-section-desc"),
                                     Div(
                                         Label("Model names", for_="field-model_names"),
                                         Input(
