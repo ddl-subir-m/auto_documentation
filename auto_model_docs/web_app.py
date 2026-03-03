@@ -25,19 +25,27 @@ from autodoc.llm import LLMClient
 from autodoc.orchestrator import Orchestrator
 from autodoc.scanning import ContentSanitizer
 
-# Ensure sibling modules are importable regardless of how this script is launched
-import sys as _sys
-_this_dir = str(Path(__file__).resolve().parent)
-if _this_dir not in _sys.path:
-    _sys.path.insert(0, _this_dir)
+# Import sibling modules by absolute file path so it works regardless of
+# sys.path, PYTHONPATH, or how Domino launches the script.
+import importlib.util as _imputil
+
+def _import_sibling(name: str):
+    """Import a .py file from the same directory as this script."""
+    path = Path(__file__).resolve().parent / f"{name}.py"
+    spec = _imputil.spec_from_file_location(name, path)
+    mod = _imputil.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 try:
-    import domino_client
-    import domino_job_store
-    import spec_store
+    domino_client = _import_sibling("domino_client")
+    domino_job_store = _import_sibling("domino_job_store")
+    spec_store = _import_sibling("spec_store")
     _DOMINO_AVAILABLE = True
 except Exception as _imp_err:
-    logging.getLogger(__name__).warning("Domino modules not available: %s: %s", type(_imp_err).__name__, _imp_err)
+    import traceback as _tb
+    print(f"[web_app] Domino modules not available: {_imp_err}", flush=True)
+    _tb.print_exc()
     _DOMINO_AVAILABLE = False
 
 # Rich console for terminal output
