@@ -1077,20 +1077,6 @@ app, rt = fast_app(
                     setInterval(pollStatus, 2000);
                 }
 
-                // Load dynamic selects (branches, hardware tiers) when htmx is blocked
-                if (!htmxWorking) {
-                    function loadSelect(id, url) {
-                        var el = document.getElementById(id);
-                        if (!el) return;
-                        fetch(url)
-                            .then(function(r) { return r.text(); })
-                            .then(function(html) { el.outerHTML = html; })
-                            .catch(function(e) { console.log('Failed to load ' + id + ':', e); });
-                    }
-                    loadSelect('field-branch', 'api/branches');
-                    loadSelect('field-hardware_tier', 'api/hardware-tiers');
-                }
-                
                 // Direct click handler on Generate button - works regardless of htmx
                 var generateBtn = document.getElementById('generate-btn');
                 if (generateBtn) {
@@ -2211,6 +2197,25 @@ def index():
     # Default to Domino mode if Domino is available
     default_mode = "domino" if _DOMINO_AVAILABLE else "app"
 
+    # Pre-fetch branches and hardware tiers for server-side rendering
+    if _DOMINO_AVAILABLE:
+        branch_options = [Option(b["name"], value=b["name"]) for b in domino_client.list_branches()]
+        if not branch_options:
+            branch_options = [Option("main", value="main"), Option("master", value="master")]
+        tier_data = domino_client.list_hardware_tiers()
+        default_tier = domino_client.get_project_default_tier()
+        tier_options = []
+        for t in tier_data:
+            tid = t.get("id") or t.get("hardwareTierId") or ""
+            tname = t.get("name") or tid
+            is_default = (tid == default_tier or tname == default_tier)
+            tier_options.append(Option(tname, value=tname, selected=is_default))
+        if not tier_options:
+            tier_options = [Option("(default)", value="")]
+    else:
+        branch_options = [Option("(Domino not available)", value="")]
+        tier_options = [Option("(Domino not available)", value="")]
+
     return Titled(
         "Auto Model Docs Studio",
         # Domino Header
@@ -2327,12 +2332,9 @@ def index():
                         Div(
                             Label("Branch", for_="field-branch"),
                             Select(
-                                Option("Loading branches...", value=""),
+                                *branch_options,
                                 name="branch",
                                 id="field-branch",
-                                hx_get="api/branches",
-                                hx_trigger="load",
-                                hx_swap="outerHTML",
                             ),
                             Span("Git branch to analyze in the Domino job.", cls="field-hint-text"),
                             cls="field domino-fields",
@@ -2441,12 +2443,9 @@ def index():
                         Div(
                             Label("Hardware tier", for_="field-hardware_tier"),
                             Select(
-                                Option("Loading tiers...", value=""),
+                                *tier_options,
                                 name="hardware_tier",
                                 id="field-hardware_tier",
-                                hx_get="api/hardware-tiers",
-                                hx_trigger="load",
-                                hx_swap="outerHTML",
                             ),
                             Span("Compute tier for the Domino job.", cls="field-hint-text"),
                             cls="field domino-fields",
