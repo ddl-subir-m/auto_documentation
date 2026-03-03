@@ -2213,23 +2213,35 @@ def index():
     default_mode = "domino" if _DOMINO_AVAILABLE else "app"
 
     # Pre-fetch branches and hardware tiers for server-side rendering
+    _debug_info = f"_DOMINO_AVAILABLE={_DOMINO_AVAILABLE}"
     if _DOMINO_AVAILABLE:
-        branch_options = [Option(b["name"], value=b["name"]) for b in domino_client.list_branches()]
+        try:
+            _branches_raw = domino_client.list_branches()
+            _debug_info += f" | branches={len(_branches_raw)}"
+            branch_options = [Option(b["name"], value=b["name"]) for b in _branches_raw]
+        except Exception as _br_err:
+            _debug_info += f" | branch_err={_br_err}"
+            branch_options = []
         if not branch_options:
             branch_options = [Option("main", value="main"), Option("master", value="master")]
-        tier_data = domino_client.list_hardware_tiers()
-        default_tier = domino_client.get_project_default_tier()
-        tier_options = []
-        for t in tier_data:
-            tid = t.get("id") or t.get("hardwareTierId") or ""
-            tname = t.get("name") or tid
-            is_default = (tid == default_tier or tname == default_tier)
-            tier_options.append(Option(tname, value=tname, selected=is_default))
+        try:
+            tier_data = domino_client.list_hardware_tiers()
+            default_tier = domino_client.get_project_default_tier()
+            tier_options = []
+            for t in tier_data:
+                tid = t.get("id") or t.get("hardwareTierId") or ""
+                tname = t.get("name") or tid
+                is_default = (tid == default_tier or tname == default_tier)
+                tier_options.append(Option(tname, value=tname, selected=is_default))
+        except Exception as _tier_err:
+            _debug_info += f" | tier_err={_tier_err}"
+            tier_options = []
         if not tier_options:
             tier_options = [Option("(default)", value="")]
     else:
         branch_options = [Option("(Domino not available)", value="")]
         tier_options = [Option("(Domino not available)", value="")]
+    print(f"[web_app] index() render: {_debug_info}", flush=True)
 
     return Titled(
         "Auto Model Docs Studio",
@@ -2243,6 +2255,11 @@ def index():
             Div(
                 H1("Generate model documentation with a single, guided workflow."),
                 cls="hero",
+            ),
+            # Debug banner (remove after confirming fix)
+            Div(
+                f"[DEBUG v2] domino={_DOMINO_AVAILABLE} | branches={len(branch_options)} | tiers={len(tier_options)}",
+                style="background:#ff0;color:#000;padding:4px 8px;font-size:12px;font-family:monospace;",
             ),
             Form(
                 # Execution mode toggle (above config grid)
