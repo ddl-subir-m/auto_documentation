@@ -8,8 +8,10 @@ export APP_PORT="8888"
 # Ensure sibling modules (domino_client, domino_job_store, spec_store) are importable
 export PYTHONPATH="/mnt/code/auto_model_docs:/mnt/code:$PYTHONPATH"
 
-# Install dependencies (ensures packages are available even if not in base environment)
-pip install -r /mnt/code/requirements.txt
+# Install dependencies if requirements.txt exists
+if [ -f /mnt/code/requirements.txt ]; then
+    pip install -r /mnt/code/requirements.txt
+fi
 
 # Run the FastHTML web app
 cd /mnt/code/auto_model_docs

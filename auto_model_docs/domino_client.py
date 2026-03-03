@@ -61,28 +61,48 @@ def _auth_headers() -> dict[str, str]:
 def list_branches() -> list[dict[str, Any]]:
     """Return list of git branches for the current project.
 
-    Uses the REST API directly since the SDK does not expose this endpoint.
-    Returns a list of dicts with at least 'name' and 'sha' keys.
-    Falls back to an empty list with a warning on any error.
+    Reads branches from the local git repo (always available inside Domino
+    workspaces, jobs, and apps).  Falls back to an empty list on any error.
     """
-    host = _api_host()
-    owner = _project_owner()
-    project = _project_name()
-    if not all([host, owner, project]):
-        logger.warning("Domino environment variables not set; cannot list branches.")
-        return []
+    import subprocess
 
-    url = f"{host}/v1/projects/{owner}/{project}/refs/branches"
     try:
-        resp = requests.get(url, headers=_auth_headers(), timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        # Response shape: {"branches": [{"name": "...", "sha": "..."}, ...]}
-        branches = data.get("branches", data) if isinstance(data, dict) else data
-        return [b for b in branches if isinstance(b, dict)]
+        # Try remote branches first (gives the full list from origin)
+        result = subprocess.run(
+            ["git", "branch", "-r", "--format=%(refname:short)"],
+            capture_output=True, text=True, timeout=5,
+            cwd="/mnt/code",
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            branches = []
+            for line in result.stdout.strip().splitlines():
+                name = line.strip()
+                # Strip origin/ prefix and skip HEAD pointer
+                if name.startswith("origin/"):
+                    name = name[len("origin/"):]
+                if name == "HEAD" or "->" in name:
+                    continue
+                if name:
+                    branches.append({"name": name})
+            if branches:
+                return branches
+
+        # Fall back to local branches
+        result = subprocess.run(
+            ["git", "branch", "--format=%(refname:short)"],
+            capture_output=True, text=True, timeout=5,
+            cwd="/mnt/code",
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return [
+                {"name": line.strip()}
+                for line in result.stdout.strip().splitlines()
+                if line.strip()
+            ]
     except Exception as exc:
-        logger.warning("Failed to list branches: %s", exc)
-        return []
+        logger.warning("Failed to list branches from git: %s", exc)
+
+    return []
 
 
 def list_hardware_tiers() -> list[dict[str, Any]]:
