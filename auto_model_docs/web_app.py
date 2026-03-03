@@ -25,12 +25,19 @@ from autodoc.llm import LLMClient
 from autodoc.orchestrator import Orchestrator
 from autodoc.scanning import ContentSanitizer
 
+# Ensure sibling modules are importable regardless of how this script is launched
+import sys as _sys
+_this_dir = str(Path(__file__).resolve().parent)
+if _this_dir not in _sys.path:
+    _sys.path.insert(0, _this_dir)
+
 try:
     import domino_client
     import domino_job_store
     import spec_store
     _DOMINO_AVAILABLE = True
-except ImportError:
+except Exception as _imp_err:
+    logging.getLogger(__name__).warning("Domino modules not available: %s: %s", type(_imp_err).__name__, _imp_err)
     _DOMINO_AVAILABLE = False
 
 # Rich console for terminal output
