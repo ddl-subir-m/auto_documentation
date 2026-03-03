@@ -1076,6 +1076,20 @@ app, rt = fast_app(
                 if (!htmxWorking) {
                     setInterval(pollStatus, 2000);
                 }
+
+                // Load dynamic selects (branches, hardware tiers) when htmx is blocked
+                if (!htmxWorking) {
+                    function loadSelect(id, url) {
+                        var el = document.getElementById(id);
+                        if (!el) return;
+                        fetch(url)
+                            .then(function(r) { return r.text(); })
+                            .then(function(html) { el.outerHTML = html; })
+                            .catch(function(e) { console.log('Failed to load ' + id + ':', e); });
+                    }
+                    loadSelect('field-branch', 'api/branches');
+                    loadSelect('field-hardware_tier', 'api/hardware-tiers');
+                }
                 
                 // Direct click handler on Generate button - works regardless of htmx
                 var generateBtn = document.getElementById('generate-btn');
