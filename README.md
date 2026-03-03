@@ -4,9 +4,6 @@ Automatically generate professional ML model documentation from Python codebases
 
 Auto Model Docs scans your ML codebase, queries MLflow for model metadata (metrics, parameters, artifacts), and uses an LLM to produce comprehensive Word documents and Jupyter notebooks — no manual writing required.
 
-<p align="center">
-  <img src="diagrams/screenshots/auto_model_full_screen.png" alt="Web UI" width="800"/>
-</p>
 
 ## Key Features
 
