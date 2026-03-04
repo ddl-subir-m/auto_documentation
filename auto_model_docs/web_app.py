@@ -555,7 +555,7 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
         _log(job, f"Model: {settings.get_model_name()}")
 
         if request.spec_content:
-            spec_path = output_dir / "doc_spec.uploaded.yaml"
+            spec_path = output_dir / f"doc_spec.{uuid4().hex[:12]}.uploaded.yaml"
             spec_path.write_text(request.spec_content)
             job.spec_path = spec_path
             _log(job, f"Uploaded spec saved to: {spec_path}")
@@ -703,6 +703,13 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
                 log_handler.close()
             except Exception:
                 pass  # Don't let cleanup errors break anything
+        # Clean up uploaded spec file (no-op if cancellation already cleared it)
+        if getattr(job, 'spec_path', None) and job.spec_path.exists():
+            try:
+                job.spec_path.unlink()
+            except Exception:
+                pass
+            job.spec_path = None
 
 
 async def _parse_request(req: Request) -> JobRequest:
