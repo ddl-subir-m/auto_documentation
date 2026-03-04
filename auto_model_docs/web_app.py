@@ -37,6 +37,7 @@ def _import_sibling(name: str):
     spec.loader.exec_module(mod)
     return mod
 
+_DOMINO_IMPORT_ERROR = ""
 try:
     domino_client = _import_sibling("domino_client")
     domino_job_store = _import_sibling("domino_job_store")
@@ -44,7 +45,7 @@ try:
     _DOMINO_AVAILABLE = True
 except Exception as _imp_err:
     import traceback as _tb
-    print(f"[web_app] Domino modules not available: {_imp_err}", flush=True)
+    _DOMINO_IMPORT_ERROR = f"{type(_imp_err).__name__}: {_imp_err}"
     _tb.print_exc()
     _DOMINO_AVAILABLE = False
 
@@ -2258,7 +2259,7 @@ def index():
             ),
             # Debug banner (remove after confirming fix)
             Div(
-                f"[DEBUG v2] domino={_DOMINO_AVAILABLE} | branches={len(branch_options)} | tiers={len(tier_options)}",
+                f"[DEBUG v3] domino={_DOMINO_AVAILABLE} | branches={len(branch_options)} | tiers={len(tier_options)} | err={_DOMINO_IMPORT_ERROR or 'none'} | file={__file__}",
                 style="background:#ff0;color:#000;padding:4px 8px;font-size:12px;font-family:monospace;",
             ),
             Form(
