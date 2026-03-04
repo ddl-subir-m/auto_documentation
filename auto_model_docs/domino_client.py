@@ -6,8 +6,6 @@ import logging
 import os
 from typing import Any, Optional
 
-import requests
-
 logger = logging.getLogger(__name__)
 
 # Domino status → local status mapping
@@ -51,11 +49,6 @@ def _project_owner() -> str:
 
 def _project_name() -> str:
     return os.environ.get("DOMINO_PROJECT_NAME", "")
-
-
-def _auth_headers() -> dict[str, str]:
-    api_key = os.environ.get("DOMINO_USER_API_KEY", "")
-    return {"X-Domino-Api-Key": api_key} if api_key else {}
 
 
 def list_branches() -> list[dict[str, Any]]:
@@ -108,50 +101,45 @@ def list_branches() -> list[dict[str, Any]]:
 def list_hardware_tiers() -> list[dict[str, Any]]:
     """Return available hardware tiers for the current project.
 
-    Returns a list of dicts with at least 'id', 'name' keys.
+    Returns a list of dicts with 'id' and 'name' keys.
     Falls back to empty list on any error.
     """
-    host = _api_host()
-    if not host:
-        return []
-
-    url = f"{host}/v1/hardwareTiers"
     try:
-        resp = requests.get(url, headers=_auth_headers(), timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        tiers = data.get("hardwareTiers", data) if isinstance(data, dict) else data
-        return [t for t in tiers if isinstance(t, dict)]
+        domino = _get_domino()
+        raw = domino.hardware_tiers_list()
+        return [
+            {
+                "id": t["hardwareTier"]["id"],
+                "name": t["hardwareTier"]["name"],
+                "isDefault": t.get("hardwareTier", {}).get("hwtFlags", {}).get("isDefault", False),
+            }
+            for t in raw
+            if isinstance(t, dict) and "hardwareTier" in t
+        ]
     except Exception as exc:
         logger.warning("Failed to list hardware tiers: %s", exc)
         return []
 
 
 def get_project_default_tier() -> Optional[str]:
-    """Return the default hardware tier name for the project.
+    """Return the default hardware tier ID for the project.
 
     Checks env var AUTODOC_DEFAULT_HARDWARE_TIER first, then
-    DOMINO_DEFAULT_HARDWARE_TIER_ID.  Falls back to None.
+    DOMINO_HARDWARE_TIER_ID (the tier of the current workspace/app).
+    Falls back to None (list_hardware_tiers returns isDefault flag).
     """
     override = os.environ.get("AUTODOC_DEFAULT_HARDWARE_TIER")
     if override:
         return override
-    return os.environ.get("DOMINO_DEFAULT_HARDWARE_TIER_ID") or None
+    return os.environ.get("DOMINO_HARDWARE_TIER_ID") or None
 
 
 def submit_job(
     command: list[str],
     branch: Optional[str],
-    tier_name: Optional[str],
-    extra_env: Optional[dict[str, str]] = None,
+    tier_id: Optional[str] = None,
 ) -> str:
-    """Submit a Domino job and return the run ID.
-
-    Passes *branch* as commit_id so Domino resolves the latest commit on that
-    branch.  If Domino cannot resolve the branch (e.g. shallow clone), retries
-    without commit_id.
-    """
-    owner = _project_owner()
+    """Submit a Domino job and return the run ID."""
     project = _project_name()
     title = f"AutoDoc: {project}" + (f" ({branch})" if branch else "")
 
@@ -161,28 +149,10 @@ def submit_job(
     command_str = " ".join(command) if isinstance(command, list) else command
 
     kwargs: dict[str, Any] = {"title": title}
-    if tier_name:
-        kwargs["hardware_tier_name"] = tier_name
-    if extra_env:
-        kwargs["environment_variables"] = extra_env
+    if tier_id:
+        kwargs["hardware_tier_id"] = tier_id
 
-    try:
-        response = domino.job_start(
-            command=command_str,
-            commit_id=branch,
-            **kwargs,
-        )
-    except Exception as exc:
-        err_msg = str(exc).lower()
-        if "commit" in err_msg or "branch" in err_msg or "ref" in err_msg:
-            logger.warning(
-                "Branch '%s' could not be resolved; retrying without commit_id. Error: %s",
-                branch,
-                exc,
-            )
-            response = domino.job_start(command=command_str, **kwargs)
-        else:
-            raise
+    response = domino.job_start(command=command_str, **kwargs)
 
     # The SDK returns different shapes across versions; extract run ID robustly.
     if isinstance(response, dict):
@@ -218,9 +188,9 @@ def get_job_status(run_id: str) -> dict[str, Any]:
 
     if isinstance(resp, dict):
         raw = (
-            resp.get("status")
+            resp.get("statuses", {}).get("executionStatus", "")
+            or resp.get("status")
             or resp.get("jobStatus")
-            or resp.get("statuses", {}).get("executionStatus", "")
             or ""
         )
     elif hasattr(resp, "status"):
@@ -252,9 +222,59 @@ def stop_job(run_id: str) -> None:
         logger.warning("Failed to stop run %s: %s", run_id, exc)
 
 
-def build_job_url(run_id: str) -> str:
+def _normalize_domino_ui_host(raw: str | None) -> str | None:
+    """Normalize a Domino host value into a UI-safe base URL."""
+    from urllib.parse import urlparse, urlunparse
+
+    if not raw or not raw.strip():
+        return None
+    candidate = raw.strip()
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+
+    hostname = (parsed.hostname or "").strip()
+    if not hostname:
+        return None
+
+    # Domino UI links should resolve to tenant root, not apps subdomain.
+    if hostname.startswith("apps."):
+        hostname = hostname[len("apps."):]
+    if not hostname:
+        return None
+
+    netloc = f"{hostname}:{parsed.port}" if parsed.port else hostname
+    return urlunparse((parsed.scheme, netloc, "", "", "", ""))
+
+
+def _resolve_domino_ui_host() -> str | None:
+    """Resolve preferred Domino tenant host for user-facing links.
+
+    Tries each candidate in priority order, returning the first that
+    normalizes to a valid URL.
+    """
+    for raw in (
+        os.environ.get("DOMINO_USER_HOST"),
+        os.environ.get("DOMINO_EXTERNAL_HOST"),
+        os.environ.get("DOMINO_LINK_HOST"),
+        os.environ.get("DOMINO_API_HOST"),
+    ):
+        normalized = _normalize_domino_ui_host(raw)
+        if normalized:
+            return normalized.rstrip("/")
+    return None
+
+
+def build_job_url(run_id: str) -> str | None:
     """Return the Domino UI URL for the given run."""
-    host = _api_host()
+    host = _resolve_domino_ui_host()
+    if not host:
+        return None
     owner = _project_owner()
     project = _project_name()
-    return f"{host}/u/{owner}/{project}/runs/{run_id}"
+    if not owner or not project:
+        return None
+    return f"{host}/jobs/{owner}/{project}/{run_id}/logs?status=all"

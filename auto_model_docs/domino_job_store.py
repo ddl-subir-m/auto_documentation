@@ -47,11 +47,17 @@ def init_db() -> None:
                 domino_status   TEXT,
                 job_url         TEXT,
                 spec_path       TEXT,
+                command         TEXT,
                 submitted_at    TEXT,
                 completed_at    TEXT
             )
             """
         )
+        # Migration: add command column to existing tables
+        try:
+            con.execute("ALTER TABLE domino_jobs ADD COLUMN command TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 def _now_iso() -> str:
@@ -63,6 +69,7 @@ def create_job(
     branch: Optional[str],
     tier: Optional[str],
     spec_path: Optional[str],
+    command: Optional[str] = None,
     job_id: Optional[str] = None,
 ) -> str:
     """Insert a new job row and return its id."""
@@ -73,10 +80,10 @@ def create_job(
         con.execute(
             """
             INSERT INTO domino_jobs
-                (id, username, branch, hardware_tier, status, spec_path, submitted_at)
-            VALUES (?, ?, ?, ?, 'queued', ?, ?)
+                (id, username, branch, hardware_tier, status, spec_path, command, submitted_at)
+            VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)
             """,
-            (jid, username, branch, tier, spec_path, _now_iso()),
+            (jid, username, branch, tier, spec_path, command, _now_iso()),
         )
     return jid
 

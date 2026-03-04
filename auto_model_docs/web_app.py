@@ -904,6 +904,24 @@ def _render_job_history_table(username: str) -> FT:
     )
 
 
+def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
+    """Build the CLI command list for a Domino job from a JobRequest."""
+    command = ["python", "/mnt/code/auto_model_docs/main.py"]
+    if spec_path:
+        command += ["--spec", spec_path]
+    if req.provider:
+        command += ["--provider", req.provider]
+    if req.model:
+        command += ["--model", req.model]
+    if req.code_root:
+        command += ["--code-root", req.code_root]
+    if req.output_dir:
+        command += ["--output-dir", req.output_dir]
+    if req.max_files:
+        command += ["--max-files", str(req.max_files)]
+    return command
+
+
 async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     """Submit or queue a Domino job and persist it to SQLite."""
     if not _DOMINO_AVAILABLE:
@@ -920,12 +938,16 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     elif req.spec_path:
         spec_path = req.spec_path
 
-    # Create the DB row first (status=queued)
+    # Build command and create the DB row (status=queued)
+    command = _build_job_command(req, spec_path)
+    command_str = " ".join(command)
+
     job_id = domino_job_store.create_job(
         username=username,
         branch=req.branch,
         tier=req.hardware_tier,
         spec_path=spec_path,
+        command=command_str,
     )
 
     # count_active_jobs includes the row we just created (status=queued)
@@ -938,30 +960,11 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
 
     # Submit immediately
     try:
-        extra_env: dict[str, str] = {}
-        if req.api_key_source == "pass_now" and req.api_key:
-            provider_upper = req.provider.upper()
-            extra_env[f"{provider_upper}_API_KEY"] = req.api_key
-
-        command = ["python", "/mnt/code/auto_model_docs/main.py"]
-        if spec_path:
-            command += ["--spec", spec_path]
-        if req.provider:
-            command += ["--provider", req.provider]
-        if req.model:
-            command += ["--model", req.model]
-        if req.code_root:
-            command += ["--code-root", req.code_root]
-        if req.output_dir:
-            command += ["--output-dir", req.output_dir]
-        if req.max_files:
-            command += ["--max-files", str(req.max_files)]
 
         run_id = domino_client.submit_job(
             command=command,
             branch=req.branch,
-            tier_name=req.hardware_tier,
-            extra_env=extra_env or None,
+            tier_id=req.hardware_tier or None,
         )
         job_url = domino_client.build_job_url(run_id)
         domino_job_store.update_job(
@@ -1040,14 +1043,17 @@ async def _poll_domino_jobs() -> None:
                     oldest = domino_job_store.get_oldest_queued_job(username)
                     if oldest:
                         try:
-                            spec_path = oldest.get("spec_path")
-                            command = ["python", "/mnt/code/auto_model_docs/main.py"]
-                            if spec_path:
-                                command += ["--spec", spec_path]
+                            stored_cmd = oldest.get("command") or ""
+                            if not stored_cmd:
+                                # Fallback for rows created before command column existed
+                                sp = oldest.get("spec_path")
+                                stored_cmd = "python /mnt/code/auto_model_docs/main.py"
+                                if sp:
+                                    stored_cmd += f" --spec {sp}"
                             run_id = domino_client.submit_job(
-                                command=command,
+                                command=stored_cmd,
                                 branch=oldest.get("branch"),
-                                tier_name=oldest.get("hardware_tier"),
+                                tier_id=oldest.get("hardware_tier"),
                             )
                             job_url = domino_client.build_job_url(run_id)
                             domino_job_store.update_job(
@@ -2241,10 +2247,10 @@ def index():
             default_tier = domino_client.get_project_default_tier()
             tier_options = []
             for t in tier_data:
-                tid = t.get("id") or t.get("hardwareTierId") or ""
+                tid = t.get("id", "")
                 tname = t.get("name") or tid
-                is_default = (tid == default_tier or tname == default_tier)
-                tier_options.append(Option(tname, value=tname, selected=is_default))
+                is_default = t.get("isDefault", False) or tid == default_tier
+                tier_options.append(Option(tname, value=tid, selected=is_default))
         except Exception:
             tier_options = []
         if not tier_options:
@@ -2723,11 +2729,12 @@ def api_hardware_tiers():
     default_tier = domino_client.get_project_default_tier()
     options = []
     for t in tiers:
-        name = t.get("name", "") or t.get("id", "")
-        is_default = name == default_tier
-        options.append(Option(name, value=name, selected=is_default))
+        tid = t.get("id", "")
+        tname = t.get("name") or tid
+        is_default = t.get("isDefault", False) or tid == default_tier
+        options.append(Option(tname, value=tid, selected=is_default))
     if not options:
-        options = [Option("Small", value="Small")]
+        options = [Option("(default)", value="")]
     return Select(*options, name="hardware_tier", id="field-hardware_tier")
 
 
