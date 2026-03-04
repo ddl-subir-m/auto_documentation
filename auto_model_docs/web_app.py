@@ -799,7 +799,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
 
     # Stop button
     stop_btn = None
-    if status in ("submitted", "running"):
+    if status in ("queued", "submitted", "running"):
         stop_btn = A(
             "Stop",
             hx_post="stop-domino",
@@ -808,8 +808,6 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
             hx_swap="innerHTML",
             cls="terminal-action",
         )
-    elif status in ("queued",):
-        stop_btn = A("Stop", href="#", cls="terminal-action terminal-action-disabled")
 
     # Job link
     job_link = None
