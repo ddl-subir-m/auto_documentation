@@ -2074,29 +2074,41 @@ app, rt = fast_app(
                 const checkedSrc = document.querySelector('input[name="api_key_source"]:checked');
                 applyApiKeySource(checkedSrc ? checkedSrc.value : 'domino_env');
 
-                // ── Domino mode: spec auto-save via HTMX ─────────────────────────
+                // ── Domino mode: spec auto-save via fetch ────────────────────────
                 const dominoSpecUpload = document.getElementById('domino-spec-upload');
                 if (dominoSpecUpload) {
                     dominoSpecUpload.addEventListener('change', function(e) {
                         const file = e.target.files[0];
                         if (!file) return;
+
+                        // Disable Generate button until upload completes
+                        var genBtn = document.getElementById('generate-btn');
+                        if (genBtn) { genBtn.disabled = true; genBtn.textContent = 'Uploading spec...'; }
+                        if (specSavedName) { specSavedName.textContent = 'Uploading ' + file.name + '...'; specSavedName.style.color = ''; }
+
                         const reader = new FileReader();
                         reader.onload = function(evt) {
                             const content = evt.target.result;
-                            // Send to /save-spec endpoint
                             const fd = new FormData();
                             fd.append('spec_filename', file.name);
                             fd.append('spec_content', content);
                             fetch('save-spec', { method: 'POST', body: fd })
-                                .then(function(r) { return r.text(); })
+                                .then(function(r) {
+                                    if (!r.ok) throw new Error('Server returned ' + r.status);
+                                    return r.text();
+                                })
                                 .then(function(path) {
-                                    // Update hidden inputs and display name
-                                    const pathInput = document.getElementById('field-spec_path');
+                                    var pathInput = document.getElementById('field-spec_path');
                                     if (pathInput) pathInput.value = path.trim();
-                                    if (specSavedName) specSavedName.textContent = 'Saved: ' + file.name;
-                                    // Clear the content input since path is now used
-                                    const contentInput = document.getElementById('domino-spec-content');
+                                    if (specSavedName) { specSavedName.textContent = 'Saved: ' + file.name; specSavedName.style.color = '#2e7d32'; }
+                                    var contentInput = document.getElementById('domino-spec-content');
                                     if (contentInput) contentInput.value = '';
+                                })
+                                .catch(function(err) {
+                                    if (specSavedName) { specSavedName.textContent = 'Upload failed: ' + err.message; specSavedName.style.color = '#c62828'; }
+                                })
+                                .finally(function() {
+                                    if (genBtn) { genBtn.disabled = false; genBtn.textContent = 'Generate Documentation'; }
                                 });
                         };
                         reader.readAsText(file);
