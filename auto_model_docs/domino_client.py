@@ -134,6 +134,34 @@ def get_project_default_tier() -> Optional[str]:
     return os.environ.get("DOMINO_HARDWARE_TIER_ID") or None
 
 
+def _resolve_git_commit(branch: Optional[str] = None) -> Optional[str]:
+    """Resolve the HEAD commit hash from the local git repo.
+
+    Tries the specified branch first, then falls back to HEAD.
+    Returns None if git is unavailable.
+    """
+    import subprocess
+
+    refs_to_try = []
+    if branch:
+        refs_to_try.append(f"origin/{branch}")
+        refs_to_try.append(branch)
+    refs_to_try.append("HEAD")
+
+    for ref in refs_to_try:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", ref],
+                capture_output=True, text=True, timeout=5,
+                cwd="/mnt/code",
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            continue
+    return None
+
+
 def submit_job(
     command: list[str],
     branch: Optional[str],
@@ -162,6 +190,11 @@ def submit_job(
         if "main_repo_git_ref" in str(exc) and branch:
             logger.warning("SDK does not support main_repo_git_ref, retrying without branch: %s", exc)
             kwargs.pop("main_repo_git_ref", None)
+            # Fall back to commit_id so the job gets a valid code snapshot
+            commit_id = _resolve_git_commit(branch)
+            if commit_id:
+                kwargs["commit_id"] = commit_id
+                logger.info("Falling back to commit_id=%s for branch %s", commit_id, branch)
             response = domino.job_start(command=command_str, **kwargs)
         else:
             raise
