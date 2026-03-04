@@ -155,7 +155,16 @@ def submit_job(
         kwargs["main_repo_git_ref"] = {"type": "branch", "value": branch}
 
     logger.info("Submitting Domino job: command=%r, kwargs=%r", command_str, kwargs)
-    response = domino.job_start(command=command_str, **kwargs)
+    try:
+        response = domino.job_start(command=command_str, **kwargs)
+    except TypeError as exc:
+        # Older SDK versions may not support main_repo_git_ref
+        if "main_repo_git_ref" in str(exc) and branch:
+            logger.warning("SDK does not support main_repo_git_ref, retrying without branch: %s", exc)
+            kwargs.pop("main_repo_git_ref", None)
+            response = domino.job_start(command=command_str, **kwargs)
+        else:
+            raise
     logger.info("Domino job_start response: %r", response)
 
     # The SDK returns different shapes across versions; extract run ID robustly.
