@@ -2218,12 +2218,14 @@ app, rt = fast_app(
                         }
                     }
 
-                    // Update HTMX polling on status panel
+                    // Update HTMX polling on status panel and fetch immediately
                     const panel = document.getElementById('status-panel');
-                    if (panel) {
-                        panel.setAttribute('hx-get', isDomino ? 'domino-status' : 'status');
+                    if (panel && typeof htmx !== 'undefined') {
+                        const url = isDomino ? 'domino-status' : 'status';
+                        panel.setAttribute('hx-get', url);
                         panel.setAttribute('hx-trigger', isDomino ? 'every 10s' : 'every 2s');
-                        if (typeof htmx !== 'undefined') htmx.process(panel);
+                        htmx.process(panel);
+                        htmx.ajax('GET', url, {target: '#status-panel', swap: 'innerHTML'});
                     }
 
                     // Update output directory default for the selected mode
