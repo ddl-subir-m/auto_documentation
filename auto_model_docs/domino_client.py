@@ -154,7 +154,9 @@ def submit_job(
     if branch:
         kwargs["main_repo_git_ref"] = {"type": "branch", "value": branch}
 
+    logger.info("Submitting Domino job: command=%r, kwargs=%r", command_str, kwargs)
     response = domino.job_start(command=command_str, **kwargs)
+    logger.info("Domino job_start response: %r", response)
 
     # The SDK returns different shapes across versions; extract run ID robustly.
     if isinstance(response, dict):

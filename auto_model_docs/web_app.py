@@ -3127,11 +3127,53 @@ async def add_security_headers(request, call_next):
     response.headers["Access-Control-Allow-Headers"] = "HX-Request, HX-Target, HX-Current-URL, Content-Type"
     return response
 
+def _reconcile_stale_jobs() -> None:
+    """On startup, sync any jobs stuck in active states with Domino's actual status."""
+    import sqlite3
+    logger = logging.getLogger(__name__)
+    try:
+        domino_job_store.init_db()
+        db_path = domino_job_store._db_path()
+        con = sqlite3.connect(str(db_path))
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT * FROM domino_jobs WHERE status IN ('queued', 'submitted', 'running')"
+        ).fetchall()
+        stale_jobs = [dict(r) for r in rows]
+        con.close()
+
+        for job in stale_jobs:
+            run_id = job.get("domino_run_id")
+            if not run_id:
+                # Queued but never submitted — mark as failed so it doesn't block
+                logger.info("Marking stale queued job %s as failed (no Domino run ID)", job["id"])
+                domino_job_store.update_job(job["id"], status="failed", domino_status="Stale: never submitted")
+                continue
+            try:
+                status_info = domino_client.get_job_status(run_id)
+                local_status = status_info["local_status"]
+                domino_status = status_info["domino_status"]
+                update_fields: dict[str, Any] = {
+                    "status": local_status,
+                    "domino_status": domino_status,
+                }
+                if local_status in ("succeeded", "failed", "cancelled"):
+                    update_fields["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
+                domino_job_store.update_job(job["id"], **update_fields)
+                logger.info("Reconciled job %s (run %s): %s", job["id"], run_id, local_status)
+            except Exception as exc:
+                logger.warning("Failed to reconcile job %s (run %s): %s", job["id"], run_id, exc)
+                domino_job_store.update_job(job["id"], status="failed", domino_status=f"Reconcile error: {exc}")
+    except Exception as exc:
+        logger.warning("Startup job reconciliation failed: %s", exc)
+
+
 @app.on_event("startup")
 async def _on_startup():
     global _POLL_TASK
     if _DOMINO_AVAILABLE:
         domino_job_store.init_db()
+        _reconcile_stale_jobs()
         _POLL_TASK = asyncio.create_task(_poll_domino_jobs())
 
 
