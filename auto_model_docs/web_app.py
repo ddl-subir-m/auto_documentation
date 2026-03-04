@@ -375,6 +375,7 @@ def _render_status(job: Optional[JobState]) -> FT:
             ),
             Div("Click Generate Documentation to generate your first document.", cls="terminal terminal-idle"),
             cls="terminal-card",
+            data_job_status="idle",
         )
 
     # Show more logs when verbose mode is on (last 500 lines vs 200)
@@ -462,6 +463,7 @@ def _render_status(job: Optional[JobState]) -> FT:
         *download_section,
         Pre(log_text, cls="terminal"),
         cls="terminal-card",
+        data_job_status=job.status,
     )
 
 
@@ -789,6 +791,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
                 cls="terminal terminal-idle",
             ),
             cls="terminal-card",
+            data_job_status="idle",
         )
 
     status = record.status
@@ -845,6 +848,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
         Pre(status_text, cls="terminal"),
         id="domino-status-inner",
         cls="terminal-card",
+        data_job_status=status,
     )
 
 
@@ -1269,17 +1273,20 @@ app, rt = fast_app(
                 letter-spacing: -0.01em;
             }
 
-            /* Page Layout */
+            /* Page Layout — fill viewport below header */
             .page {
                 max-width: 1500px;
                 margin: 0 auto;
-                padding: 2rem;
+                padding: 1rem 2rem 2rem;
                 box-sizing: border-box;
                 width: 100%;
+                display: flex;
+                flex-direction: column;
+                min-height: calc(100vh - 48px); /* 48px = header height */
             }
             .hero {
                 text-align: left;
-                padding: 0.5rem 0 1.25rem 0;
+                padding: 0.25rem 0 0.75rem 0;
             }
             .hero .hero-tagline {
                 font-size: 1.125rem;
@@ -1293,8 +1300,10 @@ app, rt = fast_app(
             .config-grid {
                 display: grid;
                 grid-template-columns: repeat(3, 1fr);
+                grid-template-rows: 1fr;
                 gap: 1rem;
                 margin-bottom: 1rem;
+                flex: 1;
             }
             @media (max-width: 1100px) {
                 .config-grid {
@@ -1310,6 +1319,8 @@ app, rt = fast_app(
             /* Cards */
             .config-grid .card {
                 min-width: 0; /* allow shrinking so content fits viewport */
+                display: flex;
+                flex-direction: column;
             }
             .card {
                 background: var(--panel);
@@ -1617,6 +1628,12 @@ app, rt = fast_app(
             .notebook-hint {
                 padding-left: 1.625rem;
                 margin-top: -0.5rem;
+            }
+            /* Form stretches to fill left column */
+            .split-left form {
+                display: flex;
+                flex-direction: column;
+                flex: 1;
             }
             /* Primary Button - right-aligned, normal size */
             .btn-row {
@@ -2087,17 +2104,17 @@ app, rt = fast_app(
             }
             .spec-list-item:last-child { border-bottom: none; }
 
-            /* Left/right split layout */
-            .page-split { display: flex; gap: 1.5rem; align-items: stretch; }
-            .split-left { flex: 1 1 0; min-width: 0; }
+            /* Left/right split layout — stretch to fill page */
+            .page-split { display: flex; gap: 1.5rem; align-items: stretch; flex: 1; }
+            .split-left { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
             .split-right {
                 flex: 0 0 clamp(300px, 28%, 380px);
                 display: flex;
                 flex-direction: column;
-                align-self: flex-start;
             }
             .output-panel {
                 flex: 1;
+                min-height: 0;
                 background: var(--panel);
                 border: 1px solid var(--panel-border);
                 border-radius: 8px;
@@ -2406,10 +2423,27 @@ app, rt = fast_app(
                     sync();
                 })();
 
+                // Terminal states that should stop polling
+                const TERMINAL_STATES = ['completed', 'failed', 'cancelled', 'succeeded', 'idle'];
+
                 // Run on load and whenever htmx swaps content
                 document.body.addEventListener('htmx:afterSwap', function(e) {
                     if (e.detail && e.detail.target && e.detail.target.id === 'status-panel') {
                         showOutputTab('live');
+                        // Stop or resume polling based on job state
+                        const card = e.detail.target.querySelector('[data-job-status]');
+                        const panel = document.getElementById('status-panel');
+                        if (card && panel) {
+                            const isDone = TERMINAL_STATES.indexOf(card.dataset.jobStatus) !== -1;
+                            if (isDone) {
+                                panel.removeAttribute('hx-trigger');
+                            } else if (!panel.getAttribute('hx-trigger')) {
+                                const isDomino = document.querySelector('input[name="execution_mode"]:checked');
+                                const interval = (isDomino && isDomino.value === 'domino') ? 'every 10s' : 'every 2s';
+                                panel.setAttribute('hx-trigger', interval);
+                            }
+                            if (typeof htmx !== 'undefined') htmx.process(panel);
+                        }
                     }
                     styleTerminalLines();
                     scrollTerminalToBottom();
