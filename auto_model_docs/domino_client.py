@@ -174,7 +174,7 @@ def submit_job(
     if tier_id:
         kwargs["hardware_tier_id"] = tier_id
     if branch:
-        kwargs["main_repo_git_ref"] = {"type": "branch", "value": branch}
+        kwargs["main_repo_git_ref"] = {"type": "branches", "value": branch}
 
     logger.info("Submitting Domino job: command=%r, kwargs=%r", command_str, kwargs)
     try:
@@ -184,7 +184,7 @@ def submit_job(
         if "main_repo_git_ref" in str(exc) and branch:
             logger.warning("SDK does not support main_repo_git_ref, calling REST API directly: %s", exc)
             # Re-add mainRepoGitRef — the API supports it even if the SDK doesn't
-            kwargs["main_repo_git_ref"] = {"type": "branch", "value": branch}
+            kwargs["main_repo_git_ref"] = {"type": "branches", "value": branch}
             response = _job_start_via_api(domino, command_str, kwargs)
         else:
             raise
