@@ -37,6 +37,26 @@ def _import_sibling(name: str):
     spec.loader.exec_module(mod)
     return mod
 
+# Preload conda's libstdc++ to fix CXXABI version mismatch in Domino Apps.
+# The App environment's system libstdc++ may lack CXXABI_1.3.15 needed by
+# conda-built C extensions (e.g. sqlite3 via libicui18n).
+_PRELOADED_LIBSTDCPP = None
+try:
+    import ctypes as _ctypes
+    for _candidate in (
+        os.path.join(os.environ.get("CONDA_PREFIX", "/opt/conda"), "lib", "libstdc++.so.6"),
+        "/opt/conda/lib/libstdc++.so.6",
+    ):
+        if os.path.isfile(_candidate):
+            try:
+                _ctypes.CDLL(_candidate, mode=_ctypes.RTLD_GLOBAL)
+                _PRELOADED_LIBSTDCPP = _candidate
+                break
+            except OSError:
+                continue
+except Exception:
+    pass
+
 _DOMINO_IMPORT_ERROR = ""
 try:
     domino_client = _import_sibling("domino_client")
@@ -2259,7 +2279,7 @@ def index():
             ),
             # Debug banner (remove after confirming fix)
             Div(
-                f"[DEBUG v3] domino={_DOMINO_AVAILABLE} | branches={len(branch_options)} | tiers={len(tier_options)} | err={_DOMINO_IMPORT_ERROR or 'none'} | file={__file__}",
+                f"[DEBUG v4] domino={_DOMINO_AVAILABLE} | branches={len(branch_options)} | tiers={len(tier_options)} | err={_DOMINO_IMPORT_ERROR or 'none'} | preload={_PRELOADED_LIBSTDCPP or 'none'} | file={__file__}",
                 style="background:#ff0;color:#000;padding:4px 8px;font-size:12px;font-family:monospace;",
             ),
             Form(
