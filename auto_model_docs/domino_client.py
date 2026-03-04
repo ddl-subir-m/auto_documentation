@@ -258,59 +258,53 @@ def stop_job(run_id: str) -> None:
         logger.warning("Failed to stop run %s: %s", run_id, exc)
 
 
-def _normalize_domino_ui_host(raw: str | None) -> str | None:
-    """Normalize a Domino host value into a UI-safe base URL."""
+# Cached UI host, set once from the first incoming request via set_ui_host().
+_ui_host: str | None = None
+
+
+def set_ui_host(request_host: str, scheme: str = "https") -> None:
+    """Cache the external Domino UI host derived from an incoming request.
+
+    Call this once from the web app (e.g. on the first request) with the
+    value of the Host or X-Forwarded-Host header.  The hostname is
+    normalised by stripping any ``apps.`` prefix so job links point to
+    the main Domino UI rather than the apps subdomain.
+    """
+    global _ui_host
+    if _ui_host is not None:
+        return  # already set
+
     from urllib.parse import urlparse, urlunparse
 
-    if not raw or not raw.strip():
-        return None
-    candidate = raw.strip()
-    if "://" not in candidate:
-        candidate = f"https://{candidate}"
+    raw = (request_host or "").strip()
+    if not raw:
+        return
 
-    parsed = urlparse(candidate)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None
+    if "://" not in raw:
+        raw = f"{scheme}://{raw}"
 
+    parsed = urlparse(raw)
     hostname = (parsed.hostname or "").strip()
     if not hostname:
-        return None
+        return
 
-    # Domino UI links should resolve to tenant root, not apps subdomain.
+    # Strip apps subdomain so links point to the main Domino UI.
     if hostname.startswith("apps."):
         hostname = hostname[len("apps."):]
     if not hostname:
-        return None
+        return
 
     netloc = f"{hostname}:{parsed.port}" if parsed.port else hostname
-    return urlunparse((parsed.scheme, netloc, "", "", "", ""))
-
-
-def _resolve_domino_ui_host() -> str | None:
-    """Resolve preferred Domino tenant host for user-facing links.
-
-    Tries each candidate in priority order, returning the first that
-    normalizes to a valid URL.
-    """
-    for raw in (
-        os.environ.get("DOMINO_USER_HOST"),
-        os.environ.get("DOMINO_EXTERNAL_HOST"),
-        os.environ.get("DOMINO_LINK_HOST"),
-        os.environ.get("DOMINO_API_HOST"),
-    ):
-        normalized = _normalize_domino_ui_host(raw)
-        if normalized:
-            return normalized.rstrip("/")
-    return None
+    _ui_host = urlunparse((parsed.scheme or scheme, netloc, "", "", "", "")).rstrip("/")
+    logger.info("Domino UI host resolved from request: %s", _ui_host)
 
 
 def build_job_url(run_id: str) -> str | None:
     """Return the Domino UI URL for the given run."""
-    host = _resolve_domino_ui_host()
-    if not host:
+    if not _ui_host:
         return None
     owner = _project_owner()
     project = _project_name()
     if not owner or not project:
         return None
-    return f"{host}/jobs/{owner}/{project}/{run_id}/logs?status=all"
+    return f"{_ui_host}/jobs/{owner}/{project}/{run_id}/logs?status=all"
