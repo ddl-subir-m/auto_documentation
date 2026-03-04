@@ -917,7 +917,7 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
     if req.code_root:
         command += ["--code-root", req.code_root]
     if req.output_dir:
-        command += ["--output-dir", req.output_dir]
+        command += ["--output", req.output_dir]
     if req.max_files:
         command += ["--max-files", str(req.max_files)]
     return command
