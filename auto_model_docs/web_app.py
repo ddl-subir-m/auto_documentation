@@ -2172,13 +2172,9 @@ app, rt = fast_app(
                     if (appModeNote)  appModeNote.style.display  = isDomino ? 'none' : '';
                     if (appNoteHint)  appNoteHint.style.display  = isDomino ? 'none' : '';
 
-                    // API key visibility
-                    if (!isDomino) {
-                        if (apiKeyPassField) apiKeyPassField.style.display = '';
-                    } else {
-                        const src = document.querySelector('input[name="api_key_source"]:checked');
-                        applyApiKeySource(src ? src.value : 'domino_env');
-                    }
+                    // API key visibility — both modes use the same radio group
+                    const src = document.querySelector('input[name="api_key_source"]:checked');
+                    applyApiKeySource(src ? src.value : 'domino_env');
 
                     // Show/hide History tab (Domino-only)
                     const historyTabBtn = document.querySelector('.tab-btn[data-tab="history"]');
@@ -2682,7 +2678,7 @@ def index():
                                 cls="api-key-source",
                             ),
                             Div(id="api-key-callout", cls="api-key-callout"),
-                            cls="field domino-fields",
+                            cls="field",
                             id="api-key-source-field",
                         ),
                         Div(
