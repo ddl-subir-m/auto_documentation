@@ -134,32 +134,26 @@ def get_project_default_tier() -> Optional[str]:
     return os.environ.get("DOMINO_HARDWARE_TIER_ID") or None
 
 
-def _resolve_git_commit(branch: Optional[str] = None) -> Optional[str]:
-    """Resolve the HEAD commit hash from the local git repo.
+def _job_start_via_api(domino, command_str: str, kwargs: dict[str, Any]) -> dict:
+    """Call the Domino v4 job start API directly, bypassing the SDK method.
 
-    Tries the specified branch first, then falls back to HEAD.
-    Returns None if git is unavailable.
+    This is used when the installed SDK is too old to accept mainRepoGitRef
+    as a keyword argument to job_start().  The REST API has supported it for
+    a while, so we build the payload ourselves.
     """
-    import subprocess
+    payload: dict[str, Any] = {
+        "projectId": domino.project_id,
+        "commandToRun": command_str,
+        "title": kwargs.get("title"),
+    }
+    if kwargs.get("hardware_tier_id"):
+        payload["overrideHardwareTierId"] = kwargs["hardware_tier_id"]
+    if kwargs.get("main_repo_git_ref"):
+        payload["mainRepoGitRef"] = kwargs["main_repo_git_ref"]
 
-    refs_to_try = []
-    if branch:
-        refs_to_try.append(f"origin/{branch}")
-        refs_to_try.append(branch)
-    refs_to_try.append("HEAD")
-
-    for ref in refs_to_try:
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", ref],
-                capture_output=True, text=True, timeout=5,
-                cwd="/mnt/code",
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except Exception:
-            continue
-    return None
+    url = domino._routes.job_start()
+    response = domino.request_manager.post(url, json=payload)
+    return response.json()
 
 
 def submit_job(
@@ -188,14 +182,10 @@ def submit_job(
     except TypeError as exc:
         # Older SDK versions may not support main_repo_git_ref
         if "main_repo_git_ref" in str(exc) and branch:
-            logger.warning("SDK does not support main_repo_git_ref, retrying without branch: %s", exc)
-            kwargs.pop("main_repo_git_ref", None)
-            # Fall back to commit_id so the job gets a valid code snapshot
-            commit_id = _resolve_git_commit(branch)
-            if commit_id:
-                kwargs["commit_id"] = commit_id
-                logger.info("Falling back to commit_id=%s for branch %s", commit_id, branch)
-            response = domino.job_start(command=command_str, **kwargs)
+            logger.warning("SDK does not support main_repo_git_ref, calling REST API directly: %s", exc)
+            # Re-add mainRepoGitRef — the API supports it even if the SDK doesn't
+            kwargs["main_repo_git_ref"] = {"type": "branch", "value": branch}
+            response = _job_start_via_api(domino, command_str, kwargs)
         else:
             raise
     logger.info("Domino job_start response: %r", response)
