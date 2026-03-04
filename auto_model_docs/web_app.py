@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import traceback
@@ -372,7 +373,7 @@ def _render_status(job: Optional[JobState]) -> FT:
                 ),
                 cls="terminal-header",
             ),
-            Div("Configure your settings above and click Generate Documentation to create your first document.", cls="terminal terminal-idle"),
+            Div("Click Generate Documentation to generate your first document.", cls="terminal terminal-idle"),
             cls="terminal-card",
         )
 
@@ -732,7 +733,7 @@ async def _parse_request(req: Request) -> JobRequest:
         experiment_names=form.get("experiment_names") or None,
         model_names=form.get("model_names") or None,
         latest_only=form.get("latest_only") in ("on", "true", "1", "yes"),
-        verbose=form.get("verbose") in ("on", "true", "1", "yes"),
+        verbose=True,
         execution_mode=execution_mode,
         branch=form.get("branch") or None,
         hardware_tier=form.get("hardware_tier") or None,
@@ -1243,64 +1244,73 @@ app, rt = fast_app(
             a { color: var(--accent); text-decoration: none; transition: color 0.2s ease; }
             a:hover { color: var(--accent-hover); }
 
-            /* Domino Header */
+            /* Domino Header - full width, Domino style */
             .domino-header {
                 background: var(--header-bg);
-                height: 44px;
+                width: 100%;
+                min-height: 48px;
                 display: flex;
                 align-items: center;
                 padding: 0 1.5rem;
+                box-sizing: border-box;
+            }
+            .domino-header-inner {
+                max-width: 1500px;
+                margin: 0 auto;
+                width: 100%;
+                display: flex;
+                align-items: center;
             }
             .domino-header-title {
                 color: #FFFFFF;
-                font-size: 0.95rem;
+                font-size: 1rem;
                 font-weight: 600;
                 margin: 0;
+                letter-spacing: -0.01em;
             }
-            
+
             /* Page Layout */
             .page {
-                max-width: 1100px;
+                max-width: 1500px;
                 margin: 0 auto;
-                padding: 2rem 2rem;
+                padding: 2rem;
                 box-sizing: border-box;
                 width: 100%;
             }
-            @media (min-width: 1400px) {
-                .page {
-                    max-width: 1200px;
-                }
-            }
             .hero {
-                text-align: center;
-                padding: 1rem 0 1.5rem 0;
+                text-align: left;
+                padding: 0.5rem 0 1.25rem 0;
             }
-            .hero h1 {
-                font-size: 1.75rem;
-                font-weight: 700;
-                margin-bottom: 0.5rem;
-                color: var(--text-primary);
+            .hero .hero-tagline {
+                font-size: 1.125rem;
+                font-weight: 400;
+                color: var(--text-secondary);
+                margin: 0;
+                line-height: 1.45;
             }
-            
-            /* Grid Layout - 3 columns */
+
+            /* Three cards in a row - responsive horizontal layout */
             .config-grid {
                 display: grid;
-                grid-template-columns: 1.3fr 1.1fr 1fr;
+                grid-template-columns: repeat(3, 1fr);
                 gap: 1rem;
-                margin-bottom: 1.5rem;
+                margin-bottom: 1rem;
             }
-            @media (max-width: 900px) {
+            @media (max-width: 1100px) {
                 .config-grid {
-                    grid-template-columns: 1fr 1fr;
+                    grid-template-columns: repeat(2, 1fr);
                 }
             }
-            @media (max-width: 600px) {
+            @media (max-width: 700px) {
                 .config-grid {
                     grid-template-columns: 1fr;
                 }
             }
-            
+
             /* Cards */
+            .config-grid .card {
+                min-width: 0; /* allow shrinking so content fits viewport */
+            }
             .card {
                 background: var(--panel);
                 border: 1px solid var(--panel-border);
@@ -1320,6 +1330,15 @@ app, rt = fast_app(
                 font-weight: 400;
                 color: var(--text-muted);
                 margin-left: 0.35rem;
+            }
+            .card-advanced .card-title {
+                font-size: 0.8125rem;
+                color: var(--text-muted);
+            }
+            .card-advanced .field label,
+            .card-advanced .filter-section-title {
+                font-size: 0.75rem;
+                color: var(--text-muted);
             }
             
             /* Form Fields */
@@ -1347,6 +1366,7 @@ app, rt = fast_app(
                 color: var(--text-primary);
                 font-size: 0.875rem;
                 transition: border-color 0.2s ease, box-shadow 0.2s ease;
+                min-width: 0; /* shrink inside grid/flex so layout stays responsive */
             }
             .field input:focus,
             .field select:focus {
@@ -1361,6 +1381,42 @@ app, rt = fast_app(
                 cursor: pointer;
             }
             
+            /* Code root prefix-dropdown + path combo */
+            .code-root-wrap {
+                display: flex;
+                border: 1px solid var(--panel-border);
+                border-radius: 4px;
+                overflow: hidden;
+                background: var(--panel);
+                transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            }
+            .code-root-wrap:focus-within {
+                border-color: var(--accent);
+                box-shadow: 0 0 0 3px var(--accent-glow);
+            }
+            .code-root-prefix {
+                padding: 0.625rem 0.75rem;
+                background: var(--bg-page);
+                border: none;
+                border-right: 1px solid var(--panel-border);
+                font-size: 0.875rem;
+                color: var(--text-secondary);
+                font-family: inherit;
+                white-space: nowrap;
+                user-select: none;
+            }
+            .code-root-suffix {
+                flex: 1;
+                border: none;
+                padding: 0.625rem 0.75rem;
+                font-size: 0.875rem;
+                color: var(--text-primary);
+                background: transparent;
+                outline: none;
+                min-width: 0;
+            }
+            .code-root-suffix::placeholder { color: var(--text-muted); }
+
             /* Inline field with upload button */
             .field-inline {
                 display: flex;
@@ -1369,6 +1425,7 @@ app, rt = fast_app(
             }
             .field-inline input[type="text"] {
                 flex: 1;
+                min-width: 0;
             }
             .upload-btn {
                 background: var(--bg-page);
@@ -1459,11 +1516,17 @@ app, rt = fast_app(
             }
             .advanced-grid {
                 display: grid;
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
                 gap: 0.75rem;
             }
             .advanced-grid .field {
                 margin-bottom: 0;
+                min-width: 0;
+            }
+            .advanced-grid .field input[type="number"] {
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
             }
             
             /* Filtering Section */
@@ -1484,6 +1547,10 @@ app, rt = fast_app(
             .filter-section .checkbox-field {
                 margin-top: 0.5rem;
             }
+            .filter-section .checkbox-field span {
+                font-size: 0.8rem;
+                color: var(--text-secondary);
+            }
             .required-star {
                 color: var(--error);
                 font-weight: 600;
@@ -1493,6 +1560,47 @@ app, rt = fast_app(
                 font-size: 0.75rem;
                 color: var(--text-muted);
                 margin-top: 0.25rem;
+            }
+            .label-row {
+                display: flex;
+                align-items: center;
+                gap: 0.35rem;
+            }
+            .info-tooltip {
+                position: relative;
+                cursor: help;
+                color: var(--text-muted);
+                font-size: 0.75rem;
+                line-height: 1;
+            }
+            .info-tooltip::after {
+                content: attr(data-tooltip);
+                position: absolute;
+                left: 50%;
+                transform: translateX(-50%);
+                bottom: 100%;
+                margin-bottom: 0.35rem;
+                padding: 0.4rem 0.6rem;
+                background: var(--text-primary);
+                color: var(--panel);
+                font-size: 0.75rem;
+                font-weight: 400;
+                white-space: normal;
+                min-width: 200px;
+                max-width: 320px;
+                width: max-content;
+                border-radius: 4px;
+                pointer-events: none;
+                opacity: 0;
+                visibility: hidden;
+                transition: opacity 0.15s ease, visibility 0.15s ease;
+                z-index: 1000;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            }
+            .info-tooltip:hover::after,
+            .info-tooltip:focus::after {
+                opacity: 1;
+                visibility: visible;
             }
             
             .advanced-summary-desc {
@@ -1510,19 +1618,19 @@ app, rt = fast_app(
                 padding-left: 1.625rem;
                 margin-top: -0.5rem;
             }
-            /* Primary Button */
+            /* Primary Button - right-aligned, normal size */
             .btn-row {
                 display: flex;
-                justify-content: center;
-                margin-bottom: 1.5rem;
+                justify-content: flex-end;
+                margin-top: 1rem;
             }
             button.primary {
                 background: var(--accent);
                 border: none;
                 border-radius: 4px;
-                padding: 0.75rem 2rem;
+                padding: 0.5rem 1.25rem;
                 color: white;
-                font-size: 0.9rem;
+                font-size: 0.875rem;
                 font-weight: 600;
                 cursor: pointer;
                 transition: all 0.2s ease;
@@ -1978,8 +2086,54 @@ app, rt = fast_app(
                 font-size: 0.8rem;
             }
             .spec-list-item:last-child { border-bottom: none; }
+
+            /* Left/right split layout */
+            .page-split { display: flex; gap: 1.5rem; align-items: stretch; }
+            .split-left { flex: 1 1 0; min-width: 0; }
+            .split-right {
+                flex: 0 0 clamp(300px, 28%, 380px);
+                display: flex;
+                flex-direction: column;
+                align-self: flex-start;
+            }
+            .output-panel {
+                flex: 1;
+                background: var(--panel);
+                border: 1px solid var(--panel-border);
+                border-radius: 8px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+            }
+            .tab-bar {
+                display: flex;
+                border-bottom: 1px solid var(--panel-border);
+                padding: 0 1rem;
+                background: var(--panel);
+            }
+            .tab-btn {
+                font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);
+                padding: 0.75rem 1rem 0.625rem;
+                border: none; border-bottom: 2px solid transparent;
+                background: none; cursor: pointer;
+                transition: color 0.15s, border-color 0.15s;
+            }
+            .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+            .tab-btn:not(.active):hover { color: var(--text-primary); }
+            .tab-content { padding: 1rem; flex: 1; }
+            .tab-content.hidden { display: none; }
+            .tab-content .terminal-card { border: none; box-shadow: none; padding: 0; }
+            @media (max-width: 1100px) {
+                .page-split { flex-direction: column; }
+                .split-right { flex: none; width: 100%; }
+            }
             """
         ),
+        Script(f"""
+            const DOMINO_OUTPUT_DEFAULT = {json.dumps(str(_get_default_output_dir()))};
+            const APP_OUTPUT_DEFAULT = "/mnt/code/output";
+        """),
         Script(
             r"""
             document.addEventListener('DOMContentLoaded', function() {
@@ -1990,7 +2144,6 @@ app, rt = fast_app(
                 const uploadBtnLabel    = document.querySelector('label.upload-btn');
                 const specSavedName     = document.getElementById('spec-saved-name');
                 const appModeNote       = document.getElementById('app-mode-note');
-                const jobHistorySection = document.getElementById('job-history-section');
                 const appNoteHint       = document.getElementById('app-mode-notebook-hint');
                 const apiKeyPassField   = document.getElementById('api-key-pass-field');
                 const apiKeyCallout     = document.getElementById('api-key-callout');
@@ -2019,9 +2172,6 @@ app, rt = fast_app(
                     if (appModeNote)  appModeNote.style.display  = isDomino ? 'none' : '';
                     if (appNoteHint)  appNoteHint.style.display  = isDomino ? 'none' : '';
 
-                    // Job history
-                    if (jobHistorySection) jobHistorySection.style.display = isDomino ? '' : 'none';
-
                     // API key visibility
                     if (!isDomino) {
                         if (apiKeyPassField) apiKeyPassField.style.display = '';
@@ -2030,12 +2180,35 @@ app, rt = fast_app(
                         applyApiKeySource(src ? src.value : 'domino_env');
                     }
 
+                    // Show/hide History tab (Domino-only)
+                    const historyTabBtn = document.querySelector('.tab-btn[data-tab="history"]');
+                    if (historyTabBtn) {
+                        historyTabBtn.style.display = isDomino ? '' : 'none';
+                        if (!isDomino && historyTabBtn.classList.contains('active')) {
+                            showOutputTab('live');
+                        }
+                    }
+
                     // Update HTMX polling on status panel
                     const panel = document.getElementById('status-panel');
                     if (panel) {
                         panel.setAttribute('hx-get', isDomino ? 'domino-status' : 'status');
                         panel.setAttribute('hx-trigger', isDomino ? 'every 10s' : 'every 2s');
                         if (typeof htmx !== 'undefined') htmx.process(panel);
+                    }
+
+                    // Update output directory default for the selected mode
+                    const outputDirField = document.getElementById('field-output_dir');
+                    if (outputDirField) {
+                        outputDirField.value = isDomino ? DOMINO_OUTPUT_DEFAULT : APP_OUTPUT_DEFAULT;
+                    }
+
+                    // Update output directory hint text
+                    const outputDirHint = document.getElementById('output-dir-hint');
+                    if (outputDirHint) {
+                        outputDirHint.setAttribute('data-tooltip', isDomino
+                            ? 'Output files are written here by the Domino job.'
+                            : 'Output files are written here and available to download.');
                     }
                 }
 
@@ -2212,8 +2385,36 @@ app, rt = fast_app(
                     }
                 }
 
+                // Tab switcher — on window so inline onclick can call it
+                window.showOutputTab = function(tab) {
+                    document.querySelectorAll('.tab-btn').forEach(function(btn) {
+                        btn.classList.toggle('active', btn.dataset.tab === tab);
+                    });
+                    document.querySelectorAll('.tab-content').forEach(function(content) {
+                        content.classList.toggle('hidden', content.id !== 'tab-' + tab);
+                    });
+                };
+
+                // ── Code root prefix+suffix sync ──────────────────────────────────
+                (function() {
+                    const prefix = document.getElementById('code-root-prefix');
+                    const suffix = document.getElementById('code-root-suffix');
+                    const hidden = document.getElementById('field-code_root');
+                    function sync() {
+                        if (!prefix || !hidden) return;
+                        const base = prefix.textContent.trim();
+                        const sub = suffix ? suffix.value.replace(/^\/+/, '') : '';
+                        hidden.value = sub ? base + '/' + sub : base;
+                    }
+                    if (suffix) suffix.addEventListener('input', sync);
+                    sync();
+                })();
+
                 // Run on load and whenever htmx swaps content
-                document.body.addEventListener('htmx:afterSwap', function() {
+                document.body.addEventListener('htmx:afterSwap', function(e) {
+                    if (e.detail && e.detail.target && e.detail.target.id === 'status-panel') {
+                        showOutputTab('live');
+                    }
                     styleTerminalLines();
                     scrollTerminalToBottom();
                 });
@@ -2271,52 +2472,56 @@ def index():
         branch_options = [Option("(Domino not available)", value="")]
         tier_options = [Option("(Domino not available)", value="")]
 
-    return Titled(
-        "Auto Model Docs Studio",
-        # Domino Header
+    return (
+        Title("Auto Model Docs Studio"),
         Div(
-            H2("Auto Model Docs Studio", cls="domino-header-title"),
+            Div(
+                H2("Auto Model Docs Studio", cls="domino-header-title"),
+                cls="domino-header-inner",
+            ),
             cls="domino-header",
         ),
         Div(
-            # Hero Section
+            # Tagline (no duplicate app name)
             Div(
-                H1("Generate model documentation with a single, guided workflow."),
+                P("Generate model documentation with a single, guided workflow.", cls="hero-tagline"),
                 cls="hero",
             ),
-            Form(
-                # Execution mode toggle (above config grid)
-                Div(
-                    Label(
-                        Input(
-                            type="radio",
-                            name="execution_mode",
-                            value="domino",
-                            checked=(default_mode == "domino"),
-                        ),
-                        "Run as Domino Job",
-                        cls="mode-toggle-option" + (" active" if default_mode == "domino" else ""),
-                        id="mode-domino-label",
+            Div(
+                Label(
+                    Input(
+                        type="radio",
+                        name="execution_mode",
+                        value="domino",
+                        checked=(default_mode == "domino"),
+                        form="main-form",
                     ),
-                    Label(
-                        Input(
-                            type="radio",
-                            name="execution_mode",
-                            value="app",
-                            checked=(default_mode == "app"),
-                        ),
-                        "Run in App",
-                        cls="mode-toggle-option" + (" active" if default_mode == "app" else ""),
-                        id="mode-app-label",
-                    ),
-                    cls="mode-toggle",
+                    "Run as Domino Job",
+                    cls="mode-toggle-option" + (" active" if default_mode == "domino" else ""),
+                    id="mode-domino-label",
                 ),
-                # Three-column config grid
+                Label(
+                    Input(
+                        type="radio",
+                        name="execution_mode",
+                        value="app",
+                        checked=(default_mode == "app"),
+                        form="main-form",
+                    ),
+                    "Run in App",
+                    cls="mode-toggle-option" + (" active" if default_mode == "app" else ""),
+                    id="mode-app-label",
+                ),
+                cls="mode-toggle",
+            ),
+            Div(
+            Div(
+            Form(
+                # Three cards stacked vertically: What to document | Run | Advanced
                 Div(
-                    # Left card: Main Configuration
+                    # Card 1: What to document (spec + artifact filtering)
                     Div(
-                        Div("Configuration", cls="card-title"),
-                        # Spec file with inline upload
+                        Div("What to document", cls="card-title"),
                         Div(
                             Label("Spec file", Span(" *", cls="required-star"), for_="field-spec_path"),
                             Div(
@@ -2327,7 +2532,6 @@ def index():
                                     value=str(default_spec),
                                     placeholder=str(default_spec),
                                 ),
-                                # App-mode upload button (hidden in Domino mode by JS)
                                 Label(
                                     "Upload",
                                     Input(
@@ -2343,9 +2547,7 @@ def index():
                             Div(id="upload-filename", cls="upload-filename"),
                             cls="field",
                         ),
-                        # Domino-mode spec upload (auto-save to /mnt/data)
                         Div(
-                            # Hidden file input for Domino mode
                             Label(
                                 Input(
                                     type="file",
@@ -2358,184 +2560,122 @@ def index():
                                 style="margin-top: 0.35rem; display: inline-flex;",
                             ),
                             Span(id="spec-saved-name", cls="spec-saved-name"),
-                            Span("Upload to save the spec file to Domino dataset storage for the job to access.", cls="field-hint-text"),
+                            Span("ⓘ", cls="info-tooltip", data_tooltip="Upload to save the spec file to Domino dataset storage for the job to access."),
                             cls="domino-fields",
                         ),
-                        # Code root
                         Div(
-                            Label("Code root", for_="field-code_root"),
+                            Div(
+                                Label("Model names", for_="field-model_names"),
+                                Span("ⓘ", cls="info-tooltip", data_tooltip="Comma-separated. Supports wildcards: * and ?"),
+                                cls="label-row",
+                            ),
                             Input(
-                                name="code_root",
-                                id="field-code_root",
+                                name="model_names",
+                                id="field-model_names",
                                 type="text",
-                                placeholder=str(_get_default_code_root()),
+                                placeholder="model1, churn*, fraud-*",
                             ),
                             cls="field",
                         ),
-                        # Output directory
                         Div(
-                            Label("Output directory", for_="field-output_dir"),
+                            Div(
+                                Label("Experiment names", for_="field-experiment_names"),
+                                Span("ⓘ", cls="info-tooltip", data_tooltip="Comma-separated. Supports wildcards: * and ?"),
+                                cls="label-row",
+                            ),
                             Input(
-                                name="output_dir",
-                                id="field-output_dir",
+                                name="experiment_names",
+                                id="field-experiment_names",
                                 type="text",
-                                placeholder=str(_get_default_output_dir()),
+                                placeholder="exp1, exp2, my-experiment*",
                             ),
                             cls="field",
                         ),
-                        # Domino-only: Branch selector
+                        Label(
+                            Input(type="checkbox", name="latest_only", id="field-latest_only", checked=True),
+                            Span("Latest version only"),
+                            cls="checkbox-field",
+                        ),
+                        cls="card",
+                    ),
+                    # Card 2: Run (paths, branch, hardware, API key)
+                    Div(
+                        Div("Run", cls="card-title"),
                         Div(
-                            Label("Branch", for_="field-branch"),
+                            Label("Code root", for_="code-root-suffix"),
+                            Div(
+                                Span("/mnt/code", id="code-root-prefix", cls="code-root-prefix"),
+                                Input(
+                                    id="code-root-suffix",
+                                    type="text",
+                                    placeholder="subdirectory (optional)",
+                                    cls="code-root-suffix",
+                                ),
+                                Input(
+                                    name="code_root",
+                                    id="field-code_root",
+                                    type="hidden",
+                                    value=str(_get_default_code_root()),
+                                ),
+                                cls="code-root-wrap",
+                            ),
+                            cls="field",
+                        ),
+                        Div(
+                            Div(
+                                Label("Branch", for_="field-branch"),
+                                Span("ⓘ", cls="info-tooltip", data_tooltip="Git branch to analyze in the Domino job."),
+                                cls="label-row",
+                            ),
                             Select(
                                 *branch_options,
                                 name="branch",
                                 id="field-branch",
                             ),
-                            Span("Git branch to analyze in the Domino job.", cls="field-hint-text"),
                             cls="field domino-fields",
                         ),
-                        cls="card",
-                    ),
-                    # Middle card: Options (limits, workers, artifact filters)
-                    Div(
-                        Div(
-                            "Options",
-                            Span(" · Limits, workers, and artifact filters", cls="card-title-sub"),
-                            cls="card-title",
-                        ),
-                        # Artifact filtering
-                        Div(
-                            Div("Artifact filtering", cls="filter-section-title"),
-                            P("Limit which MLflow models and experiments to include. Leave blank to process all.", cls="filter-section-desc"),
-                            Div(
-                                Label("Model names", for_="field-model_names"),
-                                Input(
-                                    name="model_names",
-                                    id="field-model_names",
-                                    type="text",
-                                    placeholder="model1, churn*, fraud-*",
-                                ),
-                                Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
-                                cls="field",
-                            ),
-                            Div(
-                                Label("Experiment names", for_="field-experiment_names"),
-                                Input(
-                                    name="experiment_names",
-                                    id="field-experiment_names",
-                                    type="text",
-                                    placeholder="exp1, exp2, my-experiment*",
-                                ),
-                                Span("Comma-separated. Supports wildcards: * and ?", cls="field-hint-text"),
-                                cls="field",
-                            ),
-                            Label(
-                                Input(type="checkbox", name="latest_only", id="field-latest_only"),
-                                Span("Latest version only"),
-                                cls="checkbox-field",
-                            ),
-                            cls="filter-section",
-                        ),
-                        # Numeric options grid
                         Div(
                             Div(
-                                Label("Max files", for_="field-max_files"),
-                                Input(
-                                    name="max_files",
-                                    id="field-max_files",
-                                    type="number",
-                                    value="50",
+                                Label("Output directory", for_="field-output_dir"),
+                                Span(
+                                    "ⓘ",
+                                    cls="info-tooltip",
+                                    data_tooltip="Output files are written here by the Domino job.",
+                                    id="output-dir-hint",
                                 ),
-                                cls="field",
+                                cls="label-row",
                             ),
-                            Div(
-                                Label("Planning workers", for_="field-planning_workers"),
-                                Input(
-                                    name="planning_workers",
-                                    id="field-planning_workers",
-                                    type="number",
-                                    value="1",
-                                ),
-                                Span("Parallel LLM calls in the planning phase.", cls="field-hint-text"),
-                                cls="field",
+                            Input(
+                                name="output_dir",
+                                id="field-output_dir",
+                                type="text",
+                                value=str(_get_default_output_dir()),
                             ),
-                            Div(
-                                Label("Generation workers", for_="field-workers"),
-                                Input(
-                                    name="workers",
-                                    id="field-workers",
-                                    type="number",
-                                    value="4",
-                                ),
-                                Span("Sections generated in parallel.", cls="field-hint-text"),
-                                cls="field",
-                            ),
-                            Div(
-                                Label("Timeout (s)", for_="field-timeout"),
-                                Input(
-                                    name="timeout",
-                                    id="field-timeout",
-                                    type="number",
-                                    value="120",
-                                ),
-                                Span("Seconds before a single LLM call times out.", cls="field-hint-text"),
-                                cls="field",
-                            ),
-                            cls="advanced-grid",
+                            cls="field",
                         ),
-                        # Verbose logging
-                        Label(
-                            Input(type="checkbox", name="verbose", id="field-verbose", checked=True),
-                            Span("Show detailed progress"),
-                            cls="checkbox-field",
-                        ),
-                        cls="card",
-                    ),
-                    # Right card: LLM & execution settings
-                    Div(
-                        Div("Settings", cls="card-title"),
-                        # Hardware tier (Domino only)
                         Div(
-                            Label("Hardware tier", for_="field-hardware_tier"),
+                            Div(
+                                Label("Hardware tier", for_="field-hardware_tier"),
+                                Span("ⓘ", cls="info-tooltip", data_tooltip="Compute tier for the Domino job."),
+                                cls="label-row",
+                            ),
                             Select(
                                 *tier_options,
                                 name="hardware_tier",
                                 id="field-hardware_tier",
                             ),
-                            Span("Compute tier for the Domino job.", cls="field-hint-text"),
                             cls="field domino-fields",
                         ),
-                        # Provider dropdown
-                        Div(
-                            Label("Provider", for_="field-provider"),
-                            Select(
-                                Option("Anthropic", value="anthropic"),
-                                Option("OpenAI (Compatible)", value="openai", selected=True),
-                                name="provider",
-                                id="field-provider",
-                            ),
-                            cls="field",
-                        ),
-                        # API key source (Domino mode) — hidden by JS in app mode
                         Div(
                             Label("API key"),
                             Div(
                                 Label(
-                                    Input(
-                                        type="radio",
-                                        name="api_key_source",
-                                        value="domino_env",
-                                        checked=True,
-                                    ),
+                                    Input(type="radio", name="api_key_source", value="domino_env", checked=True),
                                     "Domino environment variable (recommended)",
                                     cls="api-key-source-option",
                                 ),
                                 Label(
-                                    Input(
-                                        type="radio",
-                                        name="api_key_source",
-                                        value="pass_now",
-                                    ),
+                                    Input(type="radio", name="api_key_source", value="pass_now"),
                                     "Set key",
                                     cls="api-key-source-option",
                                 ),
@@ -2545,7 +2685,6 @@ def index():
                             cls="field domino-fields",
                             id="api-key-source-field",
                         ),
-                        # API key input (shown for app mode, or Domino "pass_now")
                         Div(
                             Label("API key", Span(" *", cls="required-star"), for_="field-api_key"),
                             Input(
@@ -2560,78 +2699,142 @@ def index():
                             id="api-key-pass-field",
                             style="display: none;" if default_mode == "domino" else "",
                         ),
-                        # Model name (only shown for OpenAI provider)
+                        cls="card",
+                    ),
+                    # Card 3: Advanced (workers, timeout, provider, model, notebook)
+                    Div(
+                        Div("Advanced", cls="card-title"),
+                        Div("Generation settings", cls="filter-section-title"),
                         Div(
-                            Label("Model", for_="field-model"),
-                            Input(
-                                name="model",
-                                id="field-model",
-                                type="text",
-                                placeholder="gpt-4o",
+                            Div(
+                                Label("Max files", for_="field-max_files"),
+                                Input(name="max_files", id="field-max_files", type="number", value="50"),
+                                cls="field",
                             ),
-                            Span("Leave blank to use default (gpt-4o)", cls="field-hint-text"),
+                            Div(
+                                Div(
+                                    Label("Planning workers", for_="field-planning_workers"),
+                                    Span("ⓘ", cls="info-tooltip", data_tooltip="Parallel LLM calls in the planning phase."),
+                                    cls="label-row",
+                                ),
+                                Input(name="planning_workers", id="field-planning_workers", type="number", value="1"),
+                                cls="field",
+                            ),
+                            Div(
+                                Div(
+                                    Label("Generation workers", for_="field-workers"),
+                                    Span("ⓘ", cls="info-tooltip", data_tooltip="Sections generated in parallel."),
+                                    cls="label-row",
+                                ),
+                                Input(name="workers", id="field-workers", type="number", value="4"),
+                                cls="field",
+                            ),
+                            Div(
+                                Div(
+                                    Label("Timeout (s)", for_="field-timeout"),
+                                    Span("ⓘ", cls="info-tooltip", data_tooltip="Seconds before a single LLM call times out."),
+                                    cls="label-row",
+                                ),
+                                Input(name="timeout", id="field-timeout", type="number", value="120"),
+                                cls="field",
+                            ),
+                            cls="advanced-grid",
+                        ),
+                        Div(
+                            Label("Provider", for_="field-provider"),
+                            Select(
+                                Option("Anthropic", value="anthropic"),
+                                Option("OpenAI (Compatible)", value="openai", selected=True),
+                                name="provider",
+                                id="field-provider",
+                            ),
+                            cls="field",
+                        ),
+                        Div(
+                            Div(
+                                Label("Model", for_="field-model"),
+                                Span("ⓘ", cls="info-tooltip", data_tooltip="Leave blank to use default (gpt-4o)"),
+                                cls="label-row",
+                            ),
+                            Input(name="model", id="field-model", type="text", placeholder="gpt-4o"),
                             cls="field",
                             id="model-name-field",
                             style="display: none;",
                         ),
-                        # Base URL (only shown for OpenAI provider)
                         Div(
-                            Label("Base URL", for_="field-base_url"),
+                            Div(
+                                Label("Base URL", for_="field-base_url"),
+                                Span("ⓘ", cls="info-tooltip", data_tooltip="For OpenAI-compatible APIs (e.g., Moonshot, Azure)"),
+                                cls="label-row",
+                            ),
                             Input(
                                 name="base_url",
                                 id="field-base_url",
                                 type="text",
                                 placeholder="https://api.openai.com/v1 (optional)",
                             ),
-                            Span("For OpenAI-compatible APIs (e.g., Moonshot, Azure)", cls="field-hint-text"),
                             cls="field",
                             id="base-url-field",
                             style="display: none;",
                         ),
-                        # Generate notebook checkbox — app mode only
                         Label(
                             Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
                             Span("Generate notebook"),
+                            Span("ⓘ", cls="info-tooltip", data_tooltip="Saved alongside your document in the output directory.", id="app-mode-notebook-hint"),
                             cls="checkbox-field",
                             id="app-mode-note",
                         ),
-                        Div("Saved alongside your document in the output directory.", cls="field-hint-text notebook-hint", id="app-mode-notebook-hint"),
-                        cls="card",
+                        cls="card card-advanced",
                     ),
                     cls="config-grid",
                 ),
-                # Generate button
-                Div(
-                    Button("Generate Documentation", type="submit", id="generate-btn", cls="primary"),
-                    cls="btn-row",
-                ),
+                id="main-form",
                 hx_post="run",
                 hx_target="#status-panel",
                 hx_swap="innerHTML",
                 hx_encoding="multipart/form-data",
                 enctype="multipart/form-data",
             ),
-            # Terminal / status panel
             Div(
-                _render_domino_status(latest_domino) if (default_mode == "domino") else _render_status(_resolve_job(ACTIVE_JOB_ID)),
-                id="status-panel",
-                hx_get="domino-status" if default_mode == "domino" else "status",
-                hx_trigger="every 10s" if default_mode == "domino" else "every 2s",
-                hx_swap="innerHTML",
+                Button("Generate Documentation", type="submit", id="generate-btn", cls="primary", form="main-form"),
+                cls="btn-row",
             ),
-            # Job history (Domino mode only)
-            Details(
-                Summary("My job history"),
-                Div(
-                    _render_job_history_table(username),
-                    id="job-history-content",
-                    hx_get="job-history",
-                    hx_trigger="every 15s",
-                    hx_swap="innerHTML",
+                    cls="split-left",
                 ),
-                cls="job-history-section",
-                id="job-history-section",
-                style="" if default_mode == "domino" else "display: none;",
+                Div(
+                    Div(
+                        Div(
+                            Button("Output", cls="tab-btn active", data_tab="live", onclick="showOutputTab('live')"),
+                            Button("History", cls="tab-btn", data_tab="history", onclick="showOutputTab('history')"),
+                            cls="tab-bar",
+                        ),
+                        Div(
+                            Div(
+                                _render_domino_status(latest_domino) if (default_mode == "domino") else _render_status(_resolve_job(ACTIVE_JOB_ID)),
+                                id="status-panel",
+                                hx_get="domino-status" if default_mode == "domino" else "status",
+                                hx_trigger="every 10s" if default_mode == "domino" else "every 2s",
+                                hx_swap="innerHTML",
+                            ),
+                            id="tab-live",
+                            cls="tab-content",
+                        ),
+                        Div(
+                            Div(
+                                _render_job_history_table(username),
+                                id="job-history-content",
+                                hx_get="job-history",
+                                hx_trigger="every 15s",
+                                hx_swap="innerHTML",
+                            ),
+                            id="tab-history",
+                            cls="tab-content hidden",
+                        ),
+                        cls="output-panel",
+                    ),
+                    cls="split-right",
+                ),
+                cls="page-split",
             ),
             cls="page",
         ),
