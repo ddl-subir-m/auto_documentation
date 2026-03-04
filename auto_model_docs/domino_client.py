@@ -151,6 +151,8 @@ def submit_job(
     kwargs: dict[str, Any] = {"title": title}
     if tier_id:
         kwargs["hardware_tier_id"] = tier_id
+    if branch:
+        kwargs["main_repo_git_ref"] = {"type": "branch", "value": branch}
 
     response = domino.job_start(command=command_str, **kwargs)
 
