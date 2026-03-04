@@ -157,6 +157,9 @@ def submit_job(
 
     domino = _get_domino()
 
+    # Domino SDK expects command as a single string, not a list.
+    command_str = " ".join(command) if isinstance(command, list) else command
+
     kwargs: dict[str, Any] = {"title": title}
     if tier_name:
         kwargs["hardware_tier_name"] = tier_name
@@ -165,7 +168,7 @@ def submit_job(
 
     try:
         response = domino.job_start(
-            command=command,
+            command=command_str,
             commit_id=branch,
             **kwargs,
         )
@@ -177,7 +180,7 @@ def submit_job(
                 branch,
                 exc,
             )
-            response = domino.job_start(command=command, **kwargs)
+            response = domino.job_start(command=command_str, **kwargs)
         else:
             raise
 
