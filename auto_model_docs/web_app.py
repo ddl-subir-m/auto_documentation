@@ -941,11 +941,29 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
         command += ["--models", req.model_names]
     if req.latest_only:
         command += ["--latest-only"]
-    if req.notebook:
-        command += ["--notebook"]
+    # Always generate notebook for Domino jobs
+    command += ["--notebook"]
     if req.verbose:
         command += ["--verbose"]
     return command
+
+
+def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
+    """Build the full shell command for a Domino job.
+
+    Wraps the CLI command and appends a copy step to write results
+    to /mnt/artifacts/auto_ml so they appear in the Domino job's
+    Artifacts tab.
+    """
+    parts = _build_job_command(req, spec_path)
+    cli_cmd = " ".join(parts)
+    output_dir = req.output_dir or "/mnt/data"
+    artifacts_dir = "/mnt/artifacts/auto_ml"
+    return (
+        f"{cli_cmd}"
+        f" && mkdir -p {artifacts_dir}"
+        f" && cp -r {output_dir}/* {artifacts_dir}/"
+    )
 
 
 async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
@@ -965,8 +983,7 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
         spec_path = req.spec_path
 
     # Build command and create the DB row (status=queued)
-    command = _build_job_command(req, spec_path)
-    command_str = " ".join(command)
+    command_str = _build_job_command_str(req, spec_path)
 
     job_id = domino_job_store.create_job(
         username=username,
@@ -988,7 +1005,7 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     try:
 
         run_id = domino_client.submit_job(
-            command=command,
+            command=command_str,
             branch=req.branch,
             tier_id=req.hardware_tier or None,
         )
@@ -2483,6 +2500,13 @@ app, rt = fast_app(
 def index():
     default_spec = _get_default_spec_path()
     username = _get_username()
+    try:
+        _settings = Settings()
+        _current_model = _settings.get_model_name()
+        _current_base_url = _settings.openai_base_url or ""
+    except Exception:
+        _current_model = ""
+        _current_base_url = ""
 
     # Determine initial status panel content based on latest Domino job
     initial_status_panel: FT
@@ -2809,7 +2833,7 @@ def index():
                                 Span("ⓘ", cls="info-tooltip", data_tooltip="Leave blank to use default (gpt-4o)"),
                                 cls="label-row",
                             ),
-                            Input(name="model", id="field-model", type="text", placeholder="gpt-4o"),
+                            Input(name="model", id="field-model", type="text", value=_current_model, placeholder="gpt-4o"),
                             cls="field",
                             id="model-name-field",
                             style="display: none;",
@@ -2824,6 +2848,7 @@ def index():
                                 name="base_url",
                                 id="field-base_url",
                                 type="text",
+                                value=_current_base_url,
                                 placeholder="https://api.openai.com/v1 (optional)",
                             ),
                             cls="field",
