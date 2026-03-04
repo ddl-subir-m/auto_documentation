@@ -924,6 +924,22 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
         command += ["--output", req.output_dir]
     if req.max_files:
         command += ["--max-files", str(req.max_files)]
+    if req.workers:
+        command += ["--generation-workers", str(req.workers)]
+    if req.planning_workers:
+        command += ["--planning-workers", str(req.planning_workers)]
+    if req.timeout:
+        command += ["--timeout", str(req.timeout)]
+    if req.experiment_names:
+        command += ["--experiments", req.experiment_names]
+    if req.model_names:
+        command += ["--models", req.model_names]
+    if req.latest_only:
+        command += ["--latest-only"]
+    if req.notebook:
+        command += ["--notebook"]
+    if req.verbose:
+        command += ["--verbose"]
     return command
 
 
@@ -2681,7 +2697,7 @@ def index():
                                 type="text",
                                 value=str(_get_default_output_dir()),
                             ),
-                            cls="field",
+                            cls="field domino-fields",
                         ),
                         Div(
                             Div(
