@@ -141,6 +141,7 @@ class JobState:
     progress_ctx: Optional[Progress] = None
     progress_task_id: Optional[int] = None
     current_phase: Optional[str] = None
+    log_version: int = 0
 
 
 @dataclass
@@ -200,6 +201,7 @@ def _timestamp() -> str:
 def _log(job: JobState, message: str) -> None:
     job.logs.append(f"[{_timestamp()}] {message}")
     job.updated_at = datetime.utcnow()
+    job.log_version += 1
 
 
 def _cleanup_job(job: JobState) -> None:
@@ -376,6 +378,7 @@ def _render_status(job: Optional[JobState]) -> FT:
             Div("Click Generate Documentation to generate your first document.", cls="terminal terminal-idle"),
             cls="terminal-card",
             data_job_status="idle",
+            data_log_version="0",
         )
 
     # Show more logs when verbose mode is on (last 500 lines vs 200)
@@ -464,6 +467,7 @@ def _render_status(job: Optional[JobState]) -> FT:
         Pre(log_text, cls="terminal"),
         cls="terminal-card",
         data_job_status=job.status,
+        data_log_version=str(job.log_version),
     )
 
 
@@ -1125,74 +1129,95 @@ app, rt = fast_app(
         Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"),
         # Load htmx synchronously to ensure it's ready before user interaction
         Script(src="https://unpkg.com/htmx.org@1.9.10"),
-        # Fallback vanilla JS polling if htmx fails to load
+        # Smart polling: only fetch full status HTML when log version changes
         Script(r"""
-            // Robust form handling that works regardless of HTMX state
-            // (Domino CSP may block or interfere with external scripts)
             window.addEventListener('DOMContentLoaded', function() {
                 var htmxWorking = false;
-                
-                // Test if htmx is actually functional
                 if (typeof htmx !== 'undefined' && typeof htmx.ajax === 'function') {
                     htmxWorking = true;
                     console.log('htmx loaded and functional');
                 } else {
                     console.log('htmx not functional, using vanilla JS');
                 }
-                
-                // Status polling - always set up as backup
-                function pollStatus() {
-                    var panel = document.getElementById('status-panel');
-                    if (!panel) return;
-                    
-                    fetch('status')
-                        .then(function(r) { return r.text(); })
-                        .then(function(html) { panel.innerHTML = html; })
-                        .catch(function(e) { console.log('Status poll error:', e); });
-                }
-                
-                // Start polling if htmx isn't working (htmx would handle its own polling)
-                if (!htmxWorking) {
-                    setInterval(pollStatus, 2000);
+
+                // Track last-known version so we only swap when something changed
+                var _lastLogVersion = -1;
+                var _pollActive = true;
+                var TERMINAL_STATES = ['idle', 'completed', 'failed', 'cancelled', 'succeeded'];
+
+                function getCurrentVersion() {
+                    var card = document.querySelector('#status-panel [data-log-version]');
+                    return card ? parseInt(card.dataset.logVersion, 10) : -1;
                 }
 
-                // Direct click handler on Generate button - works regardless of htmx
+                // Full fetch — replaces status panel HTML
+                function fetchFullStatus() {
+                    var panel = document.getElementById('status-panel');
+                    if (!panel) return Promise.resolve();
+                    return fetch('status')
+                        .then(function(r) { return r.text(); })
+                        .then(function(html) {
+                            panel.innerHTML = html;
+                            _lastLogVersion = getCurrentVersion();
+                            // Fire the same event htmx would so styling hooks run
+                            document.body.dispatchEvent(new CustomEvent('statusUpdated'));
+                        })
+                        .catch(function(e) { console.log('Status fetch error:', e); });
+                }
+
+                // Lightweight check — only fetches full HTML when version changed
+                function smartPoll() {
+                    if (!_pollActive) return;
+                    fetch('status-check')
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            var serverVersion = data.logVersion || 0;
+                            if (serverVersion !== _lastLogVersion) {
+                                fetchFullStatus();
+                            }
+                            // Stop polling when job reaches a terminal state
+                            if (TERMINAL_STATES.indexOf(data.status) !== -1 && serverVersion === _lastLogVersion) {
+                                _pollActive = false;
+                            }
+                        })
+                        .catch(function(e) { console.log('Status check error:', e); });
+                }
+
+                // Initialise version from DOM
+                _lastLogVersion = getCurrentVersion();
+
+                // Start smart polling for app mode (Domino mode uses HTMX polling)
+                var isDominoMode = document.querySelector('input[name="execution_mode"][value="domino"]:checked');
+                if (!isDominoMode) {
+                    setInterval(smartPoll, 2000);
+                }
+
+                // Re-activate polling when a new job starts (after form submit)
+                window._activateStatusPolling = function() {
+                    _pollActive = true;
+                    _lastLogVersion = -1; // Force an immediate update
+                };
+
+                // Direct click handler on Generate button
                 var generateBtn = document.getElementById('generate-btn');
                 if (generateBtn) {
                     generateBtn.addEventListener('click', function(e) {
-                        // If htmx is working, let it handle the submission
-                        if (htmxWorking) {
-                            return; // htmx will handle it
-                        }
-                        
-                        // Otherwise, handle manually
+                        if (htmxWorking) return;
                         e.preventDefault();
                         e.stopPropagation();
-                        
                         var form = document.querySelector('form');
                         if (!form) return;
-                        
                         var formData = new FormData(form);
-                        
-                        // Disable button to prevent double-clicks
                         generateBtn.disabled = true;
                         generateBtn.textContent = 'Starting...';
-                        
-                        fetch('run', {
-                            method: 'POST',
-                            body: formData
-                        })
+                        fetch('run', { method: 'POST', body: formData })
                         .then(function(r) { return r.text(); })
                         .then(function(html) {
                             var panel = document.getElementById('status-panel');
                             if (panel) panel.innerHTML = html;
-                            // Re-enable button
                             generateBtn.disabled = false;
                             generateBtn.textContent = 'Generate Documentation';
-                            // Start polling for updates
-                            if (!htmxWorking) {
-                                pollStatus();
-                            }
+                            window._activateStatusPolling();
                         })
                         .catch(function(e) {
                             console.log('Form submit error:', e);
@@ -1201,43 +1226,40 @@ app, rt = fast_app(
                         });
                     });
                 }
-                
-                // Also handle form submit event as backup
+
+                // Form submit backup
                 var form = document.querySelector('form');
                 if (form && !htmxWorking) {
                     form.addEventListener('submit', function(e) {
                         e.preventDefault();
-                        // Trigger the button click handler
                         var btn = document.getElementById('generate-btn');
                         if (btn) btn.click();
                     });
                 }
-                
-                // Handle stop and clear button clicks via event delegation
+
+                // Stop and Clear button delegation
                 document.addEventListener('click', function(e) {
                     var target = e.target;
-                    
-                    // Stop button
                     if (target.textContent === 'Stop' && !target.classList.contains('terminal-action-disabled')) {
-                        if (htmxWorking) return; // let htmx handle it
+                        if (htmxWorking) return;
                         e.preventDefault();
                         fetch('stop', { method: 'POST' })
                             .then(function(r) { return r.text(); })
                             .then(function(html) {
                                 var panel = document.getElementById('status-panel');
                                 if (panel) panel.innerHTML = html;
+                                _lastLogVersion = getCurrentVersion();
                             });
                     }
-                    
-                    // Clear button
                     if (target.textContent === 'Clear' && !target.classList.contains('terminal-action-disabled')) {
-                        if (htmxWorking) return; // let htmx handle it
+                        if (htmxWorking) return;
                         e.preventDefault();
                         fetch('clear-terminal', { method: 'POST' })
                             .then(function(r) { return r.text(); })
                             .then(function(html) {
                                 var panel = document.getElementById('status-panel');
                                 if (panel) panel.innerHTML = html;
+                                _lastLogVersion = getCurrentVersion();
                             });
                     }
                 });
@@ -1338,10 +1360,9 @@ app, rt = fast_app(
             .config-grid {
                 display: grid;
                 grid-template-columns: repeat(3, 1fr);
-                grid-template-rows: 1fr;
+                align-items: stretch;
                 gap: 1rem;
-                margin-bottom: 1rem;
-                flex: 1;
+                margin-bottom: 0;
             }
             @media (max-width: 1100px) {
                 .config-grid {
@@ -1857,14 +1878,14 @@ app, rt = fast_app(
                 font-size: 0.8rem;
                 line-height: 1.5;
                 color: #E0E0E0;
-                min-height: 120px;
+                min-height: 0;
                 max-height: 300px;
                 overflow-y: auto;
                 white-space: pre-wrap;
                 margin-top: 0.5rem;
             }
             .terminal-idle {
-                min-height: 80px;
+                min-height: 0;
                 color: #808080;
                 display: flex;
                 align-items: center;
@@ -2143,13 +2164,15 @@ app, rt = fast_app(
             .spec-list-item:last-child { border-bottom: none; }
 
             /* Left/right split layout — stretch to fill page */
-            .page-split { display: flex; gap: 1.5rem; align-items: stretch; flex: 1; }
-            .split-left { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
-            .split-right {
-                flex: 0 0 clamp(300px, 28%, 380px);
-                display: flex;
-                flex-direction: column;
+            .page-split {
+                display: grid;
+                grid-template-columns: 1fr clamp(300px, 28%, 380px);
+                grid-template-rows: 1fr auto;
+                gap: 1rem 1.5rem;
             }
+            .page-split > form { grid-column: 1; grid-row: 1; }
+            .page-split > .split-right { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; }
+            .page-split > .btn-row { grid-column: 1; grid-row: 2; justify-self: end; }
             .output-panel {
                 flex: 1;
                 min-height: 0;
@@ -2176,12 +2199,14 @@ app, rt = fast_app(
             }
             .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
             .tab-btn:not(.active):hover { color: var(--text-primary); }
-            .tab-content { padding: 1rem; flex: 1; }
+            .tab-content { padding: 1rem; flex: 1; overflow-y: auto; min-height: 0; }
             .tab-content.hidden { display: none; }
             .tab-content .terminal-card { border: none; box-shadow: none; padding: 0; }
             @media (max-width: 1100px) {
-                .page-split { flex-direction: column; }
-                .split-right { flex: none; width: 100%; }
+                .page-split { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+                .page-split > form { grid-column: 1; grid-row: 1; }
+                .page-split > .split-right { grid-column: 1; grid-row: 2; }
+                .page-split > .btn-row { grid-column: 1; grid-row: 3; justify-self: end; }
             }
             """
         ),
@@ -2240,14 +2265,25 @@ app, rt = fast_app(
                         }
                     }
 
-                    // Update HTMX polling on status panel and fetch immediately
+                    // Update polling on status panel
                     const panel = document.getElementById('status-panel');
-                    if (panel && typeof htmx !== 'undefined') {
-                        const url = isDomino ? 'domino-status' : 'status';
-                        panel.setAttribute('hx-get', url);
-                        panel.setAttribute('hx-trigger', isDomino ? 'every 10s' : 'every 2s');
-                        htmx.process(panel);
-                        htmx.ajax('GET', url, {target: '#status-panel', swap: 'innerHTML'});
+                    if (panel) {
+                        if (isDomino && typeof htmx !== 'undefined') {
+                            // Domino mode: use HTMX polling
+                            panel.setAttribute('hx-get', 'domino-status');
+                            panel.setAttribute('hx-trigger', 'every 10s');
+                            htmx.process(panel);
+                            htmx.ajax('GET', 'domino-status', {target: '#status-panel', swap: 'innerHTML'});
+                        } else {
+                            // App mode: remove HTMX polling, smart JS poll handles it
+                            panel.removeAttribute('hx-get');
+                            panel.removeAttribute('hx-trigger');
+                            if (typeof htmx !== 'undefined') htmx.process(panel);
+                            // Activate smart polling and force an immediate check
+                            if (typeof window._activateStatusPolling === 'function') {
+                                window._activateStatusPolling();
+                            }
+                        }
                     }
 
                     // Update output directory default for the selected mode
@@ -2463,31 +2499,31 @@ app, rt = fast_app(
                     sync();
                 })();
 
-                // Terminal states that should stop polling
-                const TERMINAL_STATES = ['completed', 'failed', 'cancelled', 'succeeded', 'idle'];
+                // Run styling/scrolling after any status update (HTMX swap or smart poll)
+                function onStatusUpdate() {
+                    styleTerminalLines();
+                    scrollTerminalToBottom();
+                }
 
-                // Run on load and whenever htmx swaps content
                 document.body.addEventListener('htmx:afterSwap', function(e) {
                     if (e.detail && e.detail.target && e.detail.target.id === 'status-panel') {
                         showOutputTab('live');
-                        // Stop or resume polling based on job state
-                        const card = e.detail.target.querySelector('[data-job-status]');
-                        const panel = document.getElementById('status-panel');
-                        if (card && panel) {
-                            const isDone = TERMINAL_STATES.indexOf(card.dataset.jobStatus) !== -1;
-                            if (isDone) {
-                                panel.removeAttribute('hx-trigger');
-                            } else if (!panel.getAttribute('hx-trigger')) {
-                                const isDomino = document.querySelector('input[name="execution_mode"]:checked');
-                                const interval = (isDomino && isDomino.value === 'domino') ? 'every 10s' : 'every 2s';
-                                panel.setAttribute('hx-trigger', interval);
-                            }
-                            if (typeof htmx !== 'undefined') htmx.process(panel);
+                    }
+                    onStatusUpdate();
+                });
+
+                // Custom event fired by smart polling after DOM update
+                document.body.addEventListener('statusUpdated', onStatusUpdate);
+
+                // Re-activate smart polling when HTMX submits the form
+                document.body.addEventListener('htmx:afterRequest', function(e) {
+                    if (e.detail && e.detail.pathInfo && e.detail.pathInfo.requestPath === '/run') {
+                        if (typeof window._activateStatusPolling === 'function') {
+                            window._activateStatusPolling();
                         }
                     }
-                    styleTerminalLines();
-                    scrollTerminalToBottom();
                 });
+
                 setInterval(styleTerminalLines, 500);
             });
             """
@@ -2597,7 +2633,6 @@ def index(req: Request):
                 ),
                 cls="mode-toggle",
             ),
-            Div(
             Div(
             Form(
                 # Three cards stacked vertically: What to document | Run | Advanced
@@ -2883,42 +2918,38 @@ def index(req: Request):
                 Button("Generate Documentation", type="submit", id="generate-btn", cls="primary", form="main-form"),
                 cls="btn-row",
             ),
-                    cls="split-left",
-                ),
+            Div(
                 Div(
                     Div(
-                        Div(
-                            Button("Output", cls="tab-btn active", data_tab="live", onclick="showOutputTab('live')"),
-                            Button("History", cls="tab-btn", data_tab="history", onclick="showOutputTab('history')"),
-                            cls="tab-bar",
-                        ),
-                        Div(
-                            Div(
-                                _render_domino_status(latest_domino) if (default_mode == "domino") else _render_status(_resolve_job(ACTIVE_JOB_ID)),
-                                id="status-panel",
-                                hx_get="domino-status" if default_mode == "domino" else "status",
-                                hx_trigger="every 10s" if default_mode == "domino" else "every 2s",
-                                hx_swap="innerHTML",
-                            ),
-                            id="tab-live",
-                            cls="tab-content",
-                        ),
-                        Div(
-                            Div(
-                                _render_job_history_table(username),
-                                id="job-history-content",
-                                hx_get="job-history",
-                                hx_trigger="every 15s",
-                                hx_swap="innerHTML",
-                            ),
-                            id="tab-history",
-                            cls="tab-content hidden",
-                        ),
-                        cls="output-panel",
+                        Button("Output", cls="tab-btn active", data_tab="live", onclick="showOutputTab('live')"),
+                        Button("History", cls="tab-btn", data_tab="history", onclick="showOutputTab('history')"),
+                        cls="tab-bar",
                     ),
-                    cls="split-right",
+                    Div(
+                        Div(
+                            _render_domino_status(latest_domino) if (default_mode == "domino") else _render_status(_resolve_job(ACTIVE_JOB_ID)),
+                            id="status-panel",
+                            **({"hx_get": "domino-status", "hx_trigger": "every 10s", "hx_swap": "innerHTML"} if default_mode == "domino" else {}),
+                        ),
+                        id="tab-live",
+                        cls="tab-content",
+                    ),
+                    Div(
+                        Div(
+                            _render_job_history_table(username),
+                            id="job-history-content",
+                            hx_get="job-history",
+                            hx_trigger="every 15s",
+                            hx_swap="innerHTML",
+                        ),
+                        id="tab-history",
+                        cls="tab-content hidden",
+                    ),
+                    cls="output-panel",
                 ),
-                cls="page-split",
+                cls="split-right",
+            ),
+            cls="page-split",
             ),
             cls="page",
         ),
@@ -2958,6 +2989,15 @@ async def run(req: Request):
 def status():
     job = _resolve_job(ACTIVE_JOB_ID)
     return _render_status(job)
+
+
+@rt("/status-check")
+def status_check():
+    """Lightweight endpoint returning only version + status (no HTML)."""
+    job = _resolve_job(ACTIVE_JOB_ID)
+    if not job:
+        return Response(json.dumps({"status": "idle", "logVersion": 0}), media_type="application/json")
+    return Response(json.dumps({"status": job.status, "logVersion": job.log_version}), media_type="application/json")
 
 
 @rt("/clear-terminal")
