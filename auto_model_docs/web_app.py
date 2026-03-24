@@ -2293,6 +2293,44 @@ app, rt = fast_app(
                         });
                 }
 
+                // ── Language detection ────────────────────────────────────────────
+                var langRow = document.getElementById('lang-detection-row');
+                var langName = document.getElementById('lang-detected-name');
+                var langCount = document.getElementById('lang-detected-count');
+                var langInput = document.getElementById('field-detected-language');
+                var langSelect = document.getElementById('lang-override-select');
+
+                function detectLanguage(codeRoot) {
+                    var url = '/api/detect-language';
+                    if (codeRoot) url += '?code_root=' + encodeURIComponent(codeRoot);
+                    fetch(url)
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            if (langRow) langRow.style.display = '';
+                            if (data.language) {
+                                if (langName) langName.textContent = data.display_name;
+                                if (langCount) langCount.textContent = '(' + data.file_count + ' files)';
+                                if (langInput) langInput.value = data.language;
+                                if (langSelect) langSelect.value = data.language;
+                            } else {
+                                if (langName) langName.textContent = '';
+                                if (langCount) langCount.textContent = '';
+                                if (langRow) {
+                                    langRow.innerHTML = '<span style="color:#7F8385;">No supported source files found. Supports Python, R, SAS, MATLAB.</span>';
+                                    langRow.style.display = '';
+                                }
+                            }
+                        })
+                        .catch(function() {});
+                }
+
+                window.handleLanguageOverride = function(lang) {
+                    if (langInput) langInput.value = lang;
+                    detectLanguage();
+                };
+
+                detectLanguage();
+
                 // ── All DOM references declared up-front to avoid TDZ errors ──────
                 const modeDominoLabel   = document.getElementById('mode-domino-label');
                 const modeAppLabel      = document.getElementById('mode-app-label');
@@ -2733,8 +2771,37 @@ def index(req: Request):
                 style="display: none;",
             ),
             Div(
+                Span("Detected: ", style="color: #7F8385;"),
+                Span(id="lang-detected-name", style="color: #3F4547; font-weight: 600;"),
+                Span(id="lang-detected-count", style="color: #7F8385; margin-left: 4px;"),
+                Button(
+                    "Override",
+                    id="lang-override-btn",
+                    type="button",
+                    style="background: none; border: none; color: #3B3BD3; cursor: pointer; "
+                          "padding: 8px 12px; min-height: 44px; font-size: inherit; margin-left: 8px;",
+                    aria_label="Override detected language",
+                    onclick="document.getElementById('lang-override-select').style.display = "
+                            "document.getElementById('lang-override-select').style.display === 'none' ? 'inline-block' : 'none';",
+                ),
+                Select(
+                    Option("Python", value="python"),
+                    Option("R", value="r"),
+                    Option("SAS", value="sas"),
+                    Option("MATLAB", value="matlab"),
+                    id="lang-override-select",
+                    style="display: none; border: 1px solid #DBE4E8; border-radius: 4px; "
+                          "padding: 4px 8px; margin-left: 4px;",
+                    onchange="handleLanguageOverride(this.value)",
+                ),
+                id="lang-detection-row",
+                style="display: none; padding: 6px 16px; font-size: 14px;",
+                cls="target-project-banner",
+            ),
+            Div(
             Form(
                 Input(type="hidden", name="target_project", id="field-project-id"),
+                Input(type="hidden", name="detected_language", id="field-detected-language", value="python"),
                 # Three cards stacked vertically: What to document | Run | Advanced
                 Div(
                     # Card 1: What to document (spec + artifact filtering)
@@ -3179,6 +3246,38 @@ def api_hardware_tiers():
     if not options:
         options = [Option("(default)", value="")]
     return Select(*options, name="hardware_tier", id="field-hardware_tier")
+
+
+@rt("/api/detect-language")
+def api_detect_language(req: Request):
+    """Detect project language by counting source files in code_root."""
+    from autodoc.core.models import detect_language as _detect_lang, LANGUAGE_PROFILES
+
+    code_root_param = req.query_params.get("code_root", "")
+    if code_root_param:
+        code_root = Path(code_root_param)
+    else:
+        code_root = _get_default_code_root()
+
+    profile, count = _detect_lang(code_root)
+    if profile:
+        return Response(
+            json.dumps({
+                "language": profile.name,
+                "display_name": profile.display_name,
+                "file_count": count,
+            }),
+            media_type="application/json",
+        )
+    return Response(
+        json.dumps({
+            "language": None,
+            "display_name": None,
+            "file_count": 0,
+            "supported": list(LANGUAGE_PROFILES.keys()),
+        }),
+        media_type="application/json",
+    )
 
 
 @rt("/api/resolve-project")

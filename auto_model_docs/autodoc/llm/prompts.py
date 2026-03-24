@@ -4,7 +4,10 @@ This module contains all prompts used throughout the system,
 making it easy to review, update, and maintain them in one place.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from autodoc.core.models import LanguageProfile
 
 
 # =============================================================================
@@ -54,29 +57,45 @@ SYSTEM_LIST_GENERATOR = (
 # Code Scanner Prompts
 # =============================================================================
 
-def build_code_analysis_prompt(code_contents: List[Dict[str, str]]) -> str:
+def build_code_analysis_prompt(
+    code_contents: List[Dict[str, str]],
+    profile: Optional["LanguageProfile"] = None,
+) -> str:
     """Build prompt for analyzing ML codebase.
 
     Args:
         code_contents: List of dicts with 'file' and 'content' keys.
+        profile: Language profile for code-fence and framework hints.
 
     Returns:
         Formatted prompt string.
     """
+    fence_lang = profile.code_fence_lang if profile else "python"
     code_text = "\n\n".join([
-        f"### File: {c['file']}\n```python\n{c['content']}\n```"
+        f"### File: {c['file']}\n```{fence_lang}\n{c['content']}\n```"
         for c in code_contents
     ])
 
+    # Language-specific framework and library hints
+    if profile:
+        framework_line = f"\n\nLanguage: {profile.display_name}\n{profile.framework_hints}"
+        lib_examples = ", ".join(profile.library_examples)
+        transform_cats = ", ".join(profile.transformation_categories)
+    else:
+        framework_line = ""
+        lib_examples = "sklearn, xgboost, tensorflow, pytorch"
+        transform_cats = "scaling, encoding, feature engineering"
+
     return f"""Analyze this machine learning codebase and extract information.
+{framework_line}
 
 {code_text}
 
 Extract the following information:
-1. Model classes used (e.g., sklearn models, xgboost, tensorflow, pytorch, etc.)
+1. Model classes/functions used (e.g., {lib_examples}, etc.)
 2. Feature names/columns used in the model
 3. Target variable name
-4. Data transformations (scaling, encoding, feature engineering, etc.)
+4. Data transformations ({transform_cats}, etc.)
 5. ML task type (classification, regression, clustering, etc.)
 6. Hyperparameters and their values
 7. Data sources (files, databases, APIs)
@@ -90,7 +109,8 @@ CRITICAL INSTRUCTIONS:
 - Do NOT claim SMOTE, cross-validation, or other techniques unless they are explicitly imported and used
 - For the "insights" field, only describe what is demonstrably in the code - no assumptions or common practices
 - For "code_evidence", provide concise statements that can be quoted in the report.
-- Each evidence item must include: statement, file path, symbol (class/function), and a short snippet."""
+- Each evidence item must include: statement, file path, symbol (class/function), a short snippet, and the start_line and end_line numbers from the line-numbered source.
+- The source code is annotated with line numbers (e.g., "42: code_here"). Use these to report accurate start_line and end_line values."""
 
 
 CODE_ANALYSIS_SCHEMA: Dict[str, Any] = {
@@ -152,6 +172,14 @@ CODE_ANALYSIS_SCHEMA: Dict[str, Any] = {
                     "file": {"type": "string"},
                     "symbol": {"type": "string"},
                     "snippet": {"type": "string"},
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Starting line number from the line-numbered source",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Ending line number from the line-numbered source",
+                    },
                 },
                 "required": ["statement", "file"],
             },
