@@ -82,58 +82,67 @@ class TestIsCrossProject:
 
 class TestListDatasets:
     @patch.object(ds, "_api_request")
-    def test_v2_single_page(self, mock_req):
+    def test_single_page(self, mock_req):
+        """v2 API returns datasets with nested 'dataset' wrapper."""
         mock_req.return_value = _mock_response(json_data={
-            "items": [
+            "datasets": [
                 {"dataset": {"datasetId": "ds-1", "datasetName": "my-data",
-                             "description": "desc", "readWriteSnapshotId": "snap-1"}},
+                             "readWriteSnapshotId": "snap-1"}},
                 {"dataset": {"datasetId": "ds-2", "datasetName": "autodoc-specs",
-                             "description": "", "readWriteSnapshotId": "snap-2"}},
+                             "readWriteSnapshotId": "snap-2"}},
             ]
         })
         result = ds.list_datasets("proj-123")
         assert len(result) == 2
         assert result[0]["name"] == "my-data"
-        assert result[1]["rwSnapshotId"] == "snap-2"
+        assert result[0]["rwSnapshotId"] == "snap-1"
 
     @patch.object(ds, "_api_request")
-    def test_v2_pagination(self, mock_req):
+    def test_pagination(self, mock_req):
         page1 = _mock_response(json_data={
-            "items": [{"dataset": {"datasetId": f"ds-{i}", "datasetName": f"ds{i}"}}
-                      for i in range(50)]
+            "datasets": [{"dataset": {"datasetId": f"ds-{i}", "datasetName": f"ds{i}"}}
+                         for i in range(50)]
         })
         page2 = _mock_response(json_data={
-            "items": [{"dataset": {"datasetId": "ds-50", "datasetName": "ds50"}}]
+            "datasets": [{"dataset": {"datasetId": "ds-50", "datasetName": "ds50"}}]
         })
         mock_req.side_effect = [page1, page2]
         result = ds.list_datasets("proj-123")
         assert len(result) == 51
         assert mock_req.call_count == 2
 
-    @patch.object(ds, "_list_datasets_v1")
     @patch.object(ds, "_api_request")
-    def test_v2_404_falls_back_to_v1(self, mock_req, mock_v1):
-        mock_req.side_effect = httpx.HTTPStatusError(
-            "404", request=MagicMock(),
-            response=MagicMock(status_code=404),
-        )
-        mock_v1.return_value = [{"id": "ds-v1", "name": "fallback"}]
+    def test_no_minimum_permission(self, mock_req):
+        """Must NOT send minimumPermission (it causes 500)."""
+        mock_req.return_value = _mock_response(json_data={"datasets": []})
+        ds.list_datasets("proj-123")
+        params = mock_req.call_args.kwargs.get("params", {})
+        assert "minimumPermission" not in params
+
+    @patch.object(ds, "_api_request")
+    def test_uses_v2_endpoint(self, mock_req):
+        mock_req.return_value = _mock_response(json_data={"datasets": []})
+        ds.list_datasets("proj-123")
+        assert "/api/datasetrw/v2/datasets" in mock_req.call_args.args[1]
+
+    @patch.object(ds, "_api_request")
+    def test_snapshot_ids_fallback(self, mock_req):
+        """snapshotIds array used when readWriteSnapshotId is absent."""
+        mock_req.return_value = _mock_response(json_data={
+            "datasets": [
+                {"dataset": {"datasetId": "ds-1", "datasetName": "t", "snapshotIds": ["snap-a"]}},
+                {"dataset": {"datasetId": "ds-2", "datasetName": "t2"}},
+            ]
+        })
         result = ds.list_datasets("proj-123")
-        assert result == [{"id": "ds-v1", "name": "fallback"}]
-        mock_v1.assert_called_once()
+        assert result[0]["rwSnapshotId"] == "snap-a"
+        assert result[1]["rwSnapshotId"] is None
 
     @patch.object(ds, "_api_request")
     def test_empty_datasets(self, mock_req):
-        mock_req.return_value = _mock_response(json_data={"items": []})
+        mock_req.return_value = _mock_response(json_data={"datasets": []})
         result = ds.list_datasets("proj-123")
         assert result == []
-
-    @patch.object(ds, "_api_request")
-    def test_uses_minimum_permission(self, mock_req):
-        mock_req.return_value = _mock_response(json_data={"items": []})
-        ds.list_datasets("proj-123")
-        call_kwargs = mock_req.call_args
-        assert call_kwargs.kwargs["params"]["minimumPermission"] == "DatasetRwEditor"
 
 
 # ---------------------------------------------------------------------------
@@ -375,9 +384,9 @@ class TestApiRequest:
         ds._api_request("GET", "/api/test", cross_project=False)
         headers = mock_client.request.call_args.kwargs["headers"]
         assert headers["Authorization"] == "Bearer sidecar-ephemeral-token"
-        # Datasets API always routes through nucleus (DOMINO_API_HOST), not sidecar
+        # Same-project routes through sidecar proxy
         url = mock_client.request.call_args.args[1]
-        assert url.startswith("https://domino.example.com")
+        assert url.startswith("http://localhost:8899")
 
     @patch("httpx.Client")
     @patch("httpx.get", side_effect=Exception("no sidecar"))

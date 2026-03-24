@@ -113,14 +113,8 @@ def _api_request(
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRIES,
 ) -> httpx.Response:
-    """Authenticated request to the Domino Datasets API.
-
-    Always routes through DOMINO_API_HOST (nucleus) directly, not the
-    sidecar proxy.  The sidecar (localhost:8899) doesn't route
-    /api/datasetrw/ paths — it only serves standard Domino API endpoints
-    and the /access-token endpoint for ephemeral tokens.
-    """
-    base = _resolve_nucleus_host()
+    """Authenticated request to the Domino Datasets API."""
+    base = _resolve_api_host() if not cross_project else _resolve_nucleus_host()
     if not base:
         raise RuntimeError("No Domino API host configured")
 
@@ -168,87 +162,48 @@ def _api_request(
 # ---------------------------------------------------------------------------
 
 def list_datasets(project_id: Optional[str] = None) -> list[dict[str, Any]]:
-    """List writable datasets for a project (minimumPermission=DatasetRwEditor)."""
+    """List datasets for a project.
+
+    Uses the v2 API without minimumPermission (that param isn't a valid
+    enum value and caused 500s).
+    """
     pid = _resolve_project_id(project_id)
     cross = _is_cross_project(pid)
-    logger.info("Listing writable datasets for project %s (cross=%s)", pid, cross)
+    logger.info("Listing datasets for project %s (cross=%s)", pid, cross)
 
     datasets: list[dict[str, Any]] = []
     offset = 0
     page_size = 50
 
-    while True:
-        try:
-            resp = _api_request(
-                "GET", "/api/datasetrw/v2/datasets",
-                cross_project=cross,
-                params={
-                    "projectIdsToInclude": pid,
-                    "minimumPermission": "DatasetRwEditor",
-                    "offset": offset,
-                    "limit": page_size,
-                },
-            )
-            data = resp.json()
-            logger.info("v2 datasets response (offset=%d): %s", offset, str(data)[:500])
-            items = data.get("items", [])
-            if not items:
-                break
-            for item in items:
-                ds = item.get("dataset", item)
-                datasets.append({
-                    "id": ds.get("datasetId") or ds.get("id", ""),
-                    "name": ds.get("datasetName") or ds.get("name", ""),
-                    "description": ds.get("description", ""),
-                    "rwSnapshotId": ds.get("readWriteSnapshotId"),
-                })
-            if len(items) < page_size:
-                break
-            offset += page_size
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (404, 500):
-                logger.warning(
-                    "v2 datasets API returned %s, falling back to v1",
-                    exc.response.status_code,
-                )
-                return _list_datasets_v1(pid, cross)
-            raise
-
-    logger.info("Found %d writable datasets for project %s", len(datasets), pid)
-    return datasets
-
-
-def _list_datasets_v1(
-    project_id: str, cross_project: bool = False,
-) -> list[dict[str, Any]]:
-    """Fallback: list datasets via v1 API (no minimumPermission filter)."""
-    datasets: list[dict[str, Any]] = []
-    offset = 0
-    page_size = 50
-
-    logger.info("Falling back to v1 datasets API for project %s", project_id)
     while True:
         resp = _api_request(
-            "GET", "/api/datasetrw/v1/datasets",
-            cross_project=cross_project,
-            params={"projectId": project_id, "offset": offset, "limit": page_size},
+            "GET", "/api/datasetrw/v2/datasets",
+            cross_project=cross,
+            params={
+                "projectIdsToInclude": pid,
+                "offset": offset,
+                "limit": page_size,
+            },
         )
         data = resp.json()
-        logger.info("v1 datasets response (offset=%d): %s", offset, str(data)[:500])
-        items = data.get("items", [])
+        # v2 wraps each item: {"datasets": [{"dataset": {...}, "projectInfo": {...}}, ...]}
+        items = data.get("datasets") or data.get("items") or []
         if not items:
             break
-        for ds in items:
+        for item in items:
+            ds = item.get("dataset", item) if isinstance(item, dict) else item
+            snapshot_ids = ds.get("snapshotIds") or []
             datasets.append({
                 "id": ds.get("datasetId") or ds.get("id", ""),
                 "name": ds.get("datasetName") or ds.get("name", ""),
                 "description": ds.get("description", ""),
-                "rwSnapshotId": ds.get("readWriteSnapshotId"),
+                "rwSnapshotId": ds.get("readWriteSnapshotId") or (snapshot_ids[0] if snapshot_ids else None),
             })
         if len(items) < page_size:
             break
         offset += page_size
 
+    logger.info("Found %d datasets for project %s", len(datasets), pid)
     return datasets
 
 
