@@ -2,10 +2,197 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 from pydantic import BaseModel, Field
+
+
+# =============================================================================
+# Language Profile
+# =============================================================================
+
+
+@dataclass
+class LanguageProfile:
+    """Per-language configuration for code scanning and analysis."""
+
+    name: str
+    display_name: str
+    file_extensions: List[str]
+    priority_keywords: List[str]
+    exclude_patterns: List[str]
+    framework_hints: str
+    library_examples: List[str]
+    transformation_categories: List[str]
+    secret_patterns: List[str]
+    code_fence_lang: str
+
+
+# Built-in language profiles
+PYTHON_PROFILE = LanguageProfile(
+    name="python",
+    display_name="Python",
+    file_extensions=["*.py"],
+    priority_keywords=["train", "model", "feature", "pipeline", "main", "predict"],
+    exclude_patterns=[
+        "test_", "_test.py", "conftest.py", "__pycache__", ".git",
+        "venv", ".venv", "node_modules", ".pytest_cache", "__init__.py",
+    ],
+    framework_hints=(
+        "Look for usage of scikit-learn (sklearn), PyTorch, TensorFlow, XGBoost, "
+        "LightGBM, Keras, pandas, numpy. Note: Python uses import statements, "
+        "class definitions, and decorator patterns."
+    ),
+    library_examples=["sklearn", "xgboost", "tensorflow", "pytorch", "lightgbm", "keras"],
+    transformation_categories=["scaling", "encoding", "feature engineering", "imputation"],
+    secret_patterns=[],
+    code_fence_lang="python",
+)
+
+R_PROFILE = LanguageProfile(
+    name="r",
+    display_name="R",
+    file_extensions=["*.R", "*.r", "*.Rmd", "*.rmd"],
+    priority_keywords=["train", "model", "feature", "predict", "fit", "recipe", "workflow"],
+    exclude_patterns=[
+        "test-", "tests/", "man/", "vignettes/", ".Rproj.user",
+        ".git", "renv/", "packrat/",
+    ],
+    framework_hints=(
+        "Look for usage of tidymodels (recipes, parsnip, workflows, tune, yardstick), "
+        "caret, mlr3, xgboost, ranger, glmnet, randomForest, and e1071. "
+        "Note: R uses library() for imports, <- for assignment, and formula syntax "
+        "(y ~ x1 + x2) for model specification."
+    ),
+    library_examples=[
+        "tidymodels", "caret", "mlr3", "xgboost", "ranger",
+        "glmnet", "randomForest", "e1071", "recipes", "parsnip",
+    ],
+    transformation_categories=[
+        "recipe steps", "formula transformations", "feature engineering",
+        "data preprocessing", "imputation",
+    ],
+    secret_patterns=[".Renviron", ".Rprofile"],
+    code_fence_lang="r",
+)
+
+SAS_PROFILE = LanguageProfile(
+    name="sas",
+    display_name="SAS",
+    file_extensions=["*.sas", "*.SAS"],
+    priority_keywords=["PROC", "MODEL", "LOGISTIC", "FOREST", "GRADBOOST", "DATA"],
+    exclude_patterns=["autoexec.sas", ".git"],
+    framework_hints=(
+        "Look for usage of PROC LOGISTIC, PROC FOREST, PROC GRADBOOST, "
+        "PROC HPFOREST, SAS Visual Data Mining, and SAS Model Studio macros. "
+        "Note: SAS uses PROC statements for procedures, DATA steps for data "
+        "manipulation, and macro variables (%let, &var) for parameterization."
+    ),
+    library_examples=[
+        "PROC LOGISTIC", "PROC FOREST", "PROC GRADBOOST",
+        "PROC HPFOREST", "PROC REG", "PROC GLM",
+    ],
+    transformation_categories=[
+        "DATA step transformations", "PROC STDIZE", "PROC MI",
+        "variable encoding", "feature selection",
+    ],
+    secret_patterns=[
+        r"(?i)%let\s+(password|pwd)\s*=",
+        r"(?i)libname\s+\w+.*\b(user|password)\s*=",
+    ],
+    code_fence_lang="sas",
+)
+
+MATLAB_PROFILE = LanguageProfile(
+    name="matlab",
+    display_name="MATLAB",
+    file_extensions=["*.m"],
+    priority_keywords=["fit", "train", "predict", "model", "classify", "regression"],
+    exclude_patterns=["test_", "+", ".git"],
+    framework_hints=(
+        "Look for usage of Statistics and ML Toolbox (fitcecoc, fitctree, "
+        "fitcensemble, fitcsvm, fitrgp), Deep Learning Toolbox (trainNetwork, "
+        "dlnetwork), Regression Learner, and Classification Learner apps. "
+        "Note: MATLAB uses function files, scripts, and object-oriented patterns "
+        "with classdef."
+    ),
+    library_examples=[
+        "fitcecoc", "fitctree", "fitcensemble", "fitcsvm",
+        "fitrgp", "trainNetwork", "dlnetwork",
+    ],
+    transformation_categories=[
+        "feature normalization", "PCA", "feature selection",
+        "data preprocessing", "table operations",
+    ],
+    secret_patterns=[],
+    code_fence_lang="matlab",
+)
+
+# Registry for lookup by name
+LANGUAGE_PROFILES: Dict[str, LanguageProfile] = {
+    "python": PYTHON_PROFILE,
+    "r": R_PROFILE,
+    "sas": SAS_PROFILE,
+    "matlab": MATLAB_PROFILE,
+}
+
+# Tie-break order (higher priority first)
+LANGUAGE_PRIORITY: List[str] = ["python", "r", "sas", "matlab"]
+
+
+def get_language_profile(name: str) -> LanguageProfile:
+    """Get a language profile by name.
+
+    Args:
+        name: Language name (python, r, sas, matlab).
+
+    Returns:
+        The matching LanguageProfile.
+
+    Raises:
+        ValueError: If the language name is not recognized.
+    """
+    profile = LANGUAGE_PROFILES.get(name.lower())
+    if profile is None:
+        supported = ", ".join(LANGUAGE_PROFILES.keys())
+        raise ValueError(f"Unknown language '{name}'. Supported: {supported}")
+    return profile
+
+
+def detect_language(code_root: "Path") -> Tuple[Optional[LanguageProfile], int]:
+    """Detect the project language by counting file extensions.
+
+    Args:
+        code_root: Root directory to scan.
+
+    Returns:
+        Tuple of (detected profile or None, file count).
+        Returns (None, 0) if no supported files found.
+    """
+    from pathlib import Path
+
+    if not code_root.exists():
+        return None, 0
+
+    counts: Dict[str, int] = {}
+    for lang_name, profile in LANGUAGE_PROFILES.items():
+        count = 0
+        for ext in profile.file_extensions:
+            count += len(list(code_root.rglob(ext)))
+        if count > 0:
+            counts[lang_name] = count
+
+    if not counts:
+        return None, 0
+
+    # Find max count, break ties using LANGUAGE_PRIORITY
+    max_count = max(counts.values())
+    for lang in LANGUAGE_PRIORITY:
+        if counts.get(lang, 0) == max_count:
+            return LANGUAGE_PROFILES[lang], max_count
+
+    return None, 0
 
 
 # =============================================================================
@@ -106,6 +293,8 @@ class CodeEvidence:
     symbol: str
     statement: str
     snippet: str
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
 
 
 @dataclass
@@ -123,6 +312,7 @@ class CodeContext:
     insights: str = ""
     readme: Optional[str] = None
     code_evidence: List[CodeEvidence] = field(default_factory=list)
+    language: str = "python"
 
 
 @dataclass
@@ -186,6 +376,7 @@ class GenerationContext:
     model_name: Optional[str] = None
     model_run_id: Optional[str] = None
     hint: Optional[str] = None
+    language: str = "python"
 
 
 # =============================================================================
