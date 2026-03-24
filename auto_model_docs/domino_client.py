@@ -84,7 +84,7 @@ def _domino_request(
     *,
     cross_project: bool = False,
     max_retries: int = 2,
-) -> dict[str, Any]:
+) -> Any:
     """Make an HTTP request to the Domino API and return parsed JSON.
 
     *cross_project* bypasses the local sidecar proxy and calls
@@ -178,6 +178,42 @@ def resolve_project(project_id: str) -> dict[str, Any]:
 
     _project_cache[project_id] = data
     return data
+
+
+def list_branches_api(project_id: str) -> list[dict[str, Any]]:
+    """Fetch branches for *project_id* via the Domino REST API.
+
+    Uses the cross-project route (DOMINO_API_HOST) so it returns branches for
+    the target project, not the hosting app's repo.  Falls back to
+    :func:`list_branches` (local git) on any error.
+    """
+    try:
+        data = _domino_request(
+            "GET",
+            f"/v4/projects/{project_id}/branches",
+            cross_project=True,
+        )
+        # API returns a list of branch objects; normalise to [{"name": ...}]
+        branches: list[dict[str, Any]] = []
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    name = item.get("name") or item.get("branchName") or ""
+                elif isinstance(item, str):
+                    name = item
+                else:
+                    continue
+                if name:
+                    branches.append({"name": name})
+        if branches:
+            return branches
+    except Exception as exc:
+        logger.warning(
+            "Failed to list branches via API for project %s, falling back to local git: %s",
+            project_id,
+            exc,
+        )
+    return list_branches()
 
 
 def list_branches() -> list[dict[str, Any]]:

@@ -2319,6 +2319,20 @@ app, rt = fast_app(
                 const checkedMode = document.querySelector('input[name="execution_mode"]:checked');
                 applyExecutionMode(checkedMode ? checkedMode.value : 'domino');
 
+                // ── Refresh branch dropdown for cross-project targeting ────────────
+                const _projectId = new URLSearchParams(window.location.search).get('projectId') || '';
+                if (_projectId) {
+                    var branchSelect = document.getElementById('field-branch');
+                    if (branchSelect) {
+                        fetch('api/branches?projectId=' + encodeURIComponent(_projectId))
+                            .then(function(r) { return r.text(); })
+                            .then(function(html) {
+                                branchSelect.outerHTML = html;
+                            })
+                            .catch(function(e) { console.log('Branch refresh error:', e); });
+                    }
+                }
+
                 // ── API key source radio ───────────────────────────────────────────
                 function applyApiKeySource(src) {
                     const show = src === 'pass_now';
@@ -2568,9 +2582,13 @@ def index(req: Request):
     default_mode = "domino" if _DOMINO_AVAILABLE else "app"
 
     # Pre-fetch branches and hardware tiers for server-side rendering
+    project_id = req.query_params.get("projectId", "").strip()
     if _DOMINO_AVAILABLE:
         try:
-            _branches_raw = domino_client.list_branches()
+            if project_id:
+                _branches_raw = domino_client.list_branches_api(project_id)
+            else:
+                _branches_raw = domino_client.list_branches()
             branch_options = [Option(b["name"], value=b["name"]) for b in _branches_raw]
         except Exception:
             branch_options = []
@@ -3050,11 +3068,15 @@ def download(job_id: str, artifact: str):
 
 
 @rt("/api/branches")
-def api_branches():
+def api_branches(req: Request):
     """Return an HTML <select> fragment with available git branches."""
     if not _DOMINO_AVAILABLE:
         return Select(Option("(Domino not available)", value=""), name="branch", id="field-branch")
-    branches = domino_client.list_branches()
+    project_id = req.query_params.get("projectId", "").strip()
+    if project_id:
+        branches = domino_client.list_branches_api(project_id)
+    else:
+        branches = domino_client.list_branches()
     options = [Option(b.get("name", ""), value=b.get("name", "")) for b in branches]
     if not options:
         options = [Option("main", value="main"), Option("master", value="master")]
