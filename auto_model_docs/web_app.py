@@ -18,6 +18,8 @@ from fasthtml.common import *
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TaskProgressColumn, TimeElapsedColumn
 from starlette.requests import Request
+
+logger = logging.getLogger(__name__)
 from starlette.responses import FileResponse, Response
 
 from autodoc.core.config import Settings
@@ -32,9 +34,16 @@ import importlib.util as _imputil
 
 def _import_sibling(name: str):
     """Import a .py file from the same directory as this script."""
+    import sys
     path = Path(__file__).resolve().parent / f"{name}.py"
+    if not path.exists():
+        raise FileNotFoundError(f"Sibling module not found: {path}")
     spec = _imputil.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module spec for {path}")
     mod = _imputil.module_from_spec(spec)
+    # Register in sys.modules so @dataclass and other introspection works
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -61,7 +70,8 @@ try:
     domino_job_store = _import_sibling("domino_job_store")
     spec_store = _import_sibling("spec_store")
     _DOMINO_AVAILABLE = True
-except Exception:
+except Exception as _import_exc:
+    logging.getLogger(__name__).warning("Domino modules unavailable: %s", _import_exc, exc_info=True)
     _DOMINO_AVAILABLE = False
 
 # Rich console for terminal output
@@ -170,6 +180,7 @@ class JobRequest:
     hardware_tier: Optional[str] = None
     api_key_source: str = "domino_env"  # "domino_env" | "pass_now"
     spec_filename: Optional[str] = None  # original uploaded filename
+    project_id: Optional[str] = None     # target Domino project (from ?projectId=)
 
 
 @dataclass
@@ -186,6 +197,7 @@ class DominoJobRecord:
     submitted_at: Optional[str] = None
     completed_at: Optional[str] = None
     error: Optional[str] = None
+    project_id: Optional[str] = None     # target Domino project ID
 
 
 JOB_STORE: dict[str, JobState] = {}
@@ -728,6 +740,14 @@ async def _parse_request(req: Request) -> JobRequest:
 
     execution_mode = form.get("execution_mode", "domino")
 
+    # projectId: prefer form field, fall back to query param
+    project_id = (
+        form.get("target_project")
+        or form.get("project_id")
+        or req.query_params.get("projectId")
+        or None
+    )
+
     return JobRequest(
         spec_path=form.get("spec_path") or None,
         spec_content=spec_content,
@@ -752,6 +772,7 @@ async def _parse_request(req: Request) -> JobRequest:
         hardware_tier=form.get("hardware_tier") or None,
         api_key_source=form.get("api_key_source", "domino_env"),
         spec_filename=spec_filename,
+        project_id=project_id,
     )
 
 
@@ -786,6 +807,7 @@ def _db_record_to_dataclass(row: dict) -> DominoJobRecord:
         spec_path=row.get("spec_path"),
         submitted_at=row.get("submitted_at"),
         completed_at=row.get("completed_at"),
+        project_id=row.get("project_id"),
     )
 
 
@@ -959,12 +981,10 @@ def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
     to /mnt/artifacts/auto_ml so they appear in the Domino job's
     Artifacts tab.
     """
-    import shlex
-
     parts = _build_job_command(req, spec_path)
-    cli_cmd = " ".join(shlex.quote(p) for p in parts)
-    output_dir = shlex.quote(req.output_dir or "/mnt/data")
-    artifacts_dir = shlex.quote("/mnt/artifacts/auto_ml")
+    cli_cmd = " ".join(parts)
+    output_dir = req.output_dir or "/mnt/data"
+    artifacts_dir = "/mnt/artifacts/auto_ml"
     return (
         f"{cli_cmd}"
         f" && mkdir -p {artifacts_dir}"
@@ -974,6 +994,10 @@ def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
 
 async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     """Submit or queue a Domino job and persist it to SQLite."""
+    logger.info(
+        "Submitting Domino job: project_id=%s, branch=%s, tier=%s",
+        req.project_id, req.branch, req.hardware_tier,
+    )
     if not _DOMINO_AVAILABLE:
         raise RuntimeError("Domino integration is not available.")
 
@@ -997,6 +1021,7 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
         tier=req.hardware_tier,
         spec_path=spec_path,
         command=command_str,
+        project_id=req.project_id,
     )
 
     # count_active_jobs includes the row we just created (status=queued)
@@ -1014,8 +1039,9 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
             command=command_str,
             branch=req.branch,
             tier_id=req.hardware_tier or None,
+            project_id=req.project_id,
         )
-        job_url = domino_client.build_job_url(run_id)
+        job_url = domino_client.build_job_url(run_id, project_id=req.project_id)
         domino_job_store.update_job(
             job_id,
             domino_run_id=run_id,
@@ -1103,8 +1129,9 @@ async def _poll_domino_jobs() -> None:
                                 command=stored_cmd,
                                 branch=oldest.get("branch"),
                                 tier_id=oldest.get("hardware_tier"),
+                                project_id=oldest.get("project_id"),
                             )
-                            job_url = domino_client.build_job_url(run_id)
+                            job_url = domino_client.build_job_url(run_id, project_id=oldest.get("project_id"))
                             domino_job_store.update_job(
                                 oldest["id"],
                                 domino_run_id=run_id,
@@ -1137,6 +1164,9 @@ app, rt = fast_app(
                 var htmxWorking = false;
                 if (typeof htmx !== 'undefined' && typeof htmx.ajax === 'function') {
                     htmxWorking = true;
+                    console.log('htmx loaded and functional');
+                } else {
+                    console.log('htmx not functional, using vanilla JS');
                 }
 
                 // Track last-known version so we only swap when something changed
@@ -1161,7 +1191,7 @@ app, rt = fast_app(
                             // Fire the same event htmx would so styling hooks run
                             document.body.dispatchEvent(new CustomEvent('statusUpdated'));
                         })
-                        .catch(function() {});
+                        .catch(function(e) { console.log('Status fetch error:', e); });
                 }
 
                 // Lightweight check — only fetches full HTML when version changed
@@ -1179,7 +1209,7 @@ app, rt = fast_app(
                                 _pollActive = false;
                             }
                         })
-                        .catch(function() {});
+                        .catch(function(e) { console.log('Status check error:', e); });
                 }
 
                 // Initialise version from DOM
@@ -1218,7 +1248,8 @@ app, rt = fast_app(
                             generateBtn.textContent = 'Generate Documentation';
                             window._activateStatusPolling();
                         })
-                        .catch(function() {
+                        .catch(function(e) {
+                            console.log('Form submit error:', e);
                             generateBtn.disabled = false;
                             generateBtn.textContent = 'Generate Documentation';
                         });
@@ -1352,6 +1383,27 @@ app, rt = fast_app(
                 color: var(--text-secondary);
                 margin: 0;
                 line-height: 1.45;
+            }
+            .cross-project-banner {
+                margin-top: 0.5rem;
+                padding: 0.5rem 0.75rem;
+                background: #EDECFB;
+                border: 1px solid #C9C5F2;
+                border-radius: 6px;
+                color: #1820A0;
+                font-size: 0.875rem;
+            }
+            #project-id-resolved {
+                font-size: 0.78rem;
+                color: var(--text-muted);
+                padding: 0.25rem 0 0 0.15rem;
+            }
+            #project-id-resolved.resolved {
+                color: #1820A0;
+                font-weight: 500;
+            }
+            #project-id-resolved.error {
+                color: var(--error);
             }
 
             /* Three cards in a row - responsive horizontal layout */
@@ -2206,26 +2258,6 @@ app, rt = fast_app(
                 .page-split > .split-right { grid-column: 1; grid-row: 2; }
                 .page-split > .btn-row { grid-column: 1; grid-row: 3; justify-self: end; }
             }
-            .target-project-banner {
-                padding: 0.75rem 1rem;
-                border-radius: 8px;
-                background: #EDECFB;
-                border: 1px solid #C9C5F2;
-                margin-bottom: 1rem;
-                font-size: 0.875rem;
-                color: #3F4547;
-                font-weight: 500;
-            }
-            .target-project-banner.resolving {
-                background: #FFF8E1;
-                border-color: #FFE082;
-                color: #7F8385;
-            }
-            .target-project-banner.error {
-                background: #FCE4EC;
-                border-color: #EF9A9A;
-                color: #C62828;
-            }
             """
         ),
         Script(f"""
@@ -2236,62 +2268,57 @@ app, rt = fast_app(
             r"""
             document.addEventListener('DOMContentLoaded', function() {
 
-                // ── Cross-project targeting (Extension mode) ─────────────────────
-                var urlProjectId = new URLSearchParams(window.location.search).get('projectId');
-                var targetBanner = document.getElementById('target-project-banner');
-                var targetInput = document.getElementById('field-project-id');
-                var genBtn = document.getElementById('generate-btn');
-
-                if (urlProjectId) {
-                    if (targetInput) targetInput.value = urlProjectId;
-
-                    if (targetBanner) {
-                        targetBanner.style.display = '';
-                        targetBanner.textContent = 'Resolving project\u2026';
-                        targetBanner.className = 'target-project-banner resolving';
+                // ── Auto-fill projectId from URL or postMessage ──
+                // Domino Apps run inside a cross-origin iframe; the proxy strips
+                // query params.  Try what we can; the user can always type it manually.
+                (function() {
+                    function setProjectId(pid) {
+                        if (!pid) return;
+                        var input = document.getElementById('field-project-id');
+                        if (input && !input.value) {
+                            input.value = pid;
+                            input.dataset.autoDocSet = 'true';
+                            input.dispatchEvent(new Event('change'));
+                        }
                     }
-
-                    if (genBtn) {
-                        genBtn.disabled = true;
-                        genBtn.textContent = 'Resolving project\u2026';
+                    var pid = null;
+                    // Diagnostic: log origin info
+                    if (window.parent !== window) {
+                        try {
+                        } catch(e) {
+                        }
                     }
-
-                    fetch('/api/resolve-project?projectId=' + encodeURIComponent(urlProjectId))
-                        .then(function(r) {
-                            if (!r.ok) throw new Error('Failed to resolve project (' + r.status + ')');
-                            return r.json();
-                        })
-                        .then(function(data) {
-                            var displayName = data.owner + '/' + data.name;
-                            window._resolvedProjectName = data.name;
-
-                            if (targetBanner) {
-                                targetBanner.textContent = 'Generating docs for: ' + displayName;
-                                targetBanner.className = 'target-project-banner';
-                                targetBanner.style.display = '';
+                    // 1. Own query string (direct / non-proxied access)
+                    pid = new URLSearchParams(window.location.search).get('projectId');
+                    // 2. Own hash fragment (#projectId=xxx — survives proxies)
+                    if (!pid && window.location.hash) {
+                        var h = window.location.hash.substring(1);
+                        if (h.charAt(0) === '?') h = h.substring(1);
+                        pid = new URLSearchParams(h).get('projectId');
+                    }
+                    // 3. Parent frame (same-origin deployments where parent
+                    //    and iframe share the same host)
+                    if (!pid && window.parent !== window) {
+                        try {
+                            var pLoc = window.parent.location;
+                            pid = new URLSearchParams(pLoc.search).get('projectId');
+                            if (!pid && pLoc.hash) {
+                                var ph = pLoc.hash.substring(1);
+                                if (ph.charAt(0) === '?') ph = ph.substring(1);
+                                pid = new URLSearchParams(ph).get('projectId');
                             }
-
-                            var outputDir = document.getElementById('field-output_dir');
-                            if (outputDir) outputDir.value = '/mnt/data/' + data.name;
-
-                            if (genBtn) {
-                                genBtn.disabled = false;
-                                genBtn.textContent = 'Generate Documentation';
-                            }
-                        })
-                        .catch(function(err) {
-                            if (targetBanner) {
-                                targetBanner.textContent = 'Could not resolve project: ' + err.message;
-                                targetBanner.className = 'target-project-banner error';
-                                targetBanner.style.display = '';
-                            }
-
-                            if (genBtn) {
-                                genBtn.disabled = false;
-                                genBtn.textContent = 'Generate Documentation';
-                            }
-                        });
-                }
+                        } catch(e) { /* cross-origin — ignore */ }
+                    }
+                    if (pid) {
+                        setProjectId(pid);
+                    }
+                    // 4. Listen for postMessage from Domino parent frame
+                    window.addEventListener('message', function(e) {
+                        if (e.data && typeof e.data === 'object' && e.data.projectId) {
+                            setProjectId(e.data.projectId);
+                        }
+                    });
+                })();
 
                 // ── Language detection ────────────────────────────────────────────
                 var langRow = document.getElementById('lang-detection-row');
@@ -2400,9 +2427,8 @@ app, rt = fast_app(
                     }
 
                     // Update output directory default for the selected mode
-                    // If a cross-project target was resolved, keep its output dir
                     const outputDirField = document.getElementById('field-output_dir');
-                    if (outputDirField && !window._resolvedProjectName) {
+                    if (outputDirField) {
                         outputDirField.value = isDomino ? DOMINO_OUTPUT_DEFAULT : APP_OUTPUT_DEFAULT;
                     }
 
@@ -2431,20 +2457,6 @@ app, rt = fast_app(
                 const checkedMode = document.querySelector('input[name="execution_mode"]:checked');
                 applyExecutionMode(checkedMode ? checkedMode.value : 'domino');
 
-                // ── Refresh branch dropdown for cross-project targeting ────────────
-                const _projectId = new URLSearchParams(window.location.search).get('projectId') || '';
-                if (_projectId) {
-                    var branchSelect = document.getElementById('field-branch');
-                    if (branchSelect) {
-                        fetch('api/branches?projectId=' + encodeURIComponent(_projectId))
-                            .then(function(r) { return r.text(); })
-                            .then(function(html) {
-                                branchSelect.outerHTML = html;
-                            })
-                            .catch(function() {});
-                    }
-                }
-
                 // ── API key source radio ───────────────────────────────────────────
                 function applyApiKeySource(src) {
                     const show = src === 'pass_now';
@@ -2463,6 +2475,43 @@ app, rt = fast_app(
 
                 const checkedSrc = document.querySelector('input[name="api_key_source"]:checked');
                 applyApiKeySource(checkedSrc ? checkedSrc.value : 'domino_env');
+
+                // ── Resolve project, refresh tiers & output dir on change ─────
+                var projectIdInput = document.getElementById('field-project-id');
+                if (projectIdInput) {
+                    var refreshTimer = null;
+                    function onProjectIdChange() {
+                        clearTimeout(refreshTimer);
+                        refreshTimer = setTimeout(function() {
+                            var pid = projectIdInput.value.trim();
+                            var qs = pid ? '?projectId=' + encodeURIComponent(pid) : '';
+                            // Resolve project name
+                            fetch('api/resolve-project' + qs)
+                                .then(function(r) { return r.text(); })
+                                .then(function(html) {
+                                    var el = document.getElementById('project-id-resolved');
+                                    if (el) el.outerHTML = html;
+                                    // Update output dir from resolved name
+                                    var newEl = document.getElementById('project-id-resolved');
+                                    var name = newEl ? newEl.getAttribute('data-project-name') : null;
+                                    var outputDir = document.getElementById('field-output_dir');
+                                    if (outputDir) {
+                                        outputDir.value = name ? '/mnt/data/' + name : DOMINO_OUTPUT_DEFAULT;
+                                    }
+                                })
+                                .catch(function() {});
+                            // Refresh hardware tiers
+                            if (typeof htmx !== 'undefined') {
+                                htmx.ajax('GET', 'api/hardware-tiers' + qs, {
+                                    target: '#field-hardware_tier',
+                                    swap: 'outerHTML'
+                                });
+                            }
+                        }, 300);
+                    }
+                    projectIdInput.addEventListener('change', onProjectIdChange);
+                    projectIdInput.addEventListener('blur', onProjectIdChange);
+                }
 
                 // ── Domino mode: spec auto-save via fetch ────────────────────────
                 const dominoSpecUpload = document.getElementById('domino-spec-upload');
@@ -2668,6 +2717,18 @@ def index(req: Request):
         scheme = req.headers.get("x-forwarded-proto", "https")
         domino_client.set_ui_host(host, scheme)
 
+    # Capture projectId from query string (fallback for non-proxied access;
+    # Domino's reverse proxy strips query params from the iframe URL).
+    project_id = req.query_params.get("projectId") or None
+
+    # If a cross-project ID was given, resolve its metadata eagerly so the
+    # cache is warm for later job submissions and hardware-tier lookups.
+    project_display_name: Optional[str] = None
+    if project_id and _DOMINO_AVAILABLE:
+        info = domino_client.resolve_project(project_id)
+        if info:
+            project_display_name = f"{info.owner_username}/{info.name}"
+
     default_spec = _get_default_spec_path()
     username = _get_username()
     try:
@@ -2694,20 +2755,16 @@ def index(req: Request):
     default_mode = "domino" if _DOMINO_AVAILABLE else "app"
 
     # Pre-fetch branches and hardware tiers for server-side rendering
-    project_id = req.query_params.get("projectId", "").strip()
     if _DOMINO_AVAILABLE:
         try:
-            if project_id:
-                _branches_raw = domino_client.list_branches_api(project_id)
-            else:
-                _branches_raw = domino_client.list_branches()
+            _branches_raw = domino_client.list_branches()
             branch_options = [Option(b["name"], value=b["name"]) for b in _branches_raw]
         except Exception:
             branch_options = []
         if not branch_options:
             branch_options = [Option("main", value="main"), Option("master", value="master")]
         try:
-            tier_data = domino_client.list_hardware_tiers()
+            tier_data = domino_client.list_hardware_tiers(project_id=project_id)
             default_tier = domino_client.get_project_default_tier()
             tier_options = []
             for t in tier_data:
@@ -2766,11 +2823,6 @@ def index(req: Request):
                 cls="mode-toggle",
             ),
             Div(
-                id="target-project-banner",
-                cls="target-project-banner",
-                style="display: none;",
-            ),
-            Div(
                 Span("Detected: ", style="color: #7F8385;"),
                 Span(id="lang-detected-name", style="color: #3F4547; font-weight: 600;"),
                 Span(id="lang-detected-count", style="color: #7F8385; margin-left: 4px;"),
@@ -2796,11 +2848,9 @@ def index(req: Request):
                 ),
                 id="lang-detection-row",
                 style="display: none; padding: 6px 16px; font-size: 14px;",
-                cls="target-project-banner",
             ),
             Div(
             Form(
-                Input(type="hidden", name="target_project", id="field-project-id"),
                 Input(type="hidden", name="detected_language", id="field-detected-language", value="python"),
                 # Three cards stacked vertically: What to document | Run | Advanced
                 Div(
@@ -2908,6 +2958,27 @@ def index(req: Request):
                         ),
                         Div(
                             Div(
+                                Label("Target project", for_="field-project-id"),
+                                Span("ⓘ", cls="info-tooltip", data_tooltip="Domino project ID to run the job in. Leave blank to use the current project."),
+                                cls="label-row",
+                            ),
+                            Input(
+                                name="target_project",
+                                id="field-project-id",
+                                type="text",
+                                value="",
+                                placeholder="Leave blank for current project",
+                                autocomplete="off",
+                            ),
+                            Div(
+                                (f"{project_display_name}" if project_display_name else ""),
+                                id="project-id-resolved",
+                                cls="resolved" if project_display_name else "",
+                            ),
+                            cls="field domino-fields",
+                        ),
+                        Div(
+                            Div(
                                 Label("Branch", for_="field-branch"),
                                 Span("ⓘ", cls="info-tooltip", data_tooltip="Git branch to analyze in the Domino job."),
                                 cls="label-row",
@@ -2977,7 +3048,7 @@ def index(req: Request):
                                 id="field-api_key",
                                 type="password",
                                 placeholder="Paste your API key",
-                                autocomplete="off",
+                                autocomplete="new-password",
                                 spellcheck="false",
                             ),
                             cls="field",
@@ -3215,15 +3286,11 @@ def download(job_id: str, artifact: str):
 
 
 @rt("/api/branches")
-def api_branches(req: Request):
+def api_branches():
     """Return an HTML <select> fragment with available git branches."""
     if not _DOMINO_AVAILABLE:
         return Select(Option("(Domino not available)", value=""), name="branch", id="field-branch")
-    project_id = req.query_params.get("projectId", "").strip()
-    if project_id:
-        branches = domino_client.list_branches_api(project_id)
-    else:
-        branches = domino_client.list_branches()
+    branches = domino_client.list_branches()
     options = [Option(b.get("name", ""), value=b.get("name", "")) for b in branches]
     if not options:
         options = [Option("main", value="main"), Option("master", value="master")]
@@ -3231,11 +3298,12 @@ def api_branches(req: Request):
 
 
 @rt("/api/hardware-tiers")
-def api_hardware_tiers():
+def api_hardware_tiers(req: Request):
     """Return an HTML <select> fragment with available hardware tiers."""
     if not _DOMINO_AVAILABLE:
         return Select(Option("(Domino not available)", value=""), name="hardware_tier", id="field-hardware_tier")
-    tiers = domino_client.list_hardware_tiers()
+    project_id = req.query_params.get("projectId") or None
+    tiers = domino_client.list_hardware_tiers(project_id=project_id)
     default_tier = domino_client.get_project_default_tier()
     options = []
     for t in tiers:
@@ -3282,41 +3350,23 @@ def api_detect_language(req: Request):
 
 @rt("/api/resolve-project")
 def api_resolve_project(req: Request):
-    """Resolve a Domino project ID to owner/name JSON."""
-    project_id = req.query_params.get("projectId", "").strip()
-    if not project_id:
-        return Response(
-            json.dumps({"error": "No project ID provided."}),
-            status_code=400, media_type="application/json",
+    """Return resolved project name for a given project ID."""
+    pid = req.query_params.get("projectId", "").strip()
+    if not pid or not _DOMINO_AVAILABLE:
+        return Div(id="project-id-resolved")
+    info = domino_client.resolve_project(pid)
+    if info:
+        return Div(
+            f"{info.owner_username}/{info.name}",
+            id="project-id-resolved",
+            cls="resolved",
+            data_project_name=info.name,
         )
-    if not _DOMINO_AVAILABLE:
-        return Response(
-            json.dumps({"error": "Domino integration is not available."}),
-            status_code=503, media_type="application/json",
-        )
-    try:
-        data = domino_client.resolve_project(project_id)
-        owner = data.get("owner", {}).get("userName", "") or data.get("ownerUsername", "")
-        name = data.get("name", project_id)
-        return Response(
-            json.dumps({"owner": owner, "name": name, "id": project_id}),
-            media_type="application/json",
-        )
-    except domino_client.ProjectNotFoundError:
-        return Response(
-            json.dumps({"error": "Project not found. The extension link may be outdated."}),
-            status_code=404, media_type="application/json",
-        )
-    except domino_client.ProjectForbiddenError:
-        return Response(
-            json.dumps({"error": "You don't have access to this project."}),
-            status_code=403, media_type="application/json",
-        )
-    except domino_client.ProjectAPIError:
-        return Response(
-            json.dumps({"error": "Could not reach the Domino API. Try again in a moment."}),
-            status_code=502, media_type="application/json",
-        )
+    return Div(
+        "Could not resolve project ID",
+        id="project-id-resolved",
+        cls="error",
+    )
 
 
 @rt("/stop-domino")

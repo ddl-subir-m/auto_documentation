@@ -20,6 +20,14 @@ def _db_path() -> Path:
     return base / "autodoc_jobs.db"
 
 
+def _migrate_project_id(con: sqlite3.Connection) -> None:
+    """Add project_id column if it does not exist yet."""
+    try:
+        con.execute("ALTER TABLE domino_jobs ADD COLUMN project_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
+
 @contextmanager
 def _conn():
     path = _db_path()
@@ -53,11 +61,12 @@ def init_db() -> None:
             )
             """
         )
-        # Migration: add command column to existing tables
+        # Migrations: add columns to existing tables
         try:
             con.execute("ALTER TABLE domino_jobs ADD COLUMN command TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+        _migrate_project_id(con)
 
 
 def _now_iso() -> str:
@@ -71,6 +80,7 @@ def create_job(
     spec_path: Optional[str],
     command: Optional[str] = None,
     job_id: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> str:
     """Insert a new job row and return its id."""
     import uuid
@@ -80,10 +90,10 @@ def create_job(
         con.execute(
             """
             INSERT INTO domino_jobs
-                (id, username, branch, hardware_tier, status, spec_path, command, submitted_at)
-            VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)
+                (id, username, branch, hardware_tier, status, spec_path, command, project_id, submitted_at)
+            VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)
             """,
-            (jid, username, branch, tier, spec_path, command, _now_iso()),
+            (jid, username, branch, tier, spec_path, command, project_id, _now_iso()),
         )
     return jid
 
