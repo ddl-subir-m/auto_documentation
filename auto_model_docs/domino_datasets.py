@@ -354,42 +354,71 @@ def upload_file(
     content: bytes,
     project_id: Optional[str] = None,
 ) -> None:
-    """Upload a file to a dataset via the v4 chunked upload API."""
+    """Upload a file to a dataset via the v4 chunked upload API.
+
+    Follows the same three-step workflow as the AutoML Extension:
+      1. POST .../snapshot/file/start → get upload_key
+      2. POST .../snapshot/file (multipart chunk with resumable params)
+      3. GET  .../snapshot/file/end/{key} → finalize
+    """
+    import hashlib
+
     pid = _resolve_project_id(project_id)
     cross = _is_cross_project(pid)
     logger.info("Uploading '%s' (%d bytes) to dataset %s", file_path, len(content), dataset_id)
 
-    # Step 1: start upload
+    # Step 1: start upload session
     resp = _api_request(
         "POST", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/start",
         cross_project=cross,
         json={
-            "filePath": file_path,
-            "datasetId": dataset_id,
-            "collisionSetting": "Overwrite",
+            "filePaths": [file_path],
+            "fileCollisionSetting": "Overwrite",
         },
     )
-    upload_key = resp.json().get("uploadKey") or resp.text.strip().strip('"')
+    upload_key = resp.json()
+    if not isinstance(upload_key, str):
+        upload_key = upload_key.get("upload_key") or upload_key.get("uploadKey") or upload_key.get("key")
+    if not upload_key:
+        raise RuntimeError(f"Failed to start upload session for dataset {dataset_id}")
 
-    # Step 2: upload single chunk (spec files are small)
-    _api_request(
-        "POST", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
-        cross_project=cross,
-        files={"file": (file_path.split("/")[-1], content)},
-        data={
-            "uploadKey": upload_key,
-            "chunkIndex": "0",
-            "chunkCount": "1",
-            "filePath": file_path,
-        },
-    )
+    try:
+        # Step 2: upload single chunk (spec files are small)
+        identifier = file_path.replace(".", "-").replace("/", "-")
+        checksum = hashlib.md5(content).hexdigest()
+        _api_request(
+            "POST", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
+            cross_project=cross,
+            params={
+                "key": upload_key,
+                "resumableChunkNumber": 1,
+                "resumableChunkSize": len(content),
+                "resumableCurrentChunkSize": len(content),
+                "resumableTotalChunks": 1,
+                "resumableIdentifier": identifier,
+                "resumableRelativePath": file_path,
+                "checksum": checksum,
+            },
+            files={file_path: (file_path, content, "application/octet-stream")},
+        )
 
-    # Step 3: finalize
-    _api_request(
-        "GET", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
-        cross_project=cross,
-    )
-    logger.info("Upload complete: '%s' → dataset %s", file_path, dataset_id)
+        # Step 3: finalize
+        _api_request(
+            "GET", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
+            cross_project=cross,
+        )
+        logger.info("Upload complete: '%s' → dataset %s", file_path, dataset_id)
+
+    except Exception:
+        # Cancel on failure
+        try:
+            _api_request(
+                "GET", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/cancel/{upload_key}",
+                cross_project=cross,
+            )
+        except Exception:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------

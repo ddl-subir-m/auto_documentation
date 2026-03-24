@@ -270,25 +270,29 @@ class TestListFiles:
 class TestUploadFile:
     @patch.object(ds, "_api_request")
     def test_three_step_upload(self, mock_req):
-        # Step 1: start → returns upload key
+        # start returns upload key as plain string (matching real API)
+        mock_start = MagicMock()
+        mock_start.json.return_value = "uk-abc123"
         mock_req.side_effect = [
-            _mock_response(json_data={"uploadKey": "uk-abc123"}),
-            _mock_response(),  # chunk upload
-            _mock_response(),  # finalize
+            mock_start,         # step 1: start
+            _mock_response(),   # step 2: chunk upload
+            _mock_response(),   # step 3: finalize
         ]
         ds.upload_file("ds-1", "my_spec.yaml", b"title: My Model")
         assert mock_req.call_count == 3
 
-        # Verify step 1: start
+        # Verify step 1: start (uses filePaths array, not filePath)
         start_call = mock_req.call_args_list[0]
         assert "/snapshot/file/start" in start_call.args[1]
-        assert start_call.kwargs["json"]["filePath"] == "my_spec.yaml"
-        assert start_call.kwargs["json"]["collisionSetting"] == "Overwrite"
+        assert start_call.kwargs["json"]["filePaths"] == ["my_spec.yaml"]
+        assert start_call.kwargs["json"]["fileCollisionSetting"] == "Overwrite"
 
-        # Verify step 2: chunk
+        # Verify step 2: chunk (uses resumable query params)
         chunk_call = mock_req.call_args_list[1]
         assert "/snapshot/file" in chunk_call.args[1]
-        assert chunk_call.kwargs["data"]["uploadKey"] == "uk-abc123"
+        assert chunk_call.kwargs["params"]["key"] == "uk-abc123"
+        assert chunk_call.kwargs["params"]["resumableChunkNumber"] == 1
+        assert chunk_call.kwargs["params"]["resumableTotalChunks"] == 1
 
         # Verify step 3: finalize
         end_call = mock_req.call_args_list[2]
