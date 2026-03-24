@@ -51,6 +51,76 @@ def _project_name() -> str:
     return os.environ.get("DOMINO_PROJECT_NAME", "")
 
 
+def _domino_request(
+    method: str,
+    path: str,
+    *,
+    cross_project: bool = False,
+    **kwargs: Any,
+) -> Any:
+    """Make a direct HTTP request to the Domino API.
+
+    When *cross_project* is True the request goes to DOMINO_API_HOST directly
+    (bypassing the local sidecar proxy) so it can target any project the
+    authenticated user has access to.
+    """
+    import requests  # transitive dep via domino SDK
+
+    if cross_project:
+        base = _api_host()
+    else:
+        base = (os.environ.get("DOMINO_API_PROXY") or _api_host()).rstrip("/")
+
+    if not base:
+        raise RuntimeError("Neither DOMINO_API_HOST nor DOMINO_API_PROXY is set")
+
+    url = f"{base}{path}"
+    api_key = os.environ.get("DOMINO_USER_API_KEY", "")
+    headers = kwargs.pop("headers", {})
+    headers.setdefault("X-Domino-Api-Key", api_key)
+    headers.setdefault("Accept", "application/json")
+
+    resp = requests.request(method, url, headers=headers, timeout=15, **kwargs)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def list_branches_api(project_id: str) -> list[dict[str, Any]]:
+    """Fetch branches for *project_id* via the Domino REST API.
+
+    Uses the cross-project route (DOMINO_API_HOST) so it returns branches for
+    the target project, not the hosting app's repo.  Falls back to
+    :func:`list_branches` (local git) on any error.
+    """
+    try:
+        data = _domino_request(
+            "GET",
+            f"/v4/projects/{project_id}/branches",
+            cross_project=True,
+        )
+        # API returns a list of branch objects; normalise to [{"name": ...}]
+        branches: list[dict[str, Any]] = []
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    name = item.get("name") or item.get("branchName") or ""
+                elif isinstance(item, str):
+                    name = item
+                else:
+                    continue
+                if name:
+                    branches.append({"name": name})
+        if branches:
+            return branches
+    except Exception as exc:
+        logger.warning(
+            "Failed to list branches via API for project %s, falling back to local git: %s",
+            project_id,
+            exc,
+        )
+    return list_branches()
+
+
 def list_branches() -> list[dict[str, Any]]:
     """Return list of git branches for the current project.
 
