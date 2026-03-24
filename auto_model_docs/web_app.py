@@ -253,8 +253,12 @@ def _get_default_output_dir() -> Path:
 
 
 def _get_default_code_root() -> Path:
+    """Return the default code root: /mnt/code for git projects,
+    /mnt for DFS projects, or cwd as fallback."""
     if Path("/mnt/code").exists():
         return Path("/mnt/code")
+    if Path("/mnt").exists():
+        return Path("/mnt")
     return Path(".")
 
 
@@ -2493,10 +2497,16 @@ app, rt = fast_app(
 
                 window.handleLanguageOverride = function(lang) {
                     if (langInput) langInput.value = lang;
-                    detectLanguage();
+                    var cr = document.getElementById('field-code_root');
+                    detectLanguage(cr ? cr.value : undefined);
                 };
 
-                detectLanguage();
+                function detectLanguageFromCodeRoot() {
+                    var cr = document.getElementById('field-code_root');
+                    detectLanguage(cr ? cr.value : undefined);
+                }
+
+                detectLanguageFromCodeRoot();
 
                 // ── All DOM references declared up-front to avoid TDZ errors ──────
                 // Mode toggle removed — mode is auto-inferred server-side
@@ -2744,7 +2754,14 @@ app, rt = fast_app(
                         const sub = suffix ? suffix.value.replace(/^\/+/, '') : '';
                         hidden.value = sub ? base + '/' + sub : base;
                     }
-                    if (suffix) suffix.addEventListener('input', sync);
+                    if (suffix) {
+                        suffix.addEventListener('input', sync);
+                        var langTimer = null;
+                        suffix.addEventListener('input', function() {
+                            clearTimeout(langTimer);
+                            langTimer = setTimeout(function() { detectLanguageFromCodeRoot(); }, 400);
+                        });
+                    }
                     sync();
                 })();
 
@@ -3006,7 +3023,7 @@ def index(req: Request):
                         Div(
                             Label("Code root", for_="code-root-suffix"),
                             Div(
-                                Span("/mnt/code", id="code-root-prefix", cls="code-root-prefix"),
+                                Span(str(_get_default_code_root()), id="code-root-prefix", cls="code-root-prefix"),
                                 Input(
                                     id="code-root-suffix",
                                     type="text",
