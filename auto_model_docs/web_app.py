@@ -1135,9 +1135,6 @@ app, rt = fast_app(
                 var htmxWorking = false;
                 if (typeof htmx !== 'undefined' && typeof htmx.ajax === 'function') {
                     htmxWorking = true;
-                    console.log('htmx loaded and functional');
-                } else {
-                    console.log('htmx not functional, using vanilla JS');
                 }
 
                 // Track last-known version so we only swap when something changed
@@ -1162,7 +1159,7 @@ app, rt = fast_app(
                             // Fire the same event htmx would so styling hooks run
                             document.body.dispatchEvent(new CustomEvent('statusUpdated'));
                         })
-                        .catch(function(e) { console.log('Status fetch error:', e); });
+                        .catch(function() {});
                 }
 
                 // Lightweight check — only fetches full HTML when version changed
@@ -1180,7 +1177,7 @@ app, rt = fast_app(
                                 _pollActive = false;
                             }
                         })
-                        .catch(function(e) { console.log('Status check error:', e); });
+                        .catch(function() {});
                 }
 
                 // Initialise version from DOM
@@ -1219,8 +1216,7 @@ app, rt = fast_app(
                             generateBtn.textContent = 'Generate Documentation';
                             window._activateStatusPolling();
                         })
-                        .catch(function(e) {
-                            console.log('Form submit error:', e);
+                        .catch(function() {
                             generateBtn.disabled = false;
                             generateBtn.textContent = 'Generate Documentation';
                         });
@@ -2208,6 +2204,26 @@ app, rt = fast_app(
                 .page-split > .split-right { grid-column: 1; grid-row: 2; }
                 .page-split > .btn-row { grid-column: 1; grid-row: 3; justify-self: end; }
             }
+            .target-project-banner {
+                padding: 0.75rem 1rem;
+                border-radius: 8px;
+                background: #EDECFB;
+                border: 1px solid #C9C5F2;
+                margin-bottom: 1rem;
+                font-size: 0.875rem;
+                color: #3F4547;
+                font-weight: 500;
+            }
+            .target-project-banner.resolving {
+                background: #FFF8E1;
+                border-color: #FFE082;
+                color: #7F8385;
+            }
+            .target-project-banner.error {
+                background: #FCE4EC;
+                border-color: #EF9A9A;
+                color: #C62828;
+            }
             """
         ),
         Script(f"""
@@ -2217,6 +2233,63 @@ app, rt = fast_app(
         Script(
             r"""
             document.addEventListener('DOMContentLoaded', function() {
+
+                // ── Cross-project targeting (Extension mode) ─────────────────────
+                var urlProjectId = new URLSearchParams(window.location.search).get('projectId');
+                var targetBanner = document.getElementById('target-project-banner');
+                var targetInput = document.getElementById('field-project-id');
+                var genBtn = document.getElementById('generate-btn');
+
+                if (urlProjectId) {
+                    if (targetInput) targetInput.value = urlProjectId;
+
+                    if (targetBanner) {
+                        targetBanner.style.display = '';
+                        targetBanner.textContent = 'Resolving project\u2026';
+                        targetBanner.className = 'target-project-banner resolving';
+                    }
+
+                    if (genBtn) {
+                        genBtn.disabled = true;
+                        genBtn.textContent = 'Resolving project\u2026';
+                    }
+
+                    fetch('/api/resolve-project?projectId=' + encodeURIComponent(urlProjectId))
+                        .then(function(r) {
+                            if (!r.ok) throw new Error('Failed to resolve project (' + r.status + ')');
+                            return r.json();
+                        })
+                        .then(function(data) {
+                            var displayName = data.owner + '/' + data.name;
+                            window._resolvedProjectName = data.name;
+
+                            if (targetBanner) {
+                                targetBanner.textContent = 'Generating docs for: ' + displayName;
+                                targetBanner.className = 'target-project-banner';
+                                targetBanner.style.display = '';
+                            }
+
+                            var outputDir = document.getElementById('field-output_dir');
+                            if (outputDir) outputDir.value = '/mnt/data/' + data.name;
+
+                            if (genBtn) {
+                                genBtn.disabled = false;
+                                genBtn.textContent = 'Generate Documentation';
+                            }
+                        })
+                        .catch(function(err) {
+                            if (targetBanner) {
+                                targetBanner.textContent = 'Could not resolve project: ' + err.message;
+                                targetBanner.className = 'target-project-banner error';
+                                targetBanner.style.display = '';
+                            }
+
+                            if (genBtn) {
+                                genBtn.disabled = false;
+                                genBtn.textContent = 'Generate Documentation';
+                            }
+                        });
+                }
 
                 // ── All DOM references declared up-front to avoid TDZ errors ──────
                 const modeDominoLabel   = document.getElementById('mode-domino-label');
@@ -2287,8 +2360,9 @@ app, rt = fast_app(
                     }
 
                     // Update output directory default for the selected mode
+                    // If a cross-project target was resolved, keep its output dir
                     const outputDirField = document.getElementById('field-output_dir');
-                    if (outputDirField) {
+                    if (outputDirField && !window._resolvedProjectName) {
                         outputDirField.value = isDomino ? DOMINO_OUTPUT_DEFAULT : APP_OUTPUT_DEFAULT;
                     }
 
@@ -2634,7 +2708,13 @@ def index(req: Request):
                 cls="mode-toggle",
             ),
             Div(
+                id="target-project-banner",
+                cls="target-project-banner",
+                style="display: none;",
+            ),
+            Div(
             Form(
+                Input(type="hidden", name="target_project", id="field-project-id"),
                 # Three cards stacked vertically: What to document | Run | Advanced
                 Div(
                     # Card 1: What to document (spec + artifact filtering)
