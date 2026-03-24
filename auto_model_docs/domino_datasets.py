@@ -113,8 +113,14 @@ def _api_request(
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRIES,
 ) -> httpx.Response:
-    """Authenticated request to the Domino Datasets API."""
-    base = _resolve_nucleus_host() if cross_project else _resolve_api_host()
+    """Authenticated request to the Domino Datasets API.
+
+    Always routes through DOMINO_API_HOST (nucleus) directly, not the
+    sidecar proxy.  The sidecar (localhost:8899) doesn't route
+    /api/datasetrw/ paths — it only serves standard Domino API endpoints
+    and the /access-token endpoint for ephemeral tokens.
+    """
+    base = _resolve_nucleus_host()
     if not base:
         raise RuntimeError("No Domino API host configured")
 

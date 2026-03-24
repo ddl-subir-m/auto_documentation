@@ -20,6 +20,16 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TaskPr
 from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
+
+# Configure logging for the domino_datasets module at startup so diagnostic
+# messages are visible in the Domino App logs (not just during generation jobs).
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
+for _mod_name in ("domino_datasets", "domino_client", "auth_context"):
+    logging.getLogger(_mod_name).setLevel(logging.INFO)
+
 from starlette.responses import FileResponse, Response, StreamingResponse
 
 from autodoc.core.config import Settings

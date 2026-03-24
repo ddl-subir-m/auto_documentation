@@ -375,8 +375,9 @@ class TestApiRequest:
         ds._api_request("GET", "/api/test", cross_project=False)
         headers = mock_client.request.call_args.kwargs["headers"]
         assert headers["Authorization"] == "Bearer sidecar-ephemeral-token"
+        # Datasets API always routes through nucleus (DOMINO_API_HOST), not sidecar
         url = mock_client.request.call_args.args[1]
-        assert url.startswith("http://localhost:8899")
+        assert url.startswith("https://domino.example.com")
 
     @patch("httpx.Client")
     @patch("httpx.get", side_effect=Exception("no sidecar"))
