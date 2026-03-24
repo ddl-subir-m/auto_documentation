@@ -2721,6 +2721,11 @@ app, rt = fast_app(
                             }
                             _specDatasets = datasets;
                             console.log('[spec-browser] Loaded ' + datasets.length + ' datasets:', datasets.map(function(d) { return d.name; }));
+                            if (datasets.length === 0) {
+                                specDatasetSelect.innerHTML = '<option value="">No datasets found for this project</option>';
+                                console.warn('[spec-browser] No writable datasets returned — upload a spec file to auto-create one');
+                                return;
+                            }
                             var html = '<option value="">Choose a dataset...</option>';
                             for (var i = 0; i < datasets.length; i++) {
                                 html += '<option value="' + datasets[i].id + '" data-name="' + datasets[i].name + '" data-snapshot="' + (datasets[i].rwSnapshotId || '') + '">'
@@ -4007,6 +4012,9 @@ async def api_ensure_autodoc_specs(req: Request):
     logger.info("POST /api/ensure-autodoc-specs — project=%s", pid)
     try:
         ds = domino_datasets.ensure_dataset(pid)
+        if not ds.get("id"):
+            logger.warning("ensure-autodoc-specs returned dataset with empty id: %s", ds)
+            raise RuntimeError("Dataset was created/found but has no ID — check Domino Datasets API response")
         # Resolve snapshot if not included
         if not ds.get("rwSnapshotId"):
             ds["rwSnapshotId"] = domino_datasets.get_rw_snapshot_id(ds["id"], pid)

@@ -68,6 +68,7 @@ def _get_auth_headers(cross_project: bool = False) -> dict[str, str]:
     if cross_project:
         forwarded = get_request_auth_header()
         if forwarded:
+            logger.info("Auth: using forwarded JWT for cross-project call")
             return {"Authorization": forwarded}
         raise RuntimeError(
             "Cross-project datasets API call requires a forwarded user token, "
@@ -78,13 +79,16 @@ def _get_auth_headers(cross_project: bool = False) -> dict[str, str]:
     try:
         resp = httpx.get("http://localhost:8899/access-token", timeout=3.0)
         if resp.status_code == 200 and resp.text.strip():
+            logger.info("Auth: using sidecar ephemeral token")
             return {"Authorization": f"Bearer {resp.text.strip()}"}
-    except Exception:
-        pass
+        logger.warning("Sidecar /access-token returned status=%s body=%r", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.warning("Sidecar /access-token failed: %s", exc)
 
     # Fallback: API key from environment
     api_key = os.environ.get("DOMINO_USER_API_KEY") or os.environ.get("DOMINO_API_KEY") or ""
     if api_key:
+        logger.info("Auth: using DOMINO_USER_API_KEY")
         return {"X-Domino-Api-Key": api_key}
 
     raise RuntimeError(
@@ -180,6 +184,7 @@ def list_datasets(project_id: Optional[str] = None) -> list[dict[str, Any]]:
                 },
             )
             data = resp.json()
+            logger.info("v2 datasets response (offset=%d): %s", offset, str(data)[:500])
             items = data.get("items", [])
             if not items:
                 break
@@ -215,6 +220,7 @@ def _list_datasets_v1(
     offset = 0
     page_size = 50
 
+    logger.info("Falling back to v1 datasets API for project %s", project_id)
     while True:
         resp = _api_request(
             "GET", "/api/datasetrw/v1/datasets",
@@ -222,6 +228,7 @@ def _list_datasets_v1(
             params={"projectId": project_id, "offset": offset, "limit": page_size},
         )
         data = resp.json()
+        logger.info("v1 datasets response (offset=%d): %s", offset, str(data)[:500])
         items = data.get("items", [])
         if not items:
             break
@@ -261,6 +268,7 @@ def _create_dataset(
                 cross_project=cross, json=payload,
             )
             data = resp.json()
+            logger.info("Create dataset response: %s", data)
             return {
                 "id": data.get("datasetId") or data.get("id", ""),
                 "name": data.get("datasetName") or data.get("name", name),
