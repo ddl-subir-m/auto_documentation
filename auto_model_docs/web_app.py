@@ -943,11 +943,11 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
         max_j = _max_jobs()
         queue_banner = Div(
             Span("⚠ "),
-            Span(f"Job queued — you have {max_j} active job{'s' if max_j != 1 else ''}. "
-                 "It will start automatically when a slot opens, or you can "),
-            A("cancel a running job", href="#", onclick="document.querySelector('.history-actions .terminal-action')?.click(); return false;",
-              style="color: var(--accent); text-decoration: underline;"),
-            Span(" to free a slot. You can also clear completed jobs from the History tab."),
+            Span(f"Job queued — you already have {max_j} active job{'s' if max_j != 1 else ''}. "
+                 "It will start automatically when a slot opens. To free a slot: stop a running job above, "
+                 "or switch to the History tab and use "),
+            Span("Cancel queued", style="font-weight: 600;"),
+            Span(" to remove pending jobs."),
             style="background: rgba(204,183,24,0.1); border: 1px solid rgba(204,183,24,0.3); "
                   "border-radius: 6px; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; "
                   "font-size: 0.8125rem; color: var(--text-primary); line-height: 1.5;",
@@ -1039,6 +1039,14 @@ def _render_job_history_table(username: str) -> FT:
                 hx_swap="innerHTML",
                 cls="terminal-action",
             ),
+            A(
+                "Cancel queued",
+                hx_post="cancel-queued-jobs",
+                hx_target="#job-history-content",
+                hx_swap="innerHTML",
+                cls="terminal-action",
+                title="Cancel all queued jobs that haven't been submitted yet",
+            ) if any(j.get("status") == "queued" and not j.get("run_id") for j in jobs) else None,
             cls="history-actions",
         ),
         id="job-history-content",
@@ -3577,6 +3585,23 @@ def clear_job_history():
     username = _get_username()
     if _DOMINO_AVAILABLE:
         domino_job_store.clear_terminal_jobs(username)
+    return _render_job_history_table(username)
+
+
+@rt("/cancel-queued-jobs")
+def cancel_queued_jobs():
+    """Cancel all queued (not yet submitted) jobs for the current user."""
+    username = _get_username()
+    if _DOMINO_AVAILABLE:
+        with domino_job_store._conn() as con:
+            con.execute(
+                """
+                UPDATE domino_jobs
+                SET status = 'cancelled'
+                WHERE username = ? AND status = 'queued' AND run_id IS NULL
+                """,
+                (username,),
+            )
     return _render_job_history_table(username)
 
 
