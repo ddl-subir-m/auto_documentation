@@ -22,10 +22,30 @@ def _sanitize_name(name: str) -> str:
     return sanitized.strip('_') or "Unknown"
 
 
-def build_code_citation_id(path: str, symbol: str | None = None) -> str:
-    """Build citation ID for code references."""
+def build_code_citation_id(
+    path: str,
+    symbol: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> str:
+    """Build citation ID for code references.
+
+    Args:
+        path: File path relative to code root.
+        symbol: Function/class name (optional).
+        start_line: Starting line number (optional).
+        end_line: Ending line number (optional).
+
+    Returns:
+        Citation ID like "Code:script.R#func:L42-L58" or "Code:script.py#func".
+    """
     suffix = f"#{symbol}" if symbol else ""
-    return f"Code:{path}{suffix}"
+    line_suffix = ""
+    if start_line is not None and end_line is not None:
+        line_suffix = f":L{start_line}-L{end_line}"
+    elif start_line is not None:
+        line_suffix = f":L{start_line}"
+    return f"Code:{path}{suffix}{line_suffix}"
 
 
 def build_mlflow_run_citation_id(
@@ -70,25 +90,39 @@ def build_mlflow_summary_citation_id(run_id: str) -> str:
     return build_mlflow_citation_id(run_id, "summary", "all")
 
 
+def _parse_code_citation(raw: str) -> dict:
+    """Parse the raw portion of a Code: citation, handling line number suffix."""
+    start_line = None
+    end_line = None
+    # Check for :L{start}-L{end} or :L{start} suffix
+    line_match = re.search(r":L(\d+)(?:-L(\d+))?$", raw)
+    if line_match:
+        start_line = int(line_match.group(1))
+        end_line = int(line_match.group(2)) if line_match.group(2) else None
+        raw = raw[:line_match.start()]
+
+    if "#" in raw:
+        path, symbol = raw.split("#", 1)
+    else:
+        path, symbol = raw, ""
+
+    result = {"type": "code_file", "code_path": path, "code_symbol": symbol}
+    if start_line is not None:
+        result["start_line"] = start_line
+    if end_line is not None:
+        result["end_line"] = end_line
+    return result
+
+
 def parse_citation_id(citation_id: str) -> dict:
     """Parse a citation ID to extract its components."""
-    # New format: Code:path#symbol
+    # New format: Code:path#symbol:L42-L58
     if citation_id.startswith("Code:"):
-        raw = citation_id[len("Code:"):]
-        if "#" in raw:
-            path, symbol = raw.split("#", 1)
-        else:
-            path, symbol = raw, ""
-        return {"type": "code_file", "code_path": path, "code_symbol": symbol}
+        return _parse_code_citation(citation_id[len("Code:"):])
 
     # Legacy format: code:path#symbol
     if citation_id.startswith("code:"):
-        raw = citation_id[len("code:"):]
-        if "#" in raw:
-            path, symbol = raw.split("#", 1)
-        else:
-            path, symbol = raw, ""
-        return {"type": "code_file", "code_path": path, "code_symbol": symbol}
+        return _parse_code_citation(citation_id[len("code:"):])
 
     # Legacy format: mlflow:run/{run_id}/{kind}/{key}
     if citation_id.startswith("mlflow:run/"):
