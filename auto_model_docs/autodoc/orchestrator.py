@@ -18,9 +18,12 @@ from autodoc.core.models import (
     DocumentSpec,
     GeneratedContent,
     GenerationContext,
+    LanguageProfile,
+    PYTHON_PROFILE,
     SectionPlan,
     SectionResult,
     SectionSpec,
+    detect_language,
 )
 from autodoc.generation import ContentGenerator, DocumentBuilder, NotebookBuilder, SectionPlanner
 from autodoc.llm import LLMClient
@@ -81,19 +84,47 @@ class Orchestrator:
             disable_project_filtering: Disable automatic Domino project filtering.
         """
         self.llm = llm
-        self.sanitizer = sanitizer
         self.code_root = code_root
         self.output_dir = output_dir
         self.generate_notebook = generate_notebook
         self.notebook_path = notebook_path
 
-        # Initialize components
+        # Detect language before creating sanitizer and scanner
+        detected_profile, detected_count = detect_language(code_root)
+        self.language_profile: LanguageProfile = detected_profile or PYTHON_PROFILE
+        self.detected_file_count: int = detected_count
+
+        if detected_profile:
+            logger.info(
+                f"Detected language: {detected_profile.display_name} "
+                f"({detected_count} files)"
+            )
+        else:
+            logger.info("No supported files detected, defaulting to Python")
+
+        # Create sanitizer with language-specific secret patterns
+        # Separate regex patterns from file-name patterns
+        extra_regex = [
+            p for p in self.language_profile.secret_patterns
+            if any(c in p for c in r"()*+?[]{}|\\")
+        ]
+        extra_files = [
+            p for p in self.language_profile.secret_patterns
+            if not any(c in p for c in r"()*+?[]{}|\\")
+        ]
+        self.sanitizer = ContentSanitizer(
+            extra_patterns=extra_regex or None,
+            extra_sensitive_files=extra_files or None,
+        ) if (extra_regex or extra_files) else sanitizer
+
+        # Initialize components with detected profile
         self.code_scanner = CodeScanner(
             llm=llm,
-            sanitizer=sanitizer,
+            sanitizer=self.sanitizer,
             code_root=code_root,
             max_files=max_files,
             max_file_size=max_file_size,
+            profile=self.language_profile,
         )
         self.artifact_scanner = ArtifactScanner(
             tracking_uri=mlflow_tracking_uri,
