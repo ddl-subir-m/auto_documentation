@@ -20,7 +20,7 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TaskPr
 from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
-from starlette.responses import FileResponse, Response
+from starlette.responses import FileResponse, Response, StreamingResponse
 
 from autodoc.core.config import Settings
 from autodoc.core.models import DocumentSpec
@@ -175,7 +175,7 @@ class JobRequest:
     latest_only: bool
     verbose: bool  # Enable verbose logging
     # Domino job fields
-    execution_mode: str = "domino"      # "app" | "domino"
+    # execution_mode is auto-inferred: project_id present → "domino", else → "app"
     branch: Optional[str] = None
     hardware_tier: Optional[str] = None
     api_key_source: str = "domino_env"  # "domino_env" | "pass_now"
@@ -260,6 +260,93 @@ def _get_default_code_root() -> Path:
 
 def _get_default_spec_path() -> Path:
     return Path(__file__).resolve().parent / "doc_spec.yaml"
+
+
+@dataclass
+class EnvironmentWarning:
+    """A startup environment warning."""
+    level: str   # "info" | "warning" | "error"
+    message: str
+    action: str  # suggested action
+
+
+def _validate_environment() -> list:
+    """Validate environment and return warnings. Never raises."""
+    warnings = []
+    code_root = _get_default_code_root()
+
+    # Check code directory
+    if not code_root.exists() or code_root == Path("."):
+        warnings.append(EnvironmentWarning(
+            level="warning",
+            message="Code directory not found at /mnt/code.",
+            action="Documents will be generated from MLflow artifacts only.",
+        ))
+
+    # Check MLflow
+    if not os.environ.get("MLFLOW_TRACKING_URI"):
+        warnings.append(EnvironmentWarning(
+            level="info",
+            message="MLflow not configured.",
+            action="Document generation will use code analysis only.",
+        ))
+
+    # Check Domino API (only if Domino env detected)
+    if os.environ.get("DOMINO_PROJECT_ID"):
+        if not os.environ.get("DOMINO_API_HOST"):
+            warnings.append(EnvironmentWarning(
+                level="warning",
+                message="Domino API host not configured.",
+                action="Job submission may fail. Set DOMINO_API_HOST.",
+            ))
+
+    # Ensure output directory exists
+    try:
+        _get_default_output_dir()
+    except Exception as exc:
+        warnings.append(EnvironmentWarning(
+            level="error",
+            message=f"Could not create output directory: {exc}",
+            action="Check disk permissions.",
+        ))
+
+    # Ensure cache directory exists
+    try:
+        Path(".autodoc_cache").mkdir(exist_ok=True)
+    except Exception:
+        pass  # Non-critical
+
+    return warnings
+
+
+_STARTUP_WARNINGS: list = []
+
+
+def _render_warnings_banner(warnings: list) -> list:
+    """Render environment warnings as dismissible HTML banners."""
+    if not warnings:
+        return []
+    banners = []
+    style_map = {
+        "info": "background: #EEF6FF; border: 1px solid #B3D4FC; color: #1A4971;",
+        "warning": "background: #FFF8E1; border: 1px solid #FFE082; color: #5D4037;",
+        "error": "background: #FFEBEE; border: 1px solid #EF9A9A; color: #B71C1C;",
+    }
+    for w in warnings:
+        style = style_map.get(w.level, style_map["info"])
+        banners.append(
+            Div(
+                Span(f"{w.message} {w.action}", style="flex: 1;"),
+                Button(
+                    "\u00d7", type="button",
+                    style="background: none; border: none; font-size: 1.2rem; cursor: pointer; padding: 0 0.5rem;",
+                    onclick="this.parentElement.remove();",
+                ),
+                style=f"{style} padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.5rem; "
+                      "display: flex; align-items: center; font-size: 0.875rem;",
+            )
+        )
+    return banners
 
 
 def _sanitize_optional_int(value: Optional[str]) -> Optional[int]:
@@ -738,13 +825,12 @@ async def _parse_request(req: Request) -> JobRequest:
         spec_content = content.decode("utf-8", errors="replace")
         spec_filename = getattr(spec_upload, "filename", None)
 
-    execution_mode = form.get("execution_mode", "domino")
-
-    # projectId: prefer form field, fall back to query param
+    # projectId: prefer form field, fall back to query param, then env var
     project_id = (
         form.get("target_project")
         or form.get("project_id")
         or req.query_params.get("projectId")
+        or os.environ.get("DOMINO_PROJECT_ID")
         or None
     )
 
@@ -767,7 +853,6 @@ async def _parse_request(req: Request) -> JobRequest:
         model_names=form.get("model_names") or None,
         latest_only=form.get("latest_only") in ("on", "true", "1", "yes"),
         verbose=True,
-        execution_mode=execution_mode,
         branch=form.get("branch") or None,
         hardware_tier=form.get("hardware_tier") or None,
         api_key_source=form.get("api_key_source", "domino_env"),
@@ -1215,9 +1300,10 @@ app, rt = fast_app(
                 // Initialise version from DOM
                 _lastLogVersion = getCurrentVersion();
 
-                // Start smart polling for app mode (Domino mode uses HTMX polling)
-                var isDominoMode = document.querySelector('input[name="execution_mode"][value="domino"]:checked');
-                if (!isDominoMode) {
+                // Start smart polling for app mode
+                var formEl = document.getElementById('main-form');
+                var inferredMode = formEl ? formEl.getAttribute('data-execution-mode') : 'app';
+                if (inferredMode !== 'domino') {
                     setInterval(smartPoll, 2000);
                 }
 
@@ -1822,6 +1908,14 @@ app, rt = fast_app(
                 padding: 0.25rem 0.625rem;
                 border-radius: 4px;
                 margin-bottom: 0.75rem;
+                transition: background 0.3s ease, color 0.3s ease;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(4px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .log-line {
+                animation: fadeIn 0.2s ease forwards;
             }
             .terminal-status-idle {
                 background: var(--bg-page);
@@ -2359,8 +2453,7 @@ app, rt = fast_app(
                 detectLanguage();
 
                 // ── All DOM references declared up-front to avoid TDZ errors ──────
-                const modeDominoLabel   = document.getElementById('mode-domino-label');
-                const modeAppLabel      = document.getElementById('mode-app-label');
+                // Mode toggle removed — mode is auto-inferred server-side
                 const uploadBtnLabel    = document.querySelector('label.upload-btn');
                 const specSavedName     = document.getElementById('spec-saved-name');
                 const appModeNote       = document.getElementById('app-mode-note');
@@ -2372,90 +2465,9 @@ app, rt = fast_app(
                 const baseUrlField      = document.getElementById('base-url-field');
                 const modelNameField    = document.getElementById('model-name-field');
 
-                // ── Execution mode toggle ──────────────────────────────────────────
-                function applyExecutionMode(mode) {
-                    const isDomino = mode === 'domino';
-
-                    // Highlight the active toggle pill
-                    if (modeDominoLabel) modeDominoLabel.classList.toggle('active', isDomino);
-                    if (modeAppLabel)    modeAppLabel.classList.toggle('active', !isDomino);
-
-                    // Show/hide Domino-specific fields
-                    document.querySelectorAll('.domino-fields').forEach(function(el) {
-                        el.style.display = isDomino ? '' : 'none';
-                    });
-
-                    // App-mode upload button (label-based file picker)
-                    if (uploadBtnLabel) uploadBtnLabel.style.display = isDomino ? 'none' : '';
-
-                    // App-mode-only elements
-                    if (appModeNote)  appModeNote.style.display  = isDomino ? 'none' : '';
-                    if (appNoteHint)  appNoteHint.style.display  = isDomino ? 'none' : '';
-
-                    // API key visibility — both modes use the same radio group
-                    const src = document.querySelector('input[name="api_key_source"]:checked');
-                    applyApiKeySource(src ? src.value : 'domino_env');
-
-                    // Show/hide History tab (Domino-only)
-                    const historyTabBtn = document.querySelector('.tab-btn[data-tab="history"]');
-                    if (historyTabBtn) {
-                        historyTabBtn.style.display = isDomino ? '' : 'none';
-                        if (!isDomino && historyTabBtn.classList.contains('active')) {
-                            showOutputTab('live');
-                        }
-                    }
-
-                    // Update polling on status panel
-                    const panel = document.getElementById('status-panel');
-                    if (panel) {
-                        if (isDomino && typeof htmx !== 'undefined') {
-                            // Domino mode: use HTMX polling
-                            panel.setAttribute('hx-get', 'domino-status');
-                            panel.setAttribute('hx-trigger', 'every 10s');
-                            htmx.process(panel);
-                            htmx.ajax('GET', 'domino-status', {target: '#status-panel', swap: 'innerHTML'});
-                        } else {
-                            // App mode: remove HTMX polling, smart JS poll handles it
-                            panel.removeAttribute('hx-get');
-                            panel.removeAttribute('hx-trigger');
-                            if (typeof htmx !== 'undefined') htmx.process(panel);
-                            // Activate smart polling and force an immediate check
-                            if (typeof window._activateStatusPolling === 'function') {
-                                window._activateStatusPolling();
-                            }
-                        }
-                    }
-
-                    // Update output directory default for the selected mode
-                    const outputDirField = document.getElementById('field-output_dir');
-                    if (outputDirField) {
-                        outputDirField.value = isDomino ? DOMINO_OUTPUT_DEFAULT : APP_OUTPUT_DEFAULT;
-                    }
-
-                    // Update output directory hint text
-                    const outputDirHint = document.getElementById('output-dir-hint');
-                    if (outputDirHint) {
-                        outputDirHint.setAttribute('data-tooltip', isDomino
-                            ? 'Output files are written here by the Domino job.'
-                            : 'Output files are written here and available to download.');
-                    }
-                }
-
-                // Wire clicks on the label elements directly (radio is hidden)
-                if (modeDominoLabel) {
-                    modeDominoLabel.addEventListener('click', function() {
-                        applyExecutionMode('domino');
-                    });
-                }
-                if (modeAppLabel) {
-                    modeAppLabel.addEventListener('click', function() {
-                        applyExecutionMode('app');
-                    });
-                }
-
-                // Apply on load based on which radio is checked
-                const checkedMode = document.querySelector('input[name="execution_mode"]:checked');
-                applyExecutionMode(checkedMode ? checkedMode.value : 'domino');
+                // ── Mode is server-rendered (no toggle) ─────────────────────────
+                // Domino fields are conditionally rendered server-side.
+                // Nothing to toggle at runtime.
 
                 // ── API key source radio ───────────────────────────────────────────
                 function applyApiKeySource(src) {
@@ -2751,8 +2763,13 @@ def index(req: Request):
         except Exception:
             pass
 
-    # Default to Domino mode if Domino is available
-    default_mode = "domino" if _DOMINO_AVAILABLE else "app"
+    # Auto-infer execution mode: projectId or Domino env → domino, else → app
+    inferred_mode = "app"
+    if project_id and _DOMINO_AVAILABLE:
+        inferred_mode = "domino"
+    elif not project_id and _DOMINO_AVAILABLE and os.environ.get("DOMINO_PROJECT_ID"):
+        inferred_mode = "domino"
+    default_mode = inferred_mode
 
     # Pre-fetch branches and hardware tiers for server-side rendering
     if _DOMINO_AVAILABLE:
@@ -2795,33 +2812,9 @@ def index(req: Request):
                 P("Generate model documentation with a single, guided workflow.", cls="hero-tagline"),
                 cls="hero",
             ),
-            Div(
-                Label(
-                    Input(
-                        type="radio",
-                        name="execution_mode",
-                        value="domino",
-                        checked=(default_mode == "domino"),
-                        form="main-form",
-                    ),
-                    "Run as Domino Job",
-                    cls="mode-toggle-option" + (" active" if default_mode == "domino" else ""),
-                    id="mode-domino-label",
-                ),
-                Label(
-                    Input(
-                        type="radio",
-                        name="execution_mode",
-                        value="app",
-                        checked=(default_mode == "app"),
-                        form="main-form",
-                    ),
-                    "Run in App",
-                    cls="mode-toggle-option" + (" active" if default_mode == "app" else ""),
-                    id="mode-app-label",
-                ),
-                cls="mode-toggle",
-            ),
+            # Environment warnings (dismissible)
+            *_render_warnings_banner(_STARTUP_WARNINGS),
+            # Mode auto-inferred: projectId or DOMINO_PROJECT_ID → domino, else → app
             Div(
                 Span("Detected: ", style="color: #7F8385;"),
                 Span(id="lang-detected-name", style="color: #3F4547; font-weight: 600;"),
@@ -3146,6 +3139,7 @@ def index(req: Request):
                     cls="config-grid",
                 ),
                 id="main-form",
+                data_execution_mode=inferred_mode,
                 hx_post="run",
                 hx_target="#status-panel",
                 hx_swap="innerHTML",
@@ -3198,7 +3192,7 @@ def index(req: Request):
 async def run(req: Request):
     job_request = await _parse_request(req)
 
-    if job_request.execution_mode == "domino" and _DOMINO_AVAILABLE:
+    if job_request.project_id and _DOMINO_AVAILABLE:
         username = _get_username()
         try:
             record = await _submit_domino_job(job_request, username)
@@ -3314,6 +3308,124 @@ def api_hardware_tiers(req: Request):
     if not options:
         options = [Option("(default)", value="")]
     return Select(*options, name="hardware_tier", id="field-hardware_tier")
+
+
+@rt("/status-progress")
+def status_progress(req: Request):
+    """Return progress bar HTML fragment for incremental polling."""
+    job_id = req.query_params.get("job_id", "")
+    job = JOB_STORE.get(job_id or ACTIVE_JOB_ID or "")
+    if not job:
+        return Div("", id="progress-bar-container")
+    pct = int(job.progress * 100)
+    return Div(
+        Div(
+            Div(
+                style=f"width: {pct}%; height: 100%; background: var(--accent, #543FDE); "
+                      "border-radius: 4px; transition: width 0.3s ease;",
+            ),
+            style="height: 6px; background: #E0E0E0; border-radius: 4px; overflow: hidden;",
+        ),
+        Span(f"{job.phase} — {pct}%", style="font-size: 0.8rem; color: #7F8385; margin-top: 4px;"),
+        id="progress-bar-container",
+    )
+
+
+@rt("/status-badge")
+def status_badge(req: Request):
+    """Return status badge HTML fragment for incremental polling."""
+    job_id = req.query_params.get("job_id", "")
+    job = JOB_STORE.get(job_id or ACTIVE_JOB_ID or "")
+    if not job:
+        return Span("idle", cls="terminal-status terminal-status-idle", id="status-badge")
+    badge_cls = f"terminal-status terminal-status-{job.status}"
+    return Span(job.status.upper(), cls=badge_cls, id="status-badge")
+
+
+@rt("/status-logs-since")
+def status_logs_since(req: Request):
+    """Return only new log lines since a given version for append-only updates."""
+    job_id = req.query_params.get("job_id", "")
+    since = int(req.query_params.get("since", "0"))
+    job = JOB_STORE.get(job_id or ACTIVE_JOB_ID or "")
+    if not job or since >= len(job.logs):
+        return Response("", media_type="text/html")
+    new_lines = job.logs[since:]
+    html_lines = "".join(
+        f'<div class="log-line" style="opacity:0;animation:fadeIn 0.2s forwards;">{line}</div>'
+        for line in new_lines
+    )
+    return Response(html_lines, media_type="text/html")
+
+
+@rt("/sse/job-stream")
+async def sse_job_stream(req: Request):
+    """SSE endpoint for real-time app-mode job updates."""
+    job_id = req.query_params.get("job_id", "")
+
+    # Only serve SSE for in-app jobs (JOB_STORE)
+    job = JOB_STORE.get(job_id) if job_id else None
+    if not job:
+        return Response("Job not found", status_code=404)
+
+    async def event_generator():
+        last_log_count = 0
+        last_status = ""
+        last_progress = -1.0
+        start_time = asyncio.get_event_loop().time()
+        heartbeat_counter = 0
+
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > 300:  # 5-minute max lifetime
+                yield "event: timeout\ndata: {}\n\n"
+                break
+
+            current_job = JOB_STORE.get(job_id)
+            if not current_job:
+                yield "event: error\ndata: {\"message\": \"Job not found\"}\n\n"
+                break
+
+            # Stream new log lines (append-only)
+            if len(current_job.logs) > last_log_count:
+                new_lines = current_job.logs[last_log_count:]
+                for line in new_lines:
+                    yield f"event: log\ndata: {json.dumps({'line': line})}\n\n"
+                last_log_count = len(current_job.logs)
+
+            # Stream progress changes
+            if current_job.progress != last_progress:
+                last_progress = current_job.progress
+                yield f"event: progress\ndata: {json.dumps({'phase': current_job.phase, 'progress': current_job.progress})}\n\n"
+
+            # Stream status changes
+            if current_job.status != last_status:
+                last_status = current_job.status
+                yield f"event: status\ndata: {json.dumps({'status': current_job.status})}\n\n"
+
+            # Check terminal state
+            if current_job.status in ("complete", "error", "cancelled"):
+                output_path = str(current_job.output_path) if current_job.output_path else None
+                yield f"event: complete\ndata: {json.dumps({'status': current_job.status, 'output_path': output_path})}\n\n"
+                break
+
+            # Heartbeat every 30 iterations (0.5s * 60 = 30s)
+            heartbeat_counter += 1
+            if heartbeat_counter >= 60:
+                yield "event: heartbeat\ndata: {}\n\n"
+                heartbeat_counter = 0
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @rt("/api/detect-language")
@@ -3538,7 +3650,10 @@ def _reconcile_stale_jobs() -> None:
 
 @app.on_event("startup")
 async def _on_startup():
-    global _POLL_TASK
+    global _POLL_TASK, _STARTUP_WARNINGS
+    _STARTUP_WARNINGS = _validate_environment()
+    for w in _STARTUP_WARNINGS:
+        logger.warning(f"Startup: [{w.level}] {w.message} {w.action}")
     if _DOMINO_AVAILABLE:
         domino_job_store.init_db()
         _reconcile_stale_jobs()
