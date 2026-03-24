@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 import httpx
 
-from auth_context import get_user_auth_headers
+from auth_context import get_request_auth_header
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,46 @@ def _is_cross_project(project_id: str) -> bool:
     return project_id != os.environ.get("DOMINO_PROJECT_ID", "")
 
 
+def _get_auth_headers(cross_project: bool = False) -> dict[str, str]:
+    """Build auth headers for Domino Datasets API calls.
+
+    Same-project (cross_project=False):
+        Use the ephemeral sidecar token — it is scoped to the current
+        project and is the correct credential for the local API proxy.
+
+    Cross-project (cross_project=True):
+        Use the forwarded user JWT — it carries the viewer's identity
+        and can access projects they have permissions for.  The sidecar
+        token is scoped to the app's own project so it won't work here.
+    """
+    if cross_project:
+        forwarded = get_request_auth_header()
+        if forwarded:
+            return {"Authorization": forwarded}
+        raise RuntimeError(
+            "Cross-project datasets API call requires a forwarded user token, "
+            "but none was captured from the incoming request."
+        )
+
+    # Same-project: sidecar ephemeral token
+    try:
+        resp = httpx.get("http://localhost:8899/access-token", timeout=3.0)
+        if resp.status_code == 200 and resp.text.strip():
+            return {"Authorization": f"Bearer {resp.text.strip()}"}
+    except Exception:
+        pass
+
+    # Fallback: API key from environment
+    api_key = os.environ.get("DOMINO_USER_API_KEY") or os.environ.get("DOMINO_API_KEY") or ""
+    if api_key:
+        return {"X-Domino-Api-Key": api_key}
+
+    raise RuntimeError(
+        "No Domino auth credentials available. "
+        "Need a sidecar ephemeral token or DOMINO_USER_API_KEY."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core HTTP helper
 # ---------------------------------------------------------------------------
@@ -69,7 +109,7 @@ def _api_request(
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRIES,
 ) -> httpx.Response:
-    """Authenticated request using the forwarded user JWT."""
+    """Authenticated request to the Domino Datasets API."""
     base = _resolve_nucleus_host() if cross_project else _resolve_api_host()
     if not base:
         raise RuntimeError("No Domino API host configured")
@@ -79,7 +119,7 @@ def _api_request(
     last_exc: Exception | None = None
 
     for attempt in range(max_retries + 1):
-        headers = get_user_auth_headers()
+        headers = _get_auth_headers(cross_project=cross_project)
         # Only set Content-Type for JSON requests (not multipart)
         if json is not None and files is None:
             headers["Content-Type"] = "application/json"
