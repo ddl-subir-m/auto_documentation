@@ -317,13 +317,9 @@ def list_files(
     cross = _is_cross_project(pid)
     logger.debug("Browsing files in snapshot %s, path='%s'", snapshot_id, path)
 
-    params: dict[str, str] = {}
-    if path:
-        params["path"] = path
-
     resp = _api_request(
         "GET", f"/v4/datasetrw/files/{snapshot_id}",
-        cross_project=cross, params=params,
+        cross_project=cross, params={"path": path},
     )
     data = resp.json()
     rows = data.get("rows", [])
