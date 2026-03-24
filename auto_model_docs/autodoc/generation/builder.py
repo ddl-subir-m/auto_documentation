@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -71,13 +71,21 @@ class DocumentBuilder:
             # Add table of contents placeholder
             self._add_table_of_contents(doc, results)
 
-            # Add sections
+            # Add sections, accumulating per-section citation IDs for traceability
+            section_citations: Dict[str, List[str]] = {}
             for result in results:
-                self._add_section(doc, result, registry)
+                section_name = result.plan.title or result.plan.name
+                found = self._add_section(doc, result, registry)
+                if found:
+                    section_citations[section_name] = found
 
             # Add bibliography if citations exist
             if registry.list_entries():
                 self._add_bibliography(doc, registry)
+
+            # Add traceability appendix
+            if section_citations:
+                self._add_traceability_appendix(doc, section_citations, registry)
 
             # Save document
             output_path = self._save_document(doc)
@@ -408,8 +416,8 @@ class DocumentBuilder:
 
     def _add_section(
         self, doc: Document, result: SectionResult, registry: CitationRegistry
-    ) -> None:
-        """Add a section to the document."""
+    ) -> List[str]:
+        """Add a section to the document. Returns collected citation IDs."""
         # Section heading with number and bookmark for TOC linking
         heading_text = f"{result.plan.number}. {result.plan.title}"
         heading_para = doc.add_heading(heading_text, level=1)
@@ -455,6 +463,8 @@ class DocumentBuilder:
 
         # Add spacing between sections
         doc.add_paragraph()
+
+        return section_citation_ids
 
     def _add_content(
         self, doc: Document, content: GeneratedContent, registry: CitationRegistry
@@ -811,6 +821,62 @@ class DocumentBuilder:
             if entry.run_url:
                 parts.append(f"Link: {entry.run_url}")
             para.add_run(" | ".join(parts))
+
+    def _add_traceability_appendix(
+        self,
+        doc: Document,
+        section_citations: Dict[str, List[str]],
+        registry: CitationRegistry,
+    ) -> None:
+        """Add a traceability appendix mapping sections to their sources."""
+        doc.add_heading("Traceability Appendix", level=1)
+        intro = doc.add_paragraph()
+        intro.add_run(
+            "This appendix maps each document section to the source files and "
+            "artifacts used to generate its content."
+        ).italic = True
+
+        for section_name, citation_ids in section_citations.items():
+            if not citation_ids:
+                continue
+            doc.add_heading(f"Section: {section_name}", level=2)
+
+            seen = set()
+            for cid in citation_ids:
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                parsed = parse_citation_id(cid)
+                ctype = parsed.get("type", "unknown")
+
+                if ctype == "code_file":
+                    path = parsed.get("code_path", "")
+                    symbol = parsed.get("code_symbol", "")
+                    start = parsed.get("start_line")
+                    end = parsed.get("end_line")
+                    line_info = ""
+                    if start and end:
+                        line_info = f" (lines {start}-{end})"
+                    elif start:
+                        line_info = f" (line {start})"
+                    label = f"{path}#{symbol}" if symbol else path
+                    doc.add_paragraph(f"{label}{line_info}", style="List Bullet")
+                elif ctype == "mlflow_artifact":
+                    artifact = parsed.get("artifact_path", "")
+                    exp = parsed.get("experiment_name", "")
+                    run = parsed.get("run_name", "")
+                    doc.add_paragraph(
+                        f"MLflow Artifact: {artifact} ({exp}/{run})",
+                        style="List Bullet",
+                    )
+                elif ctype.startswith("mlflow_"):
+                    exp = parsed.get("experiment_name", "")
+                    run = parsed.get("run_name", "")
+                    run_id = parsed.get("run_id", "")
+                    label = f"MLflow Run: {exp}/{run}" if exp else f"MLflow Run: {run_id}"
+                    doc.add_paragraph(label, style="List Bullet")
+                else:
+                    doc.add_paragraph(cid, style="List Bullet")
 
     def _save_document(self, doc: Document) -> Path:
         """Save the document to the output directory."""
