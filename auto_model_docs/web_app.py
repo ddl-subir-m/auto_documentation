@@ -1311,6 +1311,8 @@ app, rt = fast_app(
                 window._activateStatusPolling = function() {
                     _pollActive = true;
                     _lastLogVersion = -1; // Force an immediate update
+                    _tabInitialized = false; // Reset so next swap shows Output tab
+                    showOutputTab('live'); // Immediately show Output tab on new job
                 };
 
                 // Direct click handler on Generate button
@@ -2694,9 +2696,15 @@ app, rt = fast_app(
                     scrollTerminalToBottom();
                 }
 
+                // One-shot flag: show Output tab on first swap only (form submit),
+                // not on subsequent polling swaps (which would reset the user's tab choice).
+                var _tabInitialized = false;
                 document.body.addEventListener('htmx:afterSwap', function(e) {
                     if (e.detail && e.detail.target && e.detail.target.id === 'status-panel') {
-                        showOutputTab('live');
+                        if (!_tabInitialized) {
+                            showOutputTab('live');
+                            _tabInitialized = true;
+                        }
                     }
                     onStatusUpdate();
                 });
@@ -2891,38 +2899,45 @@ def index(req: Request):
                             Span("ⓘ", cls="info-tooltip", data_tooltip="Upload to save the spec file to Domino dataset storage for the job to access."),
                             cls="domino-fields",
                         ),
-                        Div(
+                        Details(
+                            Summary("Filters", cls="advanced-section-summary"),
                             Div(
-                                Label("Model names", for_="field-model_names"),
-                                Span("ⓘ", cls="info-tooltip", data_tooltip="Comma-separated. Supports wildcards: * and ?"),
-                                cls="label-row",
+                                Div(
+                                    Div(
+                                        Label("Model names", for_="field-model_names"),
+                                        Span("ⓘ", cls="info-tooltip", data_tooltip="Comma-separated. Supports wildcards: * and ?"),
+                                        cls="label-row",
+                                    ),
+                                    Input(
+                                        name="model_names",
+                                        id="field-model_names",
+                                        type="text",
+                                        placeholder="model1, churn*, fraud-*",
+                                    ),
+                                    cls="field",
+                                ),
+                                Div(
+                                    Div(
+                                        Label("Experiment names", for_="field-experiment_names"),
+                                        Span("ⓘ", cls="info-tooltip", data_tooltip="Comma-separated. Supports wildcards: * and ?"),
+                                        cls="label-row",
+                                    ),
+                                    Input(
+                                        name="experiment_names",
+                                        id="field-experiment_names",
+                                        type="text",
+                                        placeholder="exp1, exp2, my-experiment*",
+                                    ),
+                                    cls="field",
+                                ),
+                                Label(
+                                    Input(type="checkbox", name="latest_only", id="field-latest_only", checked=True),
+                                    Span("Latest version only"),
+                                    cls="checkbox-field",
+                                ),
+                                cls="advanced-content",
                             ),
-                            Input(
-                                name="model_names",
-                                id="field-model_names",
-                                type="text",
-                                placeholder="model1, churn*, fraud-*",
-                            ),
-                            cls="field",
-                        ),
-                        Div(
-                            Div(
-                                Label("Experiment names", for_="field-experiment_names"),
-                                Span("ⓘ", cls="info-tooltip", data_tooltip="Comma-separated. Supports wildcards: * and ?"),
-                                cls="label-row",
-                            ),
-                            Input(
-                                name="experiment_names",
-                                id="field-experiment_names",
-                                type="text",
-                                placeholder="exp1, exp2, my-experiment*",
-                            ),
-                            cls="field",
-                        ),
-                        Label(
-                            Input(type="checkbox", name="latest_only", id="field-latest_only", checked=True),
-                            Span("Latest version only"),
-                            cls="checkbox-field",
+                            cls="advanced-section",
                         ),
                         cls="card",
                     ),
@@ -2985,25 +3000,6 @@ def index(req: Request):
                         ),
                         Div(
                             Div(
-                                Label("Output directory", for_="field-output_dir"),
-                                Span(
-                                    "ⓘ",
-                                    cls="info-tooltip",
-                                    data_tooltip="Output files are written here by the Domino job.",
-                                    id="output-dir-hint",
-                                ),
-                                cls="label-row",
-                            ),
-                            Input(
-                                name="output_dir",
-                                id="field-output_dir",
-                                type="text",
-                                value=str(_get_default_output_dir()),
-                            ),
-                            cls="field domino-fields",
-                        ),
-                        Div(
-                            Div(
                                 Label("Hardware tier", for_="field-hardware_tier"),
                                 Span("ⓘ", cls="info-tooltip", data_tooltip="Compute tier for the Domino job."),
                                 cls="label-row",
@@ -3015,124 +3011,160 @@ def index(req: Request):
                             ),
                             cls="field domino-fields",
                         ),
-                        Div(
-                            Label("API key"),
+                        Details(
+                            Summary("More run settings", cls="advanced-section-summary"),
                             Div(
-                                Label(
-                                    Input(type="radio", name="api_key_source", value="domino_env", checked=True),
-                                    "Domino environment variable (recommended)",
-                                    cls="api-key-source-option",
+                                Div(
+                                    Div(
+                                        Label("Output directory", for_="field-output_dir"),
+                                        Span(
+                                            "ⓘ",
+                                            cls="info-tooltip",
+                                            data_tooltip="Output files are written here by the Domino job.",
+                                            id="output-dir-hint",
+                                        ),
+                                        cls="label-row",
+                                    ),
+                                    Input(
+                                        name="output_dir",
+                                        id="field-output_dir",
+                                        type="text",
+                                        value=str(_get_default_output_dir()),
+                                    ),
+                                    cls="field domino-fields",
                                 ),
-                                Label(
-                                    Input(type="radio", name="api_key_source", value="pass_now"),
-                                    "Set key",
-                                    cls="api-key-source-option",
+                                Div(
+                                    Label("API key"),
+                                    Div(
+                                        Label(
+                                            Input(type="radio", name="api_key_source", value="domino_env", checked=True),
+                                            "Domino environment variable (recommended)",
+                                            cls="api-key-source-option",
+                                        ),
+                                        Label(
+                                            Input(type="radio", name="api_key_source", value="pass_now"),
+                                            "Set key",
+                                            cls="api-key-source-option",
+                                        ),
+                                        cls="api-key-source",
+                                    ),
+                                    Div(id="api-key-callout", cls="api-key-callout"),
+                                    cls="field",
+                                    id="api-key-source-field",
                                 ),
-                                cls="api-key-source",
+                                Div(
+                                    Label("API key", Span(" *", cls="required-star"), for_="field-api_key"),
+                                    Input(
+                                        name="api_key",
+                                        id="field-api_key",
+                                        type="password",
+                                        placeholder="Paste your API key",
+                                        autocomplete="new-password",
+                                        spellcheck="false",
+                                    ),
+                                    cls="field",
+                                    id="api-key-pass-field",
+                                    style="display: none;" if default_mode == "domino" else "",
+                                ),
+                                cls="advanced-content",
                             ),
-                            Div(id="api-key-callout", cls="api-key-callout"),
-                            cls="field",
-                            id="api-key-source-field",
-                        ),
-                        Div(
-                            Label("API key", Span(" *", cls="required-star"), for_="field-api_key"),
-                            Input(
-                                name="api_key",
-                                id="field-api_key",
-                                type="password",
-                                placeholder="Paste your API key",
-                                autocomplete="new-password",
-                                spellcheck="false",
-                            ),
-                            cls="field",
-                            id="api-key-pass-field",
-                            style="display: none;" if default_mode == "domino" else "",
+                            cls="advanced-section",
                         ),
                         cls="card",
                     ),
-                    # Card 3: Advanced (workers, timeout, provider, model, notebook)
+                    # Card 3: Advanced (collapsed by default — all fields optional)
                     Div(
-                        Div("Advanced", cls="card-title"),
-                        Div("Generation settings", cls="filter-section-title"),
-                        Div(
-                            Div(
-                                Label("Max files", for_="field-max_files"),
-                                Input(name="max_files", id="field-max_files", type="number", value="50"),
-                                cls="field",
+                        Details(
+                            Summary(
+                                Span("Advanced", cls="card-title", style="margin-bottom: 0;"),
+                                Span("Generation settings, provider, output options", cls="advanced-summary-desc"),
+                                cls="advanced-section-summary",
                             ),
                             Div(
+                                Div("Generation settings", cls="filter-section-title"),
                                 Div(
-                                    Label("Planning workers", for_="field-planning_workers"),
-                                    Span("ⓘ", cls="info-tooltip", data_tooltip="Parallel LLM calls in the planning phase."),
-                                    cls="label-row",
+                                    Div(
+                                        Label("Max files", for_="field-max_files"),
+                                        Input(name="max_files", id="field-max_files", type="number", value="50"),
+                                        cls="field",
+                                    ),
+                                    Div(
+                                        Div(
+                                            Label("Planning workers", for_="field-planning_workers"),
+                                            Span("ⓘ", cls="info-tooltip", data_tooltip="Parallel LLM calls in the planning phase."),
+                                            cls="label-row",
+                                        ),
+                                        Input(name="planning_workers", id="field-planning_workers", type="number", value="1"),
+                                        cls="field",
+                                    ),
+                                    Div(
+                                        Div(
+                                            Label("Generation workers", for_="field-workers"),
+                                            Span("ⓘ", cls="info-tooltip", data_tooltip="Sections generated in parallel."),
+                                            cls="label-row",
+                                        ),
+                                        Input(name="workers", id="field-workers", type="number", value="4"),
+                                        cls="field",
+                                    ),
+                                    Div(
+                                        Div(
+                                            Label("Timeout (s)", for_="field-timeout"),
+                                            Span("ⓘ", cls="info-tooltip", data_tooltip="Seconds before a single LLM call times out."),
+                                            cls="label-row",
+                                        ),
+                                        Input(name="timeout", id="field-timeout", type="number", value="120"),
+                                        cls="field",
+                                    ),
+                                    cls="advanced-grid",
                                 ),
-                                Input(name="planning_workers", id="field-planning_workers", type="number", value="1"),
-                                cls="field",
-                            ),
-                            Div(
                                 Div(
-                                    Label("Generation workers", for_="field-workers"),
-                                    Span("ⓘ", cls="info-tooltip", data_tooltip="Sections generated in parallel."),
-                                    cls="label-row",
+                                    Label("Provider", for_="field-provider"),
+                                    Select(
+                                        Option("Anthropic", value="anthropic"),
+                                        Option("OpenAI (Compatible)", value="openai", selected=True),
+                                        name="provider",
+                                        id="field-provider",
+                                    ),
+                                    cls="field",
                                 ),
-                                Input(name="workers", id="field-workers", type="number", value="4"),
-                                cls="field",
-                            ),
-                            Div(
                                 Div(
-                                    Label("Timeout (s)", for_="field-timeout"),
-                                    Span("ⓘ", cls="info-tooltip", data_tooltip="Seconds before a single LLM call times out."),
-                                    cls="label-row",
+                                    Div(
+                                        Label("Model", for_="field-model"),
+                                        Span("ⓘ", cls="info-tooltip", data_tooltip="Leave blank to use default (gpt-4o)"),
+                                        cls="label-row",
+                                    ),
+                                    Input(name="model", id="field-model", type="text", value=_current_model, placeholder="gpt-4o"),
+                                    cls="field",
+                                    id="model-name-field",
+                                    style="display: none;",
                                 ),
-                                Input(name="timeout", id="field-timeout", type="number", value="120"),
-                                cls="field",
+                                Div(
+                                    Div(
+                                        Label("Base URL", for_="field-base_url"),
+                                        Span("ⓘ", cls="info-tooltip", data_tooltip="For OpenAI-compatible APIs (e.g., Moonshot, Azure)"),
+                                        cls="label-row",
+                                    ),
+                                    Input(
+                                        name="base_url",
+                                        id="field-base_url",
+                                        type="text",
+                                        value=_current_base_url,
+                                        placeholder="https://api.openai.com/v1 (optional)",
+                                    ),
+                                    cls="field",
+                                    id="base-url-field",
+                                    style="display: none;",
+                                ),
+                                Label(
+                                    Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
+                                    Span("Generate notebook"),
+                                    Span("ⓘ", cls="info-tooltip", data_tooltip="Saved alongside your document in the output directory.", id="app-mode-notebook-hint"),
+                                    cls="checkbox-field",
+                                    id="app-mode-note",
+                                ),
+                                cls="advanced-content",
                             ),
-                            cls="advanced-grid",
-                        ),
-                        Div(
-                            Label("Provider", for_="field-provider"),
-                            Select(
-                                Option("Anthropic", value="anthropic"),
-                                Option("OpenAI (Compatible)", value="openai", selected=True),
-                                name="provider",
-                                id="field-provider",
-                            ),
-                            cls="field",
-                        ),
-                        Div(
-                            Div(
-                                Label("Model", for_="field-model"),
-                                Span("ⓘ", cls="info-tooltip", data_tooltip="Leave blank to use default (gpt-4o)"),
-                                cls="label-row",
-                            ),
-                            Input(name="model", id="field-model", type="text", value=_current_model, placeholder="gpt-4o"),
-                            cls="field",
-                            id="model-name-field",
-                            style="display: none;",
-                        ),
-                        Div(
-                            Div(
-                                Label("Base URL", for_="field-base_url"),
-                                Span("ⓘ", cls="info-tooltip", data_tooltip="For OpenAI-compatible APIs (e.g., Moonshot, Azure)"),
-                                cls="label-row",
-                            ),
-                            Input(
-                                name="base_url",
-                                id="field-base_url",
-                                type="text",
-                                value=_current_base_url,
-                                placeholder="https://api.openai.com/v1 (optional)",
-                            ),
-                            cls="field",
-                            id="base-url-field",
-                            style="display: none;",
-                        ),
-                        Label(
-                            Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
-                            Span("Generate notebook"),
-                            Span("ⓘ", cls="info-tooltip", data_tooltip="Saved alongside your document in the output directory.", id="app-mode-notebook-hint"),
-                            cls="checkbox-field",
-                            id="app-mode-note",
+                            cls="advanced-section",
                         ),
                         cls="card card-advanced",
                     ),
