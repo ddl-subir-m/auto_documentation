@@ -343,8 +343,8 @@ class TestMountPaths:
 
 class TestApiRequest:
     @patch("httpx.Client")
-    def test_cross_project_uses_forwarded_jwt(self, mock_client_cls):
-        """Cross-project calls must use the forwarded user JWT."""
+    def test_prefers_forwarded_jwt(self, mock_client_cls):
+        """Forwarded JWT is preferred over sidecar for all calls."""
         mock_resp = _mock_response(json_data={"ok": True})
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -352,7 +352,7 @@ class TestApiRequest:
         mock_client.request.return_value = mock_resp
         mock_client_cls.return_value = mock_client
 
-        ds._api_request("GET", "/api/test", cross_project=True)
+        ds._api_request("GET", "/api/test", cross_project=False)
         headers = mock_client.request.call_args.kwargs["headers"]
         assert headers["Authorization"] == "Bearer test-jwt"
 
@@ -371,8 +371,9 @@ class TestApiRequest:
 
     @patch("httpx.Client")
     @patch("httpx.get")
-    def test_same_project_uses_sidecar_token(self, mock_get, mock_client_cls):
-        """Same-project calls use the ephemeral sidecar token, not the forwarded JWT."""
+    def test_falls_back_to_sidecar_when_no_jwt(self, mock_get, mock_client_cls):
+        """When no forwarded JWT, same-project falls back to sidecar token."""
+        set_request_auth_header(None)
         mock_token_resp = MagicMock()
         mock_token_resp.status_code = 200
         mock_token_resp.text = "sidecar-ephemeral-token"
@@ -388,14 +389,13 @@ class TestApiRequest:
         ds._api_request("GET", "/api/test", cross_project=False)
         headers = mock_client.request.call_args.kwargs["headers"]
         assert headers["Authorization"] == "Bearer sidecar-ephemeral-token"
-        # Same-project routes through sidecar proxy
-        url = mock_client.request.call_args.args[1]
-        assert url.startswith("http://localhost:8899")
+        set_request_auth_header("Bearer test-jwt")  # restore
 
     @patch("httpx.Client")
     @patch("httpx.get", side_effect=Exception("no sidecar"))
-    def test_same_project_falls_back_to_api_key(self, _mock_get, mock_client_cls):
-        """When sidecar is unavailable, same-project falls back to API key."""
+    def test_falls_back_to_api_key(self, _mock_get, mock_client_cls):
+        """When no JWT and no sidecar, falls back to API key."""
+        set_request_auth_header(None)
         mock_resp = _mock_response(json_data={})
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -406,6 +406,7 @@ class TestApiRequest:
         ds._api_request("GET", "/api/test", cross_project=False)
         headers = mock_client.request.call_args.kwargs["headers"]
         assert headers.get("X-Domino-Api-Key") == "test-api-key"
+        set_request_auth_header("Bearer test-jwt")  # restore
 
     def test_cross_project_raises_without_forwarded_jwt(self):
         """Cross-project calls must fail if no forwarded JWT is available."""
@@ -415,7 +416,7 @@ class TestApiRequest:
         set_request_auth_header("Bearer test-jwt")  # restore
 
     @patch("httpx.get", side_effect=Exception("no sidecar"))
-    def test_same_project_raises_without_any_auth(self, _mock_get, monkeypatch):
+    def test_raises_without_any_auth(self, _mock_get, monkeypatch):
         monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
         monkeypatch.delenv("DOMINO_API_KEY", raising=False)
         set_request_auth_header(None)

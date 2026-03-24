@@ -56,36 +56,38 @@ def _is_cross_project(project_id: str) -> bool:
 def _get_auth_headers(cross_project: bool = False) -> dict[str, str]:
     """Build auth headers for Domino Datasets API calls.
 
-    Same-project (cross_project=False):
-        Use the ephemeral sidecar token — it is scoped to the current
-        project and is the correct credential for the local API proxy.
+    Prefers the forwarded user JWT when available — it carries the
+    viewer's identity and has full RBAC permissions (reads AND writes).
+    Falls back to the sidecar ephemeral token for same-project calls
+    when no JWT is available (e.g. sync route handlers where the
+    ContextVar may not propagate).
 
-    Cross-project (cross_project=True):
-        Use the forwarded user JWT — it carries the viewer's identity
-        and can access projects they have permissions for.  The sidecar
-        token is scoped to the app's own project so it won't work here.
+    Cross-project calls require the forwarded JWT — the sidecar token
+    is scoped to the app's own project.
     """
+    # 1. Forwarded user JWT (preferred — has full user permissions)
+    forwarded = get_request_auth_header()
+    if forwarded:
+        logger.info("Auth: using forwarded user JWT")
+        return {"Authorization": forwarded}
+
     if cross_project:
-        forwarded = get_request_auth_header()
-        if forwarded:
-            logger.info("Auth: using forwarded JWT for cross-project call")
-            return {"Authorization": forwarded}
         raise RuntimeError(
             "Cross-project datasets API call requires a forwarded user token, "
             "but none was captured from the incoming request."
         )
 
-    # Same-project: sidecar ephemeral token
+    # 2. Sidecar ephemeral token (same-project fallback — read-only safe)
     try:
         resp = httpx.get("http://localhost:8899/access-token", timeout=3.0)
         if resp.status_code == 200 and resp.text.strip():
-            logger.info("Auth: using sidecar ephemeral token")
+            logger.info("Auth: using sidecar ephemeral token (no forwarded JWT)")
             return {"Authorization": f"Bearer {resp.text.strip()}"}
         logger.warning("Sidecar /access-token returned status=%s body=%r", resp.status_code, resp.text[:200])
     except Exception as exc:
         logger.warning("Sidecar /access-token failed: %s", exc)
 
-    # Fallback: API key from environment
+    # 3. API key from environment
     api_key = os.environ.get("DOMINO_USER_API_KEY") or os.environ.get("DOMINO_API_KEY") or ""
     if api_key:
         logger.info("Auth: using DOMINO_USER_API_KEY")
@@ -93,7 +95,7 @@ def _get_auth_headers(cross_project: bool = False) -> dict[str, str]:
 
     raise RuntimeError(
         "No Domino auth credentials available. "
-        "Need a sidecar ephemeral token or DOMINO_USER_API_KEY."
+        "Need a forwarded user token, sidecar ephemeral token, or DOMINO_USER_API_KEY."
     )
 
 
