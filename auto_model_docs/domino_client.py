@@ -4,9 +4,32 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any, Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Typed exceptions
+# ---------------------------------------------------------------------------
+
+class DominoAPIError(Exception):
+    """Base exception for Domino API errors."""
+
+
+class ProjectNotFoundError(DominoAPIError):
+    """Raised when a project ID is not found (404)."""
+
+
+class ProjectForbiddenError(DominoAPIError):
+    """Raised when the user lacks access to the project (403)."""
+
+
+class ProjectAPIError(DominoAPIError):
+    """Raised on network or server errors when reaching the Domino API."""
 
 # Domino status → local status mapping
 _PENDING_STATUSES = {"submitted", "queued", "pending", "initializing", "provisioning"}
@@ -49,6 +72,112 @@ def _project_owner() -> str:
 
 def _project_name() -> str:
     return os.environ.get("DOMINO_PROJECT_NAME", "")
+
+
+# ---------------------------------------------------------------------------
+# Low-level Domino API helper
+# ---------------------------------------------------------------------------
+
+def _domino_request(
+    method: str,
+    path: str,
+    *,
+    cross_project: bool = False,
+    max_retries: int = 2,
+) -> dict[str, Any]:
+    """Make an HTTP request to the Domino API and return parsed JSON.
+
+    *cross_project* bypasses the local sidecar proxy and calls
+    DOMINO_API_HOST directly (required when targeting another project).
+
+    Retries on transient network errors but **not** on bad JSON responses
+    (malformed JSON won't self-heal on retry).
+    """
+    base = _api_host()
+    if not cross_project:
+        proxy = os.environ.get("DOMINO_API_PROXY", "").rstrip("/")
+        if proxy:
+            base = proxy
+
+    url = f"{base}{path}"
+    api_key = os.environ.get("DOMINO_USER_API_KEY", "")
+    headers = {"X-Domino-Api-Key": api_key}
+
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            with httpx.Client(timeout=30) as client:
+                resp = client.request(method, url, headers=headers)
+                resp.raise_for_status()
+                try:
+                    return resp.json()
+                except ValueError:
+                    raise DominoAPIError(
+                        f"API returned invalid JSON: {resp.text[:200]}"
+                    )
+        except DominoAPIError:
+            raise  # malformed JSON — don't retry
+        except httpx.HTTPStatusError:
+            raise  # caller decides how to handle status codes
+        except (httpx.RequestError, OSError) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                time.sleep(1 * (attempt + 1))
+                continue
+            raise ProjectAPIError(
+                f"Could not reach the Domino API: {exc}"
+            ) from exc
+
+    # Unreachable, but keeps the type checker happy.
+    raise ProjectAPIError(str(last_exc))  # pragma: no cover
+
+
+# ---------------------------------------------------------------------------
+# Project resolution
+# ---------------------------------------------------------------------------
+
+_project_cache: dict[str, dict[str, Any]] = {}
+
+
+def resolve_project(project_id: str) -> dict[str, Any]:
+    """Resolve a Domino project ID to project metadata.
+
+    Returns a dict with at least ``id``, ``name``, and ``owner`` keys.
+
+    Raises:
+        ProjectNotFoundError: project ID does not exist (404).
+        ProjectForbiddenError: caller lacks access (403).
+        ProjectAPIError: network / server error.
+    """
+    project_id = project_id.lower()  # case-insensitive
+
+    if project_id in _project_cache:
+        return _project_cache[project_id]
+
+    try:
+        data = _domino_request(
+            "GET", f"/v4/projects/{project_id}", cross_project=True,
+        )
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        if code == 404:
+            raise ProjectNotFoundError(
+                f"Project '{project_id}' not found."
+            ) from exc
+        if code == 403:
+            raise ProjectForbiddenError(
+                f"You don't have access to project '{project_id}'."
+            ) from exc
+        raise ProjectAPIError(
+            f"Domino API error ({code})"
+        ) from exc
+    except (httpx.RequestError, OSError) as exc:
+        raise ProjectAPIError(
+            f"Could not reach the Domino API: {exc}"
+        ) from exc
+
+    _project_cache[project_id] = data
+    return data
 
 
 def list_branches() -> list[dict[str, Any]]:
@@ -183,11 +312,25 @@ def submit_job(
         # Older SDK versions may not support main_repo_git_ref
         if "main_repo_git_ref" in str(exc) and branch:
             logger.warning("SDK does not support main_repo_git_ref, calling REST API directly: %s", exc)
-            # Re-add mainRepoGitRef — the API supports it even if the SDK doesn't
             kwargs["main_repo_git_ref"] = {"type": "branches", "value": branch}
-            response = _job_start_via_api(domino, command_str, kwargs)
+            try:
+                response = _job_start_via_api(domino, command_str, kwargs)
+            except Exception as api_exc:
+                err_msg = str(api_exc).lower()
+                if "branch" in err_msg or "ref" in err_msg or "not found" in err_msg:
+                    raise ValueError(
+                        f"Branch '{branch}' not found in the target project."
+                    ) from api_exc
+                raise
         else:
             raise
+    except Exception as exc:
+        err_msg = str(exc).lower()
+        if branch and ("branch" in err_msg or "ref" in err_msg or "not found" in err_msg):
+            raise ValueError(
+                f"Branch '{branch}' not found in the target project."
+            ) from exc
+        raise
     logger.info("Domino job_start response: %r", response)
 
     # The SDK returns different shapes across versions; extract run ID robustly.

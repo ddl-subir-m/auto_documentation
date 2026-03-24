@@ -959,10 +959,12 @@ def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
     to /mnt/artifacts/auto_ml so they appear in the Domino job's
     Artifacts tab.
     """
+    import shlex
+
     parts = _build_job_command(req, spec_path)
-    cli_cmd = " ".join(parts)
-    output_dir = req.output_dir or "/mnt/data"
-    artifacts_dir = "/mnt/artifacts/auto_ml"
+    cli_cmd = " ".join(shlex.quote(p) for p in parts)
+    output_dir = shlex.quote(req.output_dir or "/mnt/data")
+    artifacts_dir = shlex.quote("/mnt/artifacts/auto_ml")
     return (
         f"{cli_cmd}"
         f" && mkdir -p {artifacts_dir}"
@@ -3075,6 +3077,28 @@ def api_hardware_tiers():
     if not options:
         options = [Option("(default)", value="")]
     return Select(*options, name="hardware_tier", id="field-hardware_tier")
+
+
+@rt("/api/resolve-project")
+def api_resolve_project(req: Request):
+    """Resolve a Domino project ID and return an HTML status fragment."""
+    project_id = req.query_params.get("project_id", "").strip()
+    if not project_id:
+        return Div("No project ID provided.", id="project-id-resolved", cls="error")
+    if not _DOMINO_AVAILABLE:
+        return Div("Domino integration is not available.", id="project-id-resolved", cls="error")
+    try:
+        data = domino_client.resolve_project(project_id)
+        owner = data.get("owner", {}).get("userName", "") or data.get("ownerUsername", "")
+        name = data.get("name", project_id)
+        label = f"{owner}/{name}" if owner else name
+        return Div(f"Target project: {label}", id="project-id-resolved", cls="success")
+    except domino_client.ProjectNotFoundError:
+        return Div("Project not found.", id="project-id-resolved", cls="error")
+    except domino_client.ProjectForbiddenError:
+        return Div("You don't have access to this project.", id="project-id-resolved", cls="error")
+    except domino_client.ProjectAPIError:
+        return Div("Could not reach the Domino API.", id="project-id-resolved", cls="error")
 
 
 @rt("/stop-domino")
