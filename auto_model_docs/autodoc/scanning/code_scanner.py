@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from autodoc.core.exceptions import ScannerError
-from autodoc.core.models import CodeContext, CodeEvidence
+from autodoc.core.models import CodeContext, CodeEvidence, LanguageProfile, PYTHON_PROFILE
 from autodoc.llm import LLMClient
 from autodoc.llm.prompts import (
     CODE_ANALYSIS_SCHEMA,
@@ -21,26 +21,10 @@ ProgressCallback = Callable[[float], None]
 class CodeScanner:
     """Scans codebase using LLM for semantic understanding.
 
-    This scanner uses an LLM to analyze Python code and extract
+    This scanner uses an LLM to analyze code and extract
     information about ML models, features, transformations, etc.
+    Supports multiple languages via LanguageProfile.
     """
-
-    # Keywords for prioritizing files (more relevant files first)
-    PRIORITY_KEYWORDS = ["train", "model", "feature", "pipeline", "main", "predict"]
-
-    # Patterns to exclude from scanning
-    EXCLUDE_PATTERNS = {
-        "test_",
-        "_test.py",
-        "conftest.py",
-        "__pycache__",
-        ".git",
-        "venv",
-        ".venv",
-        "node_modules",
-        ".pytest_cache",
-        "__init__.py",
-    }
 
     def __init__(
         self,
@@ -49,6 +33,7 @@ class CodeScanner:
         code_root: Path = Path("/mnt/code"),
         max_files: int = 50,
         max_file_size: int = 50000,
+        profile: Optional[LanguageProfile] = None,
     ):
         """Initialize the code scanner.
 
@@ -58,12 +43,14 @@ class CodeScanner:
             code_root: Root directory of the codebase.
             max_files: Maximum number of files to analyze.
             max_file_size: Maximum size per file in characters.
+            profile: Language profile for scanning. Defaults to Python.
         """
         self.llm = llm
         self.sanitizer = sanitizer
         self.code_root = code_root
         self.max_files = max_files
         self.max_file_size = max_file_size
+        self.profile = profile or PYTHON_PROFILE
 
     async def scan(
         self, on_progress: Optional[ProgressCallback] = None
@@ -88,8 +75,8 @@ class CodeScanner:
         try:
             report_progress(0.0)
 
-            # Find Python files
-            files = self._find_python_files()
+            # Find source files using language profile
+            files = self._find_source_files()
 
             report_progress(0.1)
 
@@ -97,10 +84,11 @@ class CodeScanner:
                 report_progress(1.0)
                 return CodeContext(
                     files=[],
-                    insights="No Python files found in codebase.",
+                    insights=f"No {self.profile.display_name} files found in codebase.",
+                    language=self.profile.name,
                 )
 
-            # Read and sanitize code
+            # Read, annotate with line numbers, and sanitize code
             code_contents = self._read_files(files)
 
             report_progress(0.3)
@@ -109,7 +97,8 @@ class CodeScanner:
                 report_progress(1.0)
                 return CodeContext(
                     files=[str(f) for f in files],
-                    insights="Could not read any Python files.",
+                    insights=f"Could not read any {self.profile.display_name} files.",
+                    language=self.profile.name,
                 )
 
             # Check for README
@@ -120,6 +109,7 @@ class CodeScanner:
             # Analyze with LLM (this is the slowest part)
             context = await self._analyze_code(code_contents)
             context.readme = readme_content
+            context.language = self.profile.name
 
             report_progress(1.0)
 
@@ -128,31 +118,37 @@ class CodeScanner:
         except Exception as e:
             raise ScannerError(f"Code scanning failed: {e}") from e
 
-    def _find_python_files(self) -> List[Path]:
-        """Find Python files, excluding tests and configs."""
+    def _find_source_files(self) -> List[Path]:
+        """Find source files matching the language profile, excluding test/config patterns."""
         if not self.code_root.exists():
             return []
 
         files = []
 
-        for path in self.code_root.rglob("*.py"):
-            # Skip excluded patterns
-            path_str = str(path)
-            if any(ex in path_str for ex in self.EXCLUDE_PATTERNS):
-                continue
-            files.append(path)
+        for ext_pattern in self.profile.file_extensions:
+            for path in self.code_root.rglob(ext_pattern):
+                # Skip excluded patterns — check against relative path only
+                try:
+                    rel_path = str(path.relative_to(self.code_root))
+                except ValueError:
+                    rel_path = str(path)
+                if any(ex in rel_path for ex in self.profile.exclude_patterns):
+                    continue
+                files.append(path)
 
         # Sort by likely importance (priority keywords in filename)
+        keywords = self.profile.priority_keywords
+
         def priority_score(p: Path) -> int:
             name_lower = p.name.lower()
-            return -sum(1 for kw in self.PRIORITY_KEYWORDS if kw in name_lower)
+            return -sum(1 for kw in keywords if kw in name_lower)
 
         files.sort(key=lambda p: (priority_score(p), p.name))
 
         return files[: self.max_files]
 
     def _read_files(self, files: List[Path]) -> List[Dict[str, str]]:
-        """Read and sanitize file contents."""
+        """Read, annotate with line numbers, and sanitize file contents."""
         code_contents = []
 
         for filepath in files:
@@ -162,6 +158,11 @@ class CodeScanner:
                 # Truncate large files
                 if len(content) > self.max_file_size:
                     content = content[: self.max_file_size] + "\n... (truncated)"
+
+                # Annotate with line numbers for citation tracking
+                lines = content.split("\n")
+                numbered_lines = [f"{i + 1}: {line}" for i, line in enumerate(lines)]
+                content = "\n".join(numbered_lines)
 
                 # Sanitize
                 rel_path = str(filepath.relative_to(self.code_root))
@@ -197,7 +198,7 @@ class CodeScanner:
 
     async def _analyze_code(self, code_contents: List[Dict[str, str]]) -> CodeContext:
         """Send code to LLM for analysis."""
-        prompt = build_code_analysis_prompt(code_contents)
+        prompt = build_code_analysis_prompt(code_contents, profile=self.profile)
 
         result = await self.llm.complete_json(
             prompt=prompt,
@@ -214,6 +215,8 @@ class CodeScanner:
                         symbol=item.get("symbol", ""),
                         statement=item.get("statement", ""),
                         snippet=item.get("snippet", ""),
+                        start_line=item.get("start_line"),
+                        end_line=item.get("end_line"),
                     )
                 )
             except Exception:
@@ -230,4 +233,5 @@ class CodeScanner:
             data_sources=result.get("data_sources", []),
             insights=result.get("insights", ""),
             code_evidence=evidence_items,
+            language=self.profile.name,
         )

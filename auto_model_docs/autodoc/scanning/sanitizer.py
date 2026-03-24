@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Pattern, Set
+from typing import List, Optional, Pattern, Set
 
 
 @dataclass
@@ -67,17 +67,25 @@ class ContentSanitizer:
         "private_key",
     }
 
-    def __init__(self, max_length: int = 50000):
+    def __init__(self, max_length: int = 50000, extra_patterns: Optional[List[str]] = None,
+                 extra_sensitive_files: Optional[List[str]] = None):
         """Initialize the sanitizer.
 
         Args:
             max_length: Maximum content length. Content longer than this
                        will be truncated.
+            extra_patterns: Additional regex patterns for language-specific secrets.
+            extra_sensitive_files: Additional file names/patterns to redact entirely
+                (e.g., [".Renviron", ".Rprofile"] for R projects).
         """
         self.max_length = max_length
+        all_patterns = list(self.SECRET_PATTERNS)
+        if extra_patterns:
+            all_patterns.extend(extra_patterns)
         self._compiled_patterns: List[Pattern] = [
-            re.compile(p, re.MULTILINE) for p in self.SECRET_PATTERNS
+            re.compile(p, re.MULTILINE) for p in all_patterns
         ]
+        self._extra_sensitive_files: List[str] = extra_sensitive_files or []
 
     def sanitize(self, content: str) -> SanitizationResult:
         """Sanitize content by redacting secrets.
@@ -137,6 +145,7 @@ class ContentSanitizer:
         """
         # Skip certain file types entirely
         sensitive_files = {".env", ".pem", ".key", "credentials", "secrets"}
+        sensitive_files.update(s.lower() for s in self._extra_sensitive_files)
         for sensitive in sensitive_files:
             if sensitive in filepath.lower():
                 return SanitizationResult(
