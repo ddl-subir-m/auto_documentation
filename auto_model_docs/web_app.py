@@ -1007,10 +1007,12 @@ def _render_job_history_table(username: str) -> FT:
         link_cell = Td(
             A("View →", href=job_url, target="_blank") if job_url else "—"
         )
+        branch_val = j.get("branch") or "—"
+        tier_val = j.get("hardware_tier") or "—"
         rows.append(
             Tr(
-                Td(j.get("branch") or "—"),
-                Td(j.get("hardware_tier") or "—"),
+                Td(branch_val, title=branch_val),
+                Td(tier_val, title=tier_val),
                 Td(Span(j.get("status", "—").upper(), cls=status_cls)),
                 Td((j.get("submitted_at") or "—")[:16].replace("T", " ")),
                 link_cell,
@@ -1018,18 +1020,21 @@ def _render_job_history_table(username: str) -> FT:
         )
 
     return Div(
-        Table(
-            Thead(
-                Tr(
-                    Th("Branch"),
-                    Th("Hardware tier"),
-                    Th("Status"),
-                    Th("Submitted"),
-                    Th("Link"),
-                )
+        Div(
+            Table(
+                Thead(
+                    Tr(
+                        Th("Branch"),
+                        Th("Tier"),
+                        Th("Status"),
+                        Th("Submitted"),
+                        Th("Link"),
+                    )
+                ),
+                Tbody(*rows),
+                cls="history-table",
             ),
-            Tbody(*rows),
-            cls="history-table",
+            cls="history-table-wrap",
         ),
         Div(
             A(
@@ -2275,23 +2280,33 @@ app, rt = fast_app(
                 font-size: 0.85rem;
                 margin: 0;
             }
+            .history-table-wrap {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
             .history-table {
                 width: 100%;
                 border-collapse: collapse;
                 font-size: 0.8rem;
+                min-width: 420px;
             }
             .history-table th {
                 text-align: left;
                 color: var(--text-secondary);
                 font-weight: 600;
                 font-size: 0.75rem;
-                padding: 0 0.75rem 0.5rem 0;
+                padding: 0 0.5rem 0.5rem 0;
                 border-bottom: 1px solid var(--panel-border);
+                white-space: nowrap;
             }
             .history-table td {
-                padding: 0.5rem 0.75rem 0.5rem 0;
+                padding: 0.5rem 0.5rem 0.5rem 0;
                 color: var(--text-primary);
                 border-bottom: 1px solid var(--panel-border);
+                max-width: 120px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
             .history-table tr:last-child td { border-bottom: none; }
             .history-status {
@@ -2967,6 +2982,7 @@ def index(req: Request):
                                 cls="advanced-content",
                             ),
                             cls="advanced-section",
+                            open=True,
                         ),
                         cls="card",
                     ),
@@ -3098,6 +3114,7 @@ def index(req: Request):
                                 cls="advanced-content",
                             ),
                             cls="advanced-section",
+                            open=True,
                         ),
                         cls="card",
                     ),
@@ -3194,6 +3211,7 @@ def index(req: Request):
                                 cls="advanced-content",
                             ),
                             cls="advanced-section",
+                            open=True,
                         ),
                         cls="card card-advanced",
                     ),
