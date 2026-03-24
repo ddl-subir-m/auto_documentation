@@ -279,6 +279,86 @@ class DocumentSpec(BaseModel):
             formatting=data.get("formatting", {}),
         )
 
+    @classmethod
+    def validate_spec(cls, content: str) -> List[str]:
+        """Validate spec YAML content and return user-friendly error messages.
+
+        Args:
+            content: Raw YAML string.
+
+        Returns:
+            List of error strings. Empty list means the spec is valid.
+        """
+        errors: List[str] = []
+
+        # 1. Parse YAML
+        try:
+            data = yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            msg = "Invalid YAML syntax"
+            if hasattr(exc, "problem_mark"):
+                mark = exc.problem_mark
+                msg += f" at line {mark.line + 1}, column {mark.column + 1}"
+            if hasattr(exc, "problem"):
+                msg += f": {exc.problem}"
+            errors.append(msg)
+            return errors
+
+        if not isinstance(data, dict):
+            errors.append("Spec file must be a YAML mapping (key: value pairs), not a "
+                          + type(data).__name__)
+            return errors
+
+        # 2. Required field: title
+        if "title" not in data:
+            errors.append("Missing required field: 'title'")
+        elif not isinstance(data["title"], str) or not data["title"].strip():
+            errors.append("'title' must be a non-empty string")
+        elif len(data["title"]) > 500:
+            errors.append(f"'title' is too long ({len(data['title'])} characters, max 500)")
+
+        # 3. Required field: sections
+        if "sections" not in data:
+            errors.append("Missing required field: 'sections'")
+        elif not isinstance(data["sections"], list):
+            errors.append("'sections' must be a list")
+        elif len(data["sections"]) == 0:
+            errors.append("'sections' must contain at least 1 section")
+        elif len(data["sections"]) > 50:
+            errors.append(f"Too many sections ({len(data['sections'])}). Maximum is 50.")
+        else:
+            for i, section in enumerate(data["sections"], 1):
+                if isinstance(section, str):
+                    name = section.replace(": per_model", "") if section.endswith(": per_model") else section
+                    if not name.strip():
+                        errors.append(f"Section {i}: name must not be empty")
+                    elif len(name) > 200:
+                        errors.append(f"Section {i} ('{name[:30]}...'): name too long ({len(name)} chars, max 200)")
+                elif isinstance(section, dict):
+                    if "name" not in section:
+                        errors.append(f"Section {i}: missing required key 'name'")
+                    elif not isinstance(section["name"], str) or not section["name"].strip():
+                        errors.append(f"Section {i}: 'name' must be a non-empty string")
+                    elif len(section["name"]) > 200:
+                        errors.append(f"Section {i} ('{section['name'][:30]}...'): name too long "
+                                      f"({len(section['name'])} chars, max 200)")
+                    if "hint" in section and isinstance(section["hint"], str) and len(section["hint"]) > 1000:
+                        errors.append(f"Section {i}: hint too long ({len(section['hint'])} chars, max 1000)")
+                    unknown = set(section.keys()) - {"name", "per_model", "hint"}
+                    if unknown:
+                        errors.append(f"Section {i}: unexpected keys {sorted(unknown)}")
+                else:
+                    errors.append(f"Section {i}: must be a string or mapping, got {type(section).__name__}")
+
+        # 4. Optional field types
+        if "hints" in data and not isinstance(data["hints"], dict):
+            errors.append("'hints' must be a mapping of section name to hint text")
+
+        if "formatting" in data and not isinstance(data["formatting"], dict):
+            errors.append("'formatting' must be a mapping")
+
+        return errors
+
 
 # =============================================================================
 # Context Models (Dataclasses for simplicity)

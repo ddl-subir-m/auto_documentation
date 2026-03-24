@@ -69,6 +69,8 @@ try:
     domino_client = _import_sibling("domino_client")
     domino_job_store = _import_sibling("domino_job_store")
     spec_store = _import_sibling("spec_store")
+    auth_context = _import_sibling("auth_context")
+    domino_datasets = _import_sibling("domino_datasets")
     _DOMINO_AVAILABLE = True
 except Exception as _import_exc:
     logging.getLogger(__name__).warning("Domino modules unavailable: %s", _import_exc, exc_info=True)
@@ -667,10 +669,21 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             job.spec_path = spec_path
             _log(job, f"Uploaded spec saved to: {spec_path}")
         else:
-            spec_path = Path(request.spec_path or _get_default_spec_path())
+            raw_path = request.spec_path or str(_get_default_spec_path())
+            # Resolve dataset:// references to actual mount paths
+            if raw_path.startswith("dataset://"):
+                parts = raw_path[len("dataset://"):].split("/", 1)
+                raw_path = domino_datasets.build_spec_mount_path(parts[0], parts[1] if len(parts) > 1 else "")
+            spec_path = Path(raw_path)
 
         if not spec_path.exists():
             raise FileNotFoundError(f"Spec not found: {spec_path}")
+
+        # Pre-flight validation with user-friendly errors
+        spec_content = spec_path.read_text(encoding="utf-8", errors="replace")
+        spec_errors = DocumentSpec.validate_spec(spec_content)
+        if spec_errors:
+            raise ValueError("Spec validation failed:\n" + "\n".join(f"  - {e}" for e in spec_errors))
 
         doc_spec = DocumentSpec.from_yaml(str(spec_path))
         _log(job, f"Loaded spec: {doc_spec.title}")
@@ -1127,13 +1140,19 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     # Ensure DB is initialised
     domino_job_store.init_db()
 
-    # Save spec file if uploaded in Domino mode
+    # Resolve spec path
     spec_path: Optional[str] = None
     if req.spec_content and req.spec_filename:
         saved = spec_store.save_spec(req.spec_filename, req.spec_content)
         spec_path = str(saved)
     elif req.spec_path:
-        spec_path = req.spec_path
+        # Resolve dataset:// references to actual mount paths
+        if req.spec_path.startswith("dataset://"):
+            spec_path = domino_datasets.build_spec_mount_path(
+                *req.spec_path[len("dataset://"):].split("/", 1)
+            )
+        else:
+            spec_path = req.spec_path
 
     # Build command and create the DB row (status=queued)
     command_str = _build_job_command_str(req, spec_path)
@@ -1360,6 +1379,12 @@ app, rt = fast_app(
                         if (htmxWorking) return;
                         e.preventDefault();
                         e.stopPropagation();
+                        // Block submission if spec validation failed
+                        if (window._specValid === false) {
+                            var resultEl = document.getElementById('spec-validation-result');
+                            if (resultEl) resultEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            return;
+                        }
                         var form = document.querySelector('form');
                         if (!form) return;
                         var formData = new FormData(form);
@@ -1700,7 +1725,76 @@ app, rt = fast_app(
                 color: var(--accent);
                 margin-top: 0.25rem;
             }
-            
+
+            /* Dataset spec browser */
+            .spec-breadcrumb {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                font-size: 0.8125rem;
+                color: #7F8385;
+                padding: 4px 0;
+                flex-wrap: wrap;
+            }
+            .spec-breadcrumb-link {
+                color: #3B3BD3;
+                cursor: pointer;
+                text-decoration: none;
+            }
+            .spec-breadcrumb-link:hover { text-decoration: underline; }
+            .spec-breadcrumb-sep { color: #DBE4E8; margin: 0 2px; }
+            .spec-breadcrumb-current { color: #3F4547; font-weight: 600; }
+            .spec-file-list {
+                border: 1px solid #DBE4E8;
+                border-radius: 6px;
+                max-height: 220px;
+                overflow-y: auto;
+                background: #fff;
+            }
+            .spec-file-item {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 12px;
+                font-size: 0.875rem;
+                cursor: pointer;
+                border-bottom: 1px solid #f0f0f0;
+                transition: background 0.1s;
+            }
+            .spec-file-item:last-child { border-bottom: none; }
+            .spec-file-item:hover { background: #f7f7fb; }
+            .spec-file-item.selected { background: #EDECFB; }
+            .spec-file-icon { flex-shrink: 0; width: 18px; text-align: center; }
+            .spec-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .spec-file-size { color: #7F8385; font-size: 0.75rem; flex-shrink: 0; }
+            .spec-file-empty {
+                padding: 24px 12px;
+                text-align: center;
+                color: #7F8385;
+                font-size: 0.875rem;
+            }
+            .spec-actions-row {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding-top: 8px;
+                flex-wrap: wrap;
+            }
+            .spec-upload-status {
+                font-size: 0.8125rem;
+                color: #7F8385;
+            }
+            .spec-validation-error {
+                background: #fef2f2;
+                border: 1px solid #fecaca;
+                border-radius: 6px;
+                padding: 0.5rem 0.75rem;
+                margin-top: 0.375rem;
+                font-size: 0.8125rem;
+                color: #991b1b;
+            }
+            .spec-validation-error ul { color: #7f1d1d; }
+
             /* Checkbox */
             .checkbox-field {
                 display: flex;
@@ -2511,7 +2605,7 @@ app, rt = fast_app(
                 // ── All DOM references declared up-front to avoid TDZ errors ──────
                 // Mode toggle removed — mode is auto-inferred server-side
                 const uploadBtnLabel    = document.querySelector('label.upload-btn');
-                const specSavedName     = document.getElementById('spec-saved-name');
+                // specSavedName removed — replaced by dataset browser UI
                 const appModeNote       = document.getElementById('app-mode-note');
                 const appNoteHint       = document.getElementById('app-mode-notebook-hint');
                 const apiKeyPassField   = document.getElementById('api-key-pass-field');
@@ -2581,45 +2675,246 @@ app, rt = fast_app(
                     projectIdInput.addEventListener('blur', onProjectIdChange);
                 }
 
-                // ── Domino mode: spec auto-save via fetch ────────────────────────
-                const dominoSpecUpload = document.getElementById('domino-spec-upload');
-                if (dominoSpecUpload) {
-                    dominoSpecUpload.addEventListener('change', function(e) {
-                        const file = e.target.files[0];
+                // ── Dataset spec browser (Domino mode) ───────────────────────────
+                var specDatasetSelect = document.getElementById('spec-dataset-select');
+                var specFileList = document.getElementById('spec-file-list');
+                var specBreadcrumb = document.getElementById('spec-breadcrumb');
+                var specSelectedIndicator = document.getElementById('spec-selected-indicator');
+                var specSelectedName = document.getElementById('spec-selected-name');
+                var specMachineUpload = document.getElementById('spec-machine-upload');
+                var specUploadStatus = document.getElementById('spec-upload-status');
+                var specPathHidden = document.getElementById('field-spec_path');
+
+                // State
+                var _specDatasets = [];
+                var _specCurrentDatasetId = '';
+                var _specCurrentDatasetName = '';
+                var _specCurrentSnapshotId = '';
+                var _specCurrentPath = '';
+                var _specAutoDocSpecsId = '';
+
+                function getProjectIdParam() {
+                    var formEl = document.getElementById('main-form');
+                    var pid = '';
+                    // Check projectId from query string
+                    var params = new URLSearchParams(window.location.search);
+                    pid = params.get('projectId') || params.get('project_id') || '';
+                    // Also check the project-id field
+                    if (!pid) {
+                        var pidInput = document.getElementById('field-project-id');
+                        if (pidInput) pid = pidInput.value.trim();
+                    }
+                    return pid ? '&projectId=' + encodeURIComponent(pid) : '';
+                }
+
+                function loadDatasets() {
+                    if (!specDatasetSelect) return;
+                    console.log('[spec-browser] Loading writable datasets...');
+                    var qs = '?' + getProjectIdParam().replace(/^&/, '');
+                    fetch('api/datasets' + qs)
+                        .then(function(r) { return r.json(); })
+                        .then(function(datasets) {
+                            if (datasets.error) {
+                                console.error('[spec-browser] Error loading datasets:', datasets.error);
+                                specDatasetSelect.innerHTML = '<option value="">Error: ' + datasets.error + '</option>';
+                                return;
+                            }
+                            _specDatasets = datasets;
+                            console.log('[spec-browser] Loaded ' + datasets.length + ' datasets:', datasets.map(function(d) { return d.name; }));
+                            var html = '<option value="">Choose a dataset...</option>';
+                            for (var i = 0; i < datasets.length; i++) {
+                                html += '<option value="' + datasets[i].id + '" data-name="' + datasets[i].name + '" data-snapshot="' + (datasets[i].rwSnapshotId || '') + '">'
+                                    + datasets[i].name + '</option>';
+                            }
+                            specDatasetSelect.innerHTML = html;
+
+                            // Auto-select autodoc-specs if it exists
+                            for (var j = 0; j < datasets.length; j++) {
+                                if (datasets[j].name === 'autodoc-specs') {
+                                    specDatasetSelect.value = datasets[j].id;
+                                    _specAutoDocSpecsId = datasets[j].id;
+                                    onDatasetChange();
+                                    return;
+                                }
+                            }
+                        })
+                        .catch(function(err) {
+                            console.error('[spec-browser] Failed to load datasets:', err);
+                            specDatasetSelect.innerHTML = '<option value="">Failed to load datasets</option>';
+                        });
+                }
+
+                function onDatasetChange() {
+                    if (!specDatasetSelect) return;
+                    var opt = specDatasetSelect.options[specDatasetSelect.selectedIndex];
+                    console.log('[spec-browser] Dataset selected:', opt ? opt.getAttribute('data-name') : 'none');
+                    _specCurrentDatasetId = specDatasetSelect.value;
+                    _specCurrentDatasetName = opt ? opt.getAttribute('data-name') || '' : '';
+                    _specCurrentSnapshotId = opt ? opt.getAttribute('data-snapshot') || '' : '';
+                    _specCurrentPath = '';
+                    if (_specCurrentDatasetId) {
+                        browseFiles('');
+                    } else {
+                        if (specFileList) specFileList.innerHTML = '<span class="spec-file-empty">Select a dataset to browse spec files</span>';
+                        if (specBreadcrumb) specBreadcrumb.innerHTML = '';
+                    }
+                }
+
+                function browseFiles(path) {
+                    _specCurrentPath = path;
+                    if (!specFileList) return;
+                    console.log('[spec-browser] Browsing path:', path || '(root)', 'in dataset:', _specCurrentDatasetName);
+                    specFileList.innerHTML = '<span class="spec-file-empty">Loading...</span>';
+                    renderBreadcrumb(path);
+
+                    var qs = '?datasetId=' + encodeURIComponent(_specCurrentDatasetId);
+                    if (_specCurrentSnapshotId) qs += '&snapshotId=' + encodeURIComponent(_specCurrentSnapshotId);
+                    if (path) qs += '&path=' + encodeURIComponent(path);
+                    qs += getProjectIdParam();
+
+                    fetch('api/dataset-files' + qs)
+                        .then(function(r) { return r.json(); })
+                        .then(function(files) {
+                            if (files.error) {
+                                console.error('[spec-browser] File listing error:', files.error);
+                                specFileList.innerHTML = '<span class="spec-file-empty">Error: ' + files.error + '</span>';
+                                return;
+                            }
+                            console.log('[spec-browser] Found ' + files.length + ' items at path:', path || '(root)');
+                            if (files.length === 0) {
+                                specFileList.innerHTML = '<span class="spec-file-empty">No YAML files found in this location</span>';
+                                return;
+                            }
+                            var html = '';
+                            // Sort: directories first, then files
+                            files.sort(function(a, b) {
+                                if (a.isDirectory && !b.isDirectory) return -1;
+                                if (!a.isDirectory && b.isDirectory) return 1;
+                                return a.fileName.localeCompare(b.fileName);
+                            });
+                            for (var i = 0; i < files.length; i++) {
+                                var f = files[i];
+                                var icon = f.isDirectory ? '\ud83d\udcc1' : '\ud83d\udcc4';
+                                var size = f.isDirectory ? '' : formatBytes(f.sizeInBytes || 0);
+                                var fullPath = path ? path + '/' + f.fileName : f.fileName;
+                                html += '<div class="spec-file-item" data-path="' + fullPath + '" data-dir="' + f.isDirectory + '" data-name="' + f.fileName + '">'
+                                    + '<span class="spec-file-icon">' + icon + '</span>'
+                                    + '<span class="spec-file-name">' + f.fileName + '</span>'
+                                    + '<span class="spec-file-size">' + size + '</span>'
+                                    + '</div>';
+                            }
+                            specFileList.innerHTML = html;
+
+                            // Attach click handlers
+                            var items = specFileList.querySelectorAll('.spec-file-item');
+                            for (var j = 0; j < items.length; j++) {
+                                items[j].addEventListener('click', onFileClick);
+                            }
+                        })
+                        .catch(function() {
+                            specFileList.innerHTML = '<span class="spec-file-empty">Failed to load files</span>';
+                        });
+                }
+
+                function onFileClick(e) {
+                    var el = e.currentTarget;
+                    var isDir = el.getAttribute('data-dir') === 'true';
+                    var path = el.getAttribute('data-path');
+                    if (isDir) {
+                        browseFiles(path);
+                    } else {
+                        // Select this file
+                        var items = specFileList.querySelectorAll('.spec-file-item');
+                        for (var i = 0; i < items.length; i++) items[i].classList.remove('selected');
+                        el.classList.add('selected');
+                        selectSpecFile(_specCurrentDatasetName, path);
+                    }
+                }
+
+                function selectSpecFile(datasetName, filePath) {
+                    console.log('[spec-browser] Selected:', datasetName + '/' + filePath);
+                    if (specSelectedIndicator) specSelectedIndicator.style.display = '';
+                    if (specSelectedName) specSelectedName.textContent = datasetName + '/' + filePath;
+                    // Build mount path and set the hidden form field
+                    // The server will resolve the correct mount prefix
+                    if (specPathHidden) {
+                        // Use a marker so the server knows this is a dataset reference
+                        specPathHidden.value = 'dataset://' + datasetName + '/' + filePath;
+                    }
+                }
+
+                function renderBreadcrumb(path) {
+                    if (!specBreadcrumb) return;
+                    var parts = path ? path.split('/').filter(Boolean) : [];
+                    var html = '<span class="spec-breadcrumb-link" onclick="window._specBrowse(\'\')">root</span>';
+                    var cumulative = '';
+                    for (var i = 0; i < parts.length; i++) {
+                        cumulative += (i > 0 ? '/' : '') + parts[i];
+                        html += '<span class="spec-breadcrumb-sep">/</span>';
+                        if (i === parts.length - 1) {
+                            html += '<span class="spec-breadcrumb-current">' + parts[i] + '</span>';
+                        } else {
+                            html += '<span class="spec-breadcrumb-link" onclick="window._specBrowse(\'' + cumulative + '\')">' + parts[i] + '</span>';
+                        }
+                    }
+                    specBreadcrumb.innerHTML = html;
+                }
+
+                function formatBytes(bytes) {
+                    if (bytes === 0) return '';
+                    if (bytes < 1024) return bytes + ' B';
+                    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+                }
+
+                // Global for breadcrumb onclick
+                window._specBrowse = function(path) { browseFiles(path); };
+
+                // Upload from machine → autodoc-specs dataset
+                if (specMachineUpload) {
+                    specMachineUpload.addEventListener('change', function(e) {
+                        var file = e.target.files[0];
                         if (!file) return;
+                        console.log('[spec-browser] Upload from machine:', file.name, '(' + file.size + ' bytes)');
+                        if (specUploadStatus) { specUploadStatus.textContent = 'Uploading ' + file.name + '...'; specUploadStatus.style.color = ''; }
+                        // Validate spec content before uploading
+                        if (typeof validateSpecContent === 'function') validateSpecContent(file);
 
-                        // Disable Generate button until upload completes
-                        var genBtn = document.getElementById('generate-btn');
-                        if (genBtn) { genBtn.disabled = true; genBtn.textContent = 'Uploading spec...'; }
-                        if (specSavedName) { specSavedName.textContent = 'Uploading ' + file.name + '...'; specSavedName.style.color = ''; }
-
-                        const reader = new FileReader();
-                        reader.onload = function(evt) {
-                            const content = evt.target.result;
-                            const fd = new FormData();
-                            fd.append('spec_filename', file.name);
-                            fd.append('spec_content', content);
-                            fetch('save-spec', { method: 'POST', body: fd })
-                                .then(function(r) {
-                                    if (!r.ok) throw new Error('Server returned ' + r.status);
-                                    return r.text();
-                                })
-                                .then(function(path) {
-                                    var pathInput = document.getElementById('field-spec_path');
-                                    if (pathInput) pathInput.value = path.trim();
-                                    if (specSavedName) { specSavedName.textContent = 'Saved: ' + file.name; specSavedName.style.color = '#2e7d32'; }
-                                    var contentInput = document.getElementById('domino-spec-content');
-                                    if (contentInput) contentInput.value = '';
-                                })
-                                .catch(function(err) {
-                                    if (specSavedName) { specSavedName.textContent = 'Upload failed: ' + err.message; specSavedName.style.color = '#c62828'; }
-                                })
-                                .finally(function() {
-                                    if (genBtn) { genBtn.disabled = false; genBtn.textContent = 'Generate Documentation'; }
-                                });
-                        };
-                        reader.readAsText(file);
+                        // Ensure autodoc-specs dataset exists, then upload
+                        var qs = '?' + getProjectIdParam().replace(/^&/, '');
+                        fetch('api/ensure-autodoc-specs' + qs, { method: 'POST' })
+                            .then(function(r) { return r.json(); })
+                            .then(function(ds) {
+                                if (ds.error) throw new Error(ds.error);
+                                console.log('[spec-browser] autodoc-specs dataset ensured: id=' + ds.id);
+                                _specAutoDocSpecsId = ds.id;
+                                var fd = new FormData();
+                                fd.append('datasetId', ds.id);
+                                fd.append('datasetName', ds.name || 'autodoc-specs');
+                                fd.append('file', file);
+                                return fetch('api/upload-spec-to-dataset' + qs, { method: 'POST', body: fd });
+                            })
+                            .then(function(r) { return r.json(); })
+                            .then(function(result) {
+                                if (result.error) throw new Error(result.error);
+                                console.log('[spec-browser] Upload success:', result.fileName, '→', result.mountPath);
+                                if (specUploadStatus) { specUploadStatus.textContent = 'Uploaded: ' + result.fileName; specUploadStatus.style.color = '#2e7d32'; }
+                                // Select the uploaded file
+                                selectSpecFile('autodoc-specs', result.fileName);
+                                // Refresh datasets if autodoc-specs was just created
+                                loadDatasets();
+                            })
+                            .catch(function(err) {
+                                console.error('[spec-browser] Upload failed:', err.message);
+                                if (specUploadStatus) { specUploadStatus.textContent = 'Upload failed: ' + err.message; specUploadStatus.style.color = '#c62828'; }
+                            });
                     });
+                }
+
+                // Wire dataset select change
+                if (specDatasetSelect) {
+                    specDatasetSelect.addEventListener('change', onDatasetChange);
+                    loadDatasets();
                 }
 
                 // ── Toggle base URL and model name fields based on provider selection
@@ -2652,28 +2947,47 @@ app, rt = fast_app(
                     toggleOpenAIFields();
                 }
                 
-                // Handle file upload and update spec path display
-                const specUpload = document.querySelector('input[name="spec_upload"]');
-                const specPath = document.getElementById('field-spec_path');
-                const uploadFilename = document.getElementById('upload-filename');
-                
-                if (specUpload && specPath) {
-                    specUpload.addEventListener('change', function(e) {
-                        const file = e.target.files[0];
+                // Handle file upload and update spec path display (app mode)
+                var specUploadApp = document.querySelector('input[name="spec_upload"]');
+                var specPathDisplay = document.getElementById('field-spec_path_display');
+                var specPathHiddenApp = document.getElementById('field-spec_path');
+                var uploadFilenameEl = document.getElementById('upload-filename');
+
+                // ── Spec validation helper ────────────────────────────────────
+                window._specValid = true; // tracks latest validation state
+                function validateSpecContent(file) {
+                    var fd = new FormData();
+                    fd.append('spec_upload', file);
+                    var resultEl = document.getElementById('spec-validation-result');
+                    if (resultEl) resultEl.innerHTML = '<span style="color:var(--text-muted);font-size:0.8125rem;">Validating spec...</span>';
+                    fetch('validate-spec', { method: 'POST', body: fd })
+                        .then(function(r) { return r.text(); })
+                        .then(function(html) {
+                            if (resultEl) resultEl.outerHTML = html;
+                            // Check if validation passed
+                            window._specValid = html.indexOf('validation failed') === -1;
+                        })
+                        .catch(function() {
+                            if (resultEl) resultEl.innerHTML = '';
+                            window._specValid = true; // don't block on network errors
+                        });
+                }
+
+                if (specUploadApp && specPathDisplay) {
+                    specUploadApp.addEventListener('change', function(e) {
+                        var file = e.target.files[0];
                         if (file) {
-                            // Update the path field to show the uploaded filename
-                            specPath.value = '[Uploaded] ' + file.name;
-                            specPath.disabled = true;
-                            // Show the filename below
-                            if (uploadFilename) {
-                                uploadFilename.textContent = 'Using uploaded file: ' + file.name;
-                            }
+                            specPathDisplay.value = '[Uploaded] ' + file.name;
+                            specPathDisplay.disabled = true;
+                            if (specPathHiddenApp) specPathHiddenApp.value = '[Uploaded] ' + file.name;
+                            if (uploadFilenameEl) uploadFilenameEl.textContent = 'Using uploaded file: ' + file.name;
+                            validateSpecContent(file);
                         } else {
-                            // Clear if no file selected
-                            specPath.disabled = false;
-                            if (uploadFilename) {
-                                uploadFilename.textContent = '';
-                            }
+                            specPathDisplay.disabled = false;
+                            if (uploadFilenameEl) uploadFilenameEl.textContent = '';
+                            var resultEl = document.getElementById('spec-validation-result');
+                            if (resultEl) resultEl.innerHTML = '';
+                            window._specValid = true;
                         }
                     });
                 }
@@ -2933,15 +3247,65 @@ def index(req: Request):
                     # Card 1: What to document (spec + artifact filtering)
                     Div(
                         Div("What to document", cls="card-title"),
+                        # Hidden field that stores the resolved spec path for form submission
+                        Input(name="spec_path", id="field-spec_path", type="hidden",
+                              value=str(default_spec) if default_mode == "app" else ""),
+                        # ── Domino mode: dataset browser ──────────────────────
+                        *([ Div(
+                            Label("Spec file", Span(" *", cls="required-star")),
+                            # Dataset selector
+                            Div(
+                                Select(
+                                    Option("Loading datasets...", value="", disabled=True, selected=True),
+                                    id="spec-dataset-select",
+                                ),
+                                cls="field",
+                            ),
+                            # Breadcrumb navigation
+                            Div(id="spec-breadcrumb", cls="spec-breadcrumb"),
+                            # File browser
+                            Div(
+                                Span("Select a dataset to browse spec files", style="color: #7F8385; font-size: 0.875rem;"),
+                                id="spec-file-list",
+                                cls="spec-file-list",
+                            ),
+                            # Selected file indicator
+                            Div(
+                                Span("Selected: ", style="color: #7F8385;"),
+                                Span(id="spec-selected-name", style="font-weight: 600; color: #3F4547;"),
+                                id="spec-selected-indicator",
+                                style="display: none; padding: 8px 0; font-size: 0.875rem;",
+                            ),
+                            # Upload from machine + download template
+                            Div(
+                                Label(
+                                    "Upload from my machine",
+                                    Input(
+                                        type="file",
+                                        accept=".yaml,.yml",
+                                        id="spec-machine-upload",
+                                        cls="hidden-upload",
+                                    ),
+                                    cls="upload-btn",
+                                ),
+                                Span(id="spec-upload-status", cls="spec-upload-status"),
+                                A("Download reference template", href="api/download-template",
+                                  download="doc_spec_template.yaml",
+                                  style="color: #3B3BD3; font-size: 0.875rem; margin-left: auto;"),
+                                cls="spec-actions-row",
+                            ),
+                            cls="field",
+                        )] if default_mode == "domino" else [
+                        # ── App mode: simple file path + upload ───────────────
                         Div(
-                            Label("Spec file", Span(" *", cls="required-star"), for_="field-spec_path"),
+                            Label("Spec file", Span(" *", cls="required-star"), for_="field-spec_path_display"),
                             Div(
                                 Input(
-                                    name="spec_path",
-                                    id="field-spec_path",
+                                    id="field-spec_path_display",
                                     type="text",
                                     value=str(default_spec),
                                     placeholder=str(default_spec),
+                                    oninput="document.getElementById('field-spec_path').value = this.value;",
                                 ),
                                 Label(
                                     "Upload",
@@ -2957,23 +3321,8 @@ def index(req: Request):
                             ),
                             Div(id="upload-filename", cls="upload-filename"),
                             cls="field",
-                        ),
-                        Div(
-                            Label(
-                                Input(
-                                    type="file",
-                                    accept=".yaml,.yml",
-                                    id="domino-spec-upload",
-                                    cls="hidden-upload",
-                                ),
-                                "Upload spec",
-                                cls="upload-btn",
-                                style="margin-top: 0.35rem; display: inline-flex;",
-                            ),
-                            Span(id="spec-saved-name", cls="spec-saved-name"),
-                            Span("ⓘ", cls="info-tooltip", data_tooltip="Upload to save the spec file to Domino dataset storage for the job to access."),
-                            cls="domino-fields",
-                        ),
+                        )]),
+                        Div(id="spec-validation-result"),
                         Details(
                             Summary("Filters", cls="advanced-section-summary"),
                             Div(
@@ -3570,6 +3919,165 @@ def api_detect_language(req: Request):
     )
 
 
+# ---------------------------------------------------------------------------
+# Dataset browsing & spec upload API
+# ---------------------------------------------------------------------------
+
+def _resolve_request_project_id(req: Request) -> Optional[str]:
+    """Resolve project ID from query params or env."""
+    for key in ("projectId", "project_id"):
+        pid = req.query_params.get(key)
+        if pid:
+            return pid
+    return os.environ.get("DOMINO_PROJECT_ID", "") or None
+
+
+@rt("/api/datasets")
+def api_datasets(req: Request):
+    """List writable datasets for the project."""
+    if not _DOMINO_AVAILABLE:
+        return Response(json.dumps([]), media_type="application/json")
+    pid = _resolve_request_project_id(req)
+    logger.info("GET /api/datasets — project=%s", pid)
+    try:
+        datasets = domino_datasets.list_datasets(pid)
+        logger.info("GET /api/datasets — returned %d datasets", len(datasets))
+        return Response(json.dumps(datasets), media_type="application/json")
+    except Exception as exc:
+        logger.warning("Failed to list datasets: %s", exc, exc_info=True)
+        return Response(
+            json.dumps({"error": str(exc)}),
+            status_code=500,
+            media_type="application/json",
+        )
+
+
+@rt("/api/dataset-files")
+def api_dataset_files(req: Request):
+    """Browse files in a dataset (directories + yaml only)."""
+    if not _DOMINO_AVAILABLE:
+        return Response(json.dumps([]), media_type="application/json")
+
+    dataset_id = req.query_params.get("datasetId", "")
+    snapshot_id = req.query_params.get("snapshotId", "")
+    path = req.query_params.get("path", "")
+    pid = _resolve_request_project_id(req)
+
+    if not dataset_id:
+        return Response(
+            json.dumps({"error": "datasetId required"}),
+            status_code=400,
+            media_type="application/json",
+        )
+
+    # Resolve snapshot ID if not provided
+    if not snapshot_id:
+        snapshot_id = domino_datasets.get_rw_snapshot_id(dataset_id, pid)
+    if not snapshot_id:
+        return Response(
+            json.dumps({"error": "Could not resolve snapshot for dataset"}),
+            status_code=400,
+            media_type="application/json",
+        )
+
+    logger.info("GET /api/dataset-files — dataset=%s snapshot=%s path='%s'", dataset_id, snapshot_id, path)
+    try:
+        files = domino_datasets.list_files(snapshot_id, path, pid)
+        logger.info("GET /api/dataset-files — returned %d items", len(files))
+        return Response(json.dumps(files), media_type="application/json")
+    except Exception as exc:
+        logger.warning("Failed to list files: %s", exc, exc_info=True)
+        return Response(
+            json.dumps({"error": str(exc)}),
+            status_code=500,
+            media_type="application/json",
+        )
+
+
+@rt("/api/ensure-autodoc-specs")
+async def api_ensure_autodoc_specs(req: Request):
+    """Ensure the autodoc-specs dataset exists, return its metadata."""
+    if not _DOMINO_AVAILABLE:
+        return Response(
+            json.dumps({"error": "Domino not available"}),
+            status_code=400,
+            media_type="application/json",
+        )
+    pid = _resolve_request_project_id(req)
+    logger.info("POST /api/ensure-autodoc-specs — project=%s", pid)
+    try:
+        ds = domino_datasets.ensure_dataset(pid)
+        # Resolve snapshot if not included
+        if not ds.get("rwSnapshotId"):
+            ds["rwSnapshotId"] = domino_datasets.get_rw_snapshot_id(ds["id"], pid)
+        logger.info("POST /api/ensure-autodoc-specs — dataset id=%s name=%s", ds.get("id"), ds.get("name"))
+        return Response(json.dumps(ds), media_type="application/json")
+    except Exception as exc:
+        logger.warning("Failed to ensure autodoc-specs: %s", exc, exc_info=True)
+        return Response(
+            json.dumps({"error": str(exc)}),
+            status_code=500,
+            media_type="application/json",
+        )
+
+
+@rt("/api/upload-spec-to-dataset")
+async def api_upload_spec_to_dataset(req: Request):
+    """Upload a spec file from the user's machine into a dataset."""
+    if not _DOMINO_AVAILABLE:
+        return Response(
+            json.dumps({"error": "Domino not available"}),
+            status_code=400,
+            media_type="application/json",
+        )
+
+    form = await req.form()
+    dataset_id = form.get("datasetId", "")
+    file_upload = form.get("file")
+    pid = _resolve_request_project_id(req)
+
+    if not dataset_id or not file_upload or not hasattr(file_upload, "read"):
+        return Response(
+            json.dumps({"error": "datasetId and file are required"}),
+            status_code=400,
+            media_type="application/json",
+        )
+
+    filename = getattr(file_upload, "filename", "spec.yaml")
+    content = await file_upload.read()
+    logger.info("POST /api/upload-spec-to-dataset — file='%s' (%d bytes) → dataset=%s", filename, len(content), dataset_id)
+
+    try:
+        domino_datasets.upload_file(dataset_id, filename, content, pid)
+        dataset_name = form.get("datasetName", domino_datasets.AUTODOC_SPECS_DATASET)
+        mount_path = domino_datasets.build_spec_mount_path(dataset_name, filename)
+        logger.info("POST /api/upload-spec-to-dataset — success, mount=%s", mount_path)
+        return Response(
+            json.dumps({"mountPath": mount_path, "fileName": filename}),
+            media_type="application/json",
+        )
+    except Exception as exc:
+        logger.warning("Failed to upload spec: %s", exc, exc_info=True)
+        return Response(
+            json.dumps({"error": str(exc)}),
+            status_code=500,
+            media_type="application/json",
+        )
+
+
+@rt("/api/download-template")
+def api_download_template():
+    """Serve the bundled doc_spec.yaml as a downloadable reference template."""
+    template_path = Path(__file__).resolve().parent / "doc_spec.yaml"
+    if not template_path.exists():
+        return Response("Template not found", status_code=404)
+    return FileResponse(
+        str(template_path),
+        media_type="application/x-yaml",
+        filename="doc_spec_template.yaml",
+    )
+
+
 @rt("/api/resolve-project")
 def api_resolve_project(req: Request):
     """Return resolved project name for a given project ID."""
@@ -3654,6 +4162,43 @@ def cancel_queued_jobs():
     return _render_job_history_table(username)
 
 
+
+@rt("/validate-spec")
+async def validate_spec_route(req: Request):
+    """Validate uploaded spec YAML and return inline feedback."""
+    form = await req.form()
+    spec_upload = form.get("spec_upload")
+    content = None
+    if spec_upload and hasattr(spec_upload, "read"):
+        raw = await spec_upload.read()
+        content = raw.decode("utf-8", errors="replace")
+    else:
+        content = form.get("spec_content")
+
+    if not content or not content.strip():
+        return Div(
+            Span("No spec content to validate.", style="color: var(--text-muted);"),
+            id="spec-validation-result",
+        )
+
+    errors = DocumentSpec.validate_spec(content)
+    if errors:
+        error_items = [Li(e) for e in errors]
+        return Div(
+            Div(
+                Span("Spec validation failed", style="font-weight: 600; color: var(--error);"),
+                Ul(*error_items, style="margin: 0.25rem 0 0 0; padding-left: 1.25rem; font-size: 0.8125rem;"),
+                cls="spec-validation-error",
+            ),
+            id="spec-validation-result",
+        )
+
+    return Div(
+        Span("Spec is valid", style="color: #2e7d32; font-weight: 500; font-size: 0.8125rem;"),
+        id="spec-validation-result",
+    )
+
+
 @rt("/save-spec")
 async def save_spec_route(req: Request):
     """Auto-save an uploaded spec file and return the saved path."""
@@ -3732,6 +4277,20 @@ async def add_security_headers(request, call_next):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "HX-Request, HX-Target, HX-Current-URL, Content-Type"
+    return response
+
+# Capture the visiting user's JWT so outbound Domino API calls
+# (datasets, jobs) run as the viewer, not the app owner.
+@app.middleware("http")
+async def capture_auth_context(request, call_next):
+    if _DOMINO_AVAILABLE:
+        forwarded = request.headers.get("authorization")
+        auth_context.set_request_auth_header(forwarded)
+    try:
+        response = await call_next(request)
+    finally:
+        if _DOMINO_AVAILABLE:
+            auth_context.set_request_auth_header(None)
     return response
 
 def _reconcile_stale_jobs() -> None:
