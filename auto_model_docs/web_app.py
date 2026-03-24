@@ -2468,7 +2468,7 @@ app, rt = fast_app(
                 var langSelect = document.getElementById('lang-override-select');
 
                 function detectLanguage(codeRoot) {
-                    var url = '/api/detect-language';
+                    var url = 'api/detect-language';
                     if (codeRoot) url += '?code_root=' + encodeURIComponent(codeRoot);
                     fetch(url)
                         .then(function(r) { return r.json(); })
