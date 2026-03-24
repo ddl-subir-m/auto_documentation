@@ -205,13 +205,20 @@ class Orchestrator:
         artifact_task = asyncio.create_task(
             self.artifact_scanner.scan(on_progress=on_artifact_progress)
         )
-        artifact_ctx = await artifact_task
-        if on_status:
-            on_status(
-                "MLflow artifact scan completed "
-                f"in {time.monotonic() - artifact_start:.1f}s."
-            )
-        code_ctx = await code_task
+        try:
+            artifact_ctx = await artifact_task
+            if on_status:
+                on_status(
+                    "MLflow artifact scan completed "
+                    f"in {time.monotonic() - artifact_start:.1f}s."
+                )
+            code_ctx = await code_task
+        except (asyncio.CancelledError, Exception):
+            for t in (code_task, artifact_task):
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(code_task, artifact_task, return_exceptions=True)
+            raise
 
         # Log scan summary for debugging
         logger.info("=== SCAN SUMMARY ===")
