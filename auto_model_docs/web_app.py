@@ -2613,6 +2613,8 @@ app, rt = fast_app(
                 }
 
                 // ── Toggle base URL and model name fields based on provider selection
+                var OPENAI_DEFAULT_MODEL = 'kimi-k2-0905-preview';
+                var ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-20250514';
                 function toggleOpenAIFields() {
                     const isOpenAI = providerSelect && providerSelect.value === 'openai';
                     if (baseUrlField) {
@@ -2620,6 +2622,18 @@ app, rt = fast_app(
                     }
                     if (modelNameField) {
                         modelNameField.style.display = isOpenAI ? 'flex' : 'none';
+                    }
+                    var modelInput = document.getElementById('field-model');
+                    if (modelInput) {
+                        if (isOpenAI) {
+                            if (!modelInput.value || modelInput.value === ANTHROPIC_DEFAULT_MODEL) {
+                                modelInput.value = OPENAI_DEFAULT_MODEL;
+                            }
+                        } else {
+                            if (!modelInput.value || modelInput.value === OPENAI_DEFAULT_MODEL) {
+                                modelInput.value = ANTHROPIC_DEFAULT_MODEL;
+                            }
+                        }
                     }
                 }
 
@@ -2797,11 +2811,11 @@ def index(req: Request):
     username = _get_username()
     try:
         _settings = Settings()
-        _current_model = _settings.get_model_name()
-        _current_base_url = _settings.openai_base_url or ""
+        _current_model = "kimi-k2-0905-preview"
+        _current_base_url = _settings.openai_base_url or "https://api.moonshot.ai/v1"
     except Exception:
-        _current_model = ""
-        _current_base_url = ""
+        _current_model = "kimi-k2-0905-preview"
+        _current_base_url = "https://api.moonshot.ai/v1"
 
     # Determine initial status panel content based on latest Domino job
     initial_status_panel: FT
@@ -3176,10 +3190,10 @@ def index(req: Request):
                                 Div(
                                     Div(
                                         Label("Model", for_="field-model"),
-                                        Span("ⓘ", cls="info-tooltip", data_tooltip="Leave blank to use default (gpt-4o)"),
+                                        Span("ⓘ", cls="info-tooltip", data_tooltip="Leave blank to use default (kimi-k2-0905-preview)"),
                                         cls="label-row",
                                     ),
-                                    Input(name="model", id="field-model", type="text", value=_current_model, placeholder="gpt-4o"),
+                                    Input(name="model", id="field-model", type="text", value=_current_model, placeholder="kimi-k2-0905-preview"),
                                     cls="field",
                                     id="model-name-field",
                                     style="display: none;",
@@ -3195,7 +3209,7 @@ def index(req: Request):
                                         id="field-base_url",
                                         type="text",
                                         value=_current_base_url,
-                                        placeholder="https://api.openai.com/v1 (optional)",
+                                        placeholder="https://api.moonshot.ai/v1",
                                     ),
                                     cls="field",
                                     id="base-url-field",
