@@ -2403,7 +2403,7 @@ app, rt = fast_app(
                             .then(function(html) {
                                 branchSelect.outerHTML = html;
                             })
-                            .catch(function(e) { console.log('Branch refresh error:', e); });
+                            .catch(function() {});
                     }
                 }
 
@@ -3183,24 +3183,41 @@ def api_hardware_tiers():
 
 @rt("/api/resolve-project")
 def api_resolve_project(req: Request):
-    """Resolve a Domino project ID and return an HTML status fragment."""
-    project_id = req.query_params.get("project_id", "").strip()
+    """Resolve a Domino project ID to owner/name JSON."""
+    project_id = req.query_params.get("projectId", "").strip()
     if not project_id:
-        return Div("No project ID provided.", id="project-id-resolved", cls="error")
+        return Response(
+            json.dumps({"error": "No project ID provided."}),
+            status_code=400, media_type="application/json",
+        )
     if not _DOMINO_AVAILABLE:
-        return Div("Domino integration is not available.", id="project-id-resolved", cls="error")
+        return Response(
+            json.dumps({"error": "Domino integration is not available."}),
+            status_code=503, media_type="application/json",
+        )
     try:
         data = domino_client.resolve_project(project_id)
         owner = data.get("owner", {}).get("userName", "") or data.get("ownerUsername", "")
         name = data.get("name", project_id)
-        label = f"{owner}/{name}" if owner else name
-        return Div(f"Target project: {label}", id="project-id-resolved", cls="success")
+        return Response(
+            json.dumps({"owner": owner, "name": name, "id": project_id}),
+            media_type="application/json",
+        )
     except domino_client.ProjectNotFoundError:
-        return Div("Project not found.", id="project-id-resolved", cls="error")
+        return Response(
+            json.dumps({"error": "Project not found. The extension link may be outdated."}),
+            status_code=404, media_type="application/json",
+        )
     except domino_client.ProjectForbiddenError:
-        return Div("You don't have access to this project.", id="project-id-resolved", cls="error")
+        return Response(
+            json.dumps({"error": "You don't have access to this project."}),
+            status_code=403, media_type="application/json",
+        )
     except domino_client.ProjectAPIError:
-        return Div("Could not reach the Domino API.", id="project-id-resolved", cls="error")
+        return Response(
+            json.dumps({"error": "Could not reach the Domino API. Try again in a moment."}),
+            status_code=502, media_type="application/json",
+        )
 
 
 @rt("/stop-domino")
