@@ -155,7 +155,11 @@ def list_datasets(project_id: Optional[str] = None) -> list[dict[str, Any]]:
                 break
             offset += page_size
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+            if exc.response.status_code in (404, 500):
+                logger.warning(
+                    "v2 datasets API returned %s, falling back to v1",
+                    exc.response.status_code,
+                )
                 return _list_datasets_v1(pid, cross)
             raise
 
