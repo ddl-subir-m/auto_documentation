@@ -937,6 +937,23 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
             cls="domino-job-link",
         )
 
+    # Queue-full explanation for queued jobs
+    queue_banner = None
+    if status == "queued" and not record.run_id:
+        max_j = _max_jobs()
+        queue_banner = Div(
+            Span("⚠ "),
+            Span(f"Job queued — you have {max_j} active job{'s' if max_j != 1 else ''}. "
+                 "It will start automatically when a slot opens, or you can "),
+            A("cancel a running job", href="#", onclick="document.querySelector('.history-actions .terminal-action')?.click(); return false;",
+              style="color: var(--accent); text-decoration: underline;"),
+            Span(" to free a slot. You can also clear completed jobs from the History tab."),
+            style="background: rgba(204,183,24,0.1); border: 1px solid rgba(204,183,24,0.3); "
+                  "border-radius: 6px; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; "
+                  "font-size: 0.8125rem; color: var(--text-primary); line-height: 1.5;",
+            role="alert",
+        )
+
     # Status message
     status_lines = []
     if record.submitted_at:
@@ -946,7 +963,10 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
     if record.completed_at:
         status_lines.append(f"Completed: {record.completed_at[:19].replace('T', ' ')} UTC")
     if not status_lines:
-        status_lines.append("Waiting for status...")
+        if status == "queued" and not record.run_id:
+            status_lines.append("Waiting for a slot to open...")
+        else:
+            status_lines.append("Waiting for status...")
 
     status_text = "\n".join(status_lines)
 
@@ -960,6 +980,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
             cls="terminal-header",
         ),
         Div(status.upper(), cls=badge_cls),
+        queue_banner,
         Div(job_link, cls="domino-job-link-row") if job_link else None,
         Pre(status_text, cls="terminal"),
         id="domino-status-inner",
