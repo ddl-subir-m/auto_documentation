@@ -3878,7 +3878,7 @@ async def sse_job_stream(req: Request):
                 yield f"event: status\ndata: {json.dumps({'status': current_job.status})}\n\n"
 
             # Check terminal state
-            if current_job.status in ("complete", "error", "cancelled"):
+            if current_job.status in ("completed", "failed", "cancelled"):
                 output_path = str(current_job.output_path) if current_job.output_path else None
                 yield f"event: complete\ndata: {json.dumps({'status': current_job.status, 'output_path': output_path})}\n\n"
                 break
@@ -4173,7 +4173,7 @@ def cancel_queued_jobs():
                 """
                 UPDATE domino_jobs
                 SET status = 'cancelled'
-                WHERE username = ? AND status = 'queued' AND run_id IS NULL
+                WHERE username = ? AND status = 'queued' AND domino_run_id IS NULL
                 """,
                 (username,),
             )

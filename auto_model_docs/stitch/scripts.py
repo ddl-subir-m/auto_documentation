@@ -749,9 +749,9 @@ MAIN_DOM_JS = r"""
             scrollTerminalToBottom();
         }
 
-        // One-shot flag: show Output tab on first swap only (form submit),
-        // not on subsequent polling swaps (which would reset the user's tab choice).
-        var _tabInitialized = false;
+        // One-shot flag: show Output tab only after a NEW job submit
+        // (when _activateStatusPolling resets it to false), not on page load polling.
+        var _tabInitialized = true;
         document.body.addEventListener('htmx:afterSwap', function(e) {
             if (e.detail && e.detail.target && e.detail.target.id === 'status-panel') {
                 if (!_tabInitialized) {

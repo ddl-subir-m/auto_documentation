@@ -136,15 +136,10 @@ a:hover { color: var(--primary-container); }
     margin: 0 auto;
     padding: 1.5rem 2rem 6rem;
     width: 100%;
-    /* Fill remaining viewport below the header, minus sticky footer */
-    height: calc(100vh - 48px - 4.5rem);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    min-height: calc(100vh - 48px);
 }
 .hero {
     padding: 0.25rem 0 1rem 0;
-    flex-shrink: 0;
 }
 .hero-tagline {
     font-family: var(--font-body);
@@ -183,13 +178,7 @@ a:hover { color: var(--primary-container); }
     display: grid;
     grid-template-columns: 3fr 5fr 4fr;
     gap: 1.5rem;
-    flex: 1;
-    min-height: 0;  /* allow grid to shrink inside flex parent */
-    overflow: hidden;
-}
-.stitch-grid > * {
-    overflow-y: auto;
-    min-height: 0;
+    align-items: start;
 }
 @media (max-width: 1200px) {
     .stitch-grid {

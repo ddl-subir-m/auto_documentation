@@ -231,7 +231,7 @@ def register_job_routes(rt):
                     yield f"event: status\ndata: {json.dumps({'status': current_job.status})}\n\n"
 
                 # Check terminal state
-                if current_job.status in ("complete", "error", "cancelled"):
+                if current_job.status in ("completed", "failed", "cancelled"):
                     output_path = str(current_job.output_path) if current_job.output_path else None
                     yield f"event: complete\ndata: {json.dumps({'status': current_job.status, 'output_path': output_path})}\n\n"
                     break
@@ -311,7 +311,7 @@ def register_job_routes(rt):
                     """
                     UPDATE domino_jobs
                     SET status = 'cancelled'
-                    WHERE username = ? AND status = 'queued' AND run_id IS NULL
+                    WHERE username = ? AND status = 'queued' AND domino_run_id IS NULL
                     """,
                     (username,),
                 )
