@@ -395,7 +395,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
 
     # Queue-full explanation for queued jobs
     queue_banner = None
-    if status == "queued" and not record.run_id:
+    if status == "queued" and not record.domino_run_id:
         max_j = _max_jobs()
         queue_banner = Div(
             Span("\u26a0 "),
@@ -419,7 +419,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
     if record.completed_at:
         status_lines.append(f"Completed: {record.completed_at[:19].replace('T', ' ')} UTC")
     if not status_lines:
-        if status == "queued" and not record.run_id:
+        if status == "queued" and not record.domino_run_id:
             status_lines.append("Waiting for a slot to open...")
         else:
             status_lines.append("Waiting for status...")
@@ -511,7 +511,7 @@ def _render_job_history_table(username: str) -> FT:
                 hx_swap="innerHTML",
                 cls="terminal-action",
                 title="Cancel all queued jobs that haven't been submitted yet",
-            ) if any(j.get("status") == "queued" and not j.get("run_id") for j in jobs) else None,
+            ) if any(j.get("status") == "queued" and not j.get("domino_run_id") for j in jobs) else None,
             cls="history-actions",
         ),
         id="job-history-content",
