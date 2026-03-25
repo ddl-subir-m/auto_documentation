@@ -457,7 +457,6 @@ def _render_job_history_table(username: str) -> FT:
     if not jobs:
         return Div(
             P("No jobs submitted yet.", cls="history-empty"),
-            cls="job-history-content",
         )
 
     rows = []
@@ -514,6 +513,4 @@ def _render_job_history_table(username: str) -> FT:
             ) if any(j.get("status") == "queued" and not j.get("domino_run_id") for j in jobs) else None,
             cls="history-actions",
         ),
-        id="job-history-content",
-        cls="job-history-content",
     )
