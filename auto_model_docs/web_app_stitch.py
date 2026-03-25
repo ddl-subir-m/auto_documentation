@@ -635,9 +635,6 @@ def index(req: Request):
                 Div(
                     _render_job_history_table(username),
                     id="job-history-content",
-                    hx_get="job-history",
-                    hx_trigger="every 15s",
-                    hx_swap="innerHTML settle:0",
                 ),
                 id="tab-history",
                 cls="tab-content hidden",

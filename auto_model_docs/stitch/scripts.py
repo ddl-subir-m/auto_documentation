@@ -777,5 +777,15 @@ MAIN_DOM_JS = r"""
         });
 
         setInterval(styleTerminalLines, 500);
+
+        // Poll job history via plain fetch (not HTMX) to avoid ID-settling interference
+        setInterval(function() {
+            var el = document.getElementById('job-history-content');
+            if (!el) return;
+            fetch('job-history')
+                .then(function(r) { return r.text(); })
+                .then(function(html) { el.innerHTML = html; })
+                .catch(function() {});
+        }, 15000);
     });
 """
