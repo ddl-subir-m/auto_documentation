@@ -370,11 +370,10 @@ async def upload_file(
     import io
 
     pid = _resolve_project_id(project_id)
-    # When project_id is explicitly passed, route through nucleus (not sidecar)
-    # and use the forwarded JWT for the viewer's identity
-    cross = project_id is not None or _is_cross_project(pid)
-    headers = _get_auth_headers(cross_project=cross)
-    base = _resolve_nucleus_host() if cross else _resolve_api_host()
+    # Always route uploads through the sidecar proxy — it injects auth
+    # headers that the v4 multipart upload endpoints require (per AutoML).
+    headers = _get_auth_headers(cross_project=False)
+    base = _resolve_api_host()
     base_url = base.rstrip("/")
     logger.info("Uploading '%s' (%d bytes) to dataset %s", file_path, len(content), dataset_id)
 
