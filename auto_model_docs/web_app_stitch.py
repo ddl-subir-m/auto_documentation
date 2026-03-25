@@ -245,37 +245,6 @@ def index(req: Request):
 
     spec_card_children.append(Div(id="spec-validation-result"))
 
-    # Language detection row
-    spec_card_children.append(
-        Div(
-            Span("Detected: ", style="color: var(--outline);"),
-            Span(id="lang-detected-name", style="color: var(--on-surface); font-weight: 600;"),
-            Span(id="lang-detected-count", style="color: var(--outline); margin-left: 4px;"),
-            Button(
-                "Override",
-                id="lang-override-btn",
-                type="button",
-                style="background: none; border: none; color: var(--primary); cursor: pointer; "
-                      "padding: 8px 12px; min-height: 44px; font-size: inherit; margin-left: 8px;",
-                aria_label="Override detected language",
-                onclick="document.getElementById('lang-override-select').style.display = "
-                        "document.getElementById('lang-override-select').style.display === 'none' ? 'inline-block' : 'none';",
-            ),
-            Select(
-                Option("Python", value="python"),
-                Option("R", value="r"),
-                Option("SAS", value="sas"),
-                Option("MATLAB", value="matlab"),
-                id="lang-override-select",
-                style="display: none; border: 1px solid var(--ghost-border); border-radius: 2px; "
-                      "padding: 4px 8px; margin-left: 4px; font-size: 0.8125rem;",
-                onchange="handleLanguageOverride(this.value)",
-            ),
-            id="lang-detection-row",
-            style="display: none; padding: 8px 0; font-size: 0.8125rem;",
-        )
-    )
-
     # Filters section
     spec_card_children.append(
         Details(
@@ -371,6 +340,37 @@ def index(req: Request):
     # Hidden detected language field
     run_card_children.append(
         Input(type="hidden", name="detected_language", id="field-detected-language", value="python"),
+    )
+
+    # Language detection row (shown after code root is set)
+    run_card_children.append(
+        Div(
+            Span("Detected: ", style="color: var(--outline);"),
+            Span(id="lang-detected-name", style="color: var(--on-surface); font-weight: 600;"),
+            Span(id="lang-detected-count", style="color: var(--outline); margin-left: 4px;"),
+            Button(
+                "Override",
+                id="lang-override-btn",
+                type="button",
+                style="background: none; border: none; color: var(--primary); cursor: pointer; "
+                      "padding: 8px 12px; min-height: 44px; font-size: inherit; margin-left: 8px;",
+                aria_label="Override detected language",
+                onclick="document.getElementById('lang-override-select').style.display = "
+                        "document.getElementById('lang-override-select').style.display === 'none' ? 'inline-block' : 'none';",
+            ),
+            Select(
+                Option("Python", value="python"),
+                Option("R", value="r"),
+                Option("SAS", value="sas"),
+                Option("MATLAB", value="matlab"),
+                id="lang-override-select",
+                style="display: none; border: 1px solid var(--ghost-border); border-radius: 2px; "
+                      "padding: 4px 8px; margin-left: 4px; font-size: 0.8125rem;",
+                onchange="handleLanguageOverride(this.value)",
+            ),
+            id="lang-detection-row",
+            style="display: none; padding: 8px 0; font-size: 0.8125rem;",
+        )
     )
 
     # Domino-specific fields
