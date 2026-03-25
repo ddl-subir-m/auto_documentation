@@ -576,37 +576,41 @@ class Orchestrator:
         """Generate content for all sections in parallel."""
 
         async def generate_section(plan: SectionPlan) -> SectionResult:
-            """Generate content for a single section."""
-            async with self.semaphore:
-                context = GenerationContext(
-                    code_context=code_ctx,
-                    artifact_context=artifact_ctx,
-                    section_name=plan.name,
-                    model_name=plan.model_name,
-                    model_run_id=plan.model_run_id,
-                )
+            """Generate content for a single section.
 
-                contents = []
-                errors = []
+            The semaphore is acquired per-block (not per-section) so blocks
+            across all sections compete for the same worker pool, maximising
+            LLM call concurrency.
+            """
+            context = GenerationContext(
+                code_context=code_ctx,
+                artifact_context=artifact_ctx,
+                section_name=plan.name,
+                model_name=plan.model_name,
+                model_run_id=plan.model_run_id,
+            )
 
-                for block in plan.content_blocks:
+            errors = []
+
+            async def _gen_block(block):
+                async with self.semaphore:
                     try:
-                        content = await self.generator.generate(block, context)
-                        if content is not None:
-                            contents.append(content)
-                        else:
-                            # Track skipped content as a warning (not error)
-                            logger.warning(f"Content skipped for {block.type.value}: {block.purpose}")
+                        return await self.generator.generate(block, context)
                     except Exception as e:
-                        error_msg = f"{block.type.value}: {str(e)}"
-                        errors.append(error_msg)
+                        errors.append(f"{block.type.value}: {str(e)}")
                         logger.error(f"Content generation failed for {block.type.value}: {e}")
+                        return None
 
-                return SectionResult(
-                    plan=plan,
-                    contents=contents,
-                    errors=errors,
-                )
+            results_raw = await asyncio.gather(
+                *[_gen_block(b) for b in plan.content_blocks]
+            )
+            contents = [c for c in results_raw if c is not None]
+
+            return SectionResult(
+                plan=plan,
+                contents=contents,
+                errors=errors,
+            )
 
         # Create tasks for all sections
         tasks = [generate_section(plan) for plan in plans]

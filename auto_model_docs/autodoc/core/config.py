@@ -154,14 +154,14 @@ class Settings(BaseSettings):
 
     # Generation Configuration
     parallel_workers: int = Field(
-        default=1,
+        default=4,
         ge=1,
         le=10,
         description="Number of parallel content generation workers",
         validation_alias=AliasChoices("AUTODOC_PARALLEL_WORKERS", "PARALLEL_WORKERS"),
     )
     planning_workers: int = Field(
-        default=1,
+        default=3,
         ge=1,
         le=10,
         description="Number of parallel planning workers",

@@ -492,7 +492,7 @@ def index(req: Request):
                         Span("\u24d8", cls="info-tooltip", data_tooltip="Parallel LLM calls in the planning phase."),
                         cls="label-row",
                     ),
-                    Input(name="planning_workers", id="field-planning_workers", type="number", value="1"),
+                    Input(name="planning_workers", id="field-planning_workers", type="number", value="3"),
                     cls="field",
                 ),
                 Div(
