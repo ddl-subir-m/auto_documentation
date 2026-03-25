@@ -520,6 +520,101 @@ def index(req: Request):
             style="display: none;" if default_mode == "domino" else "",
         )
     )
+    # Generation settings
+    more_settings_children.append(
+        Div(
+            Div("Generation settings", cls="filter-section-title"),
+            Div(
+                Div(
+                    Label("Max files", for_="field-max_files"),
+                    Input(name="max_files", id="field-max_files", type="number", value="50"),
+                    cls="field",
+                ),
+                Div(
+                    Div(
+                        Label("Planning workers", for_="field-planning_workers"),
+                        Span("\u24d8", cls="info-tooltip", data_tooltip="Parallel LLM calls in the planning phase."),
+                        cls="label-row",
+                    ),
+                    Input(name="planning_workers", id="field-planning_workers", type="number", value="1"),
+                    cls="field",
+                ),
+                Div(
+                    Div(
+                        Label("Generation workers", for_="field-workers"),
+                        Span("\u24d8", cls="info-tooltip", data_tooltip="Sections generated in parallel."),
+                        cls="label-row",
+                    ),
+                    Input(name="workers", id="field-workers", type="number", value="4"),
+                    cls="field",
+                ),
+                Div(
+                    Div(
+                        Label("Timeout (s)", for_="field-timeout"),
+                        Span("\u24d8", cls="info-tooltip", data_tooltip="Seconds before a single LLM call times out."),
+                        cls="label-row",
+                    ),
+                    Input(name="timeout", id="field-timeout", type="number", value="120"),
+                    cls="field",
+                ),
+                cls="advanced-grid",
+            ),
+        )
+    )
+    # Provider & model
+    more_settings_children.append(
+        Div(
+            Label("Provider", for_="field-provider"),
+            Select(
+                Option("Anthropic", value="anthropic"),
+                Option("OpenAI (Compatible)", value="openai", selected=True),
+                name="provider",
+                id="field-provider",
+            ),
+            cls="field",
+        )
+    )
+    more_settings_children.append(
+        Div(
+            Div(
+                Label("Model", for_="field-model"),
+                Span("\u24d8", cls="info-tooltip", data_tooltip="Leave blank to use default (kimi-k2-0905-preview)"),
+                cls="label-row",
+            ),
+            Input(name="model", id="field-model", type="text", value=_current_model, placeholder="kimi-k2-0905-preview"),
+            cls="field",
+            id="model-name-field",
+            style="display: none;",
+        )
+    )
+    more_settings_children.append(
+        Div(
+            Div(
+                Label("Base URL", for_="field-base_url"),
+                Span("\u24d8", cls="info-tooltip", data_tooltip="For OpenAI-compatible APIs (e.g., Moonshot, Azure)"),
+                cls="label-row",
+            ),
+            Input(
+                name="base_url",
+                id="field-base_url",
+                type="text",
+                value=_current_base_url,
+                placeholder="https://api.moonshot.ai/v1",
+            ),
+            cls="field",
+            id="base-url-field",
+            style="display: none;",
+        )
+    )
+    more_settings_children.append(
+        Label(
+            Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
+            Span("Generate notebook"),
+            Span("\u24d8", cls="info-tooltip", data_tooltip="Saved alongside your document in the output directory.", id="app-mode-notebook-hint"),
+            cls="checkbox-field",
+            id="app-mode-note",
+        )
+    )
 
     run_card_children.append(
         Details(
@@ -531,105 +626,6 @@ def index(req: Request):
     )
 
     mid_col_children.append(Div(*run_card_children, cls="bp-card"))
-
-    # Advanced card
-    advanced_card_children = []
-    advanced_card_children.append(
-        Details(
-            Summary(
-                Span("Advanced", style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0;"),
-                Span("Generation settings, provider, output options", cls="advanced-summary-desc"),
-                cls="advanced-section-summary",
-            ),
-            Div(
-                Div("Generation settings", cls="filter-section-title"),
-                Div(
-                    Div(
-                        Label("Max files", for_="field-max_files"),
-                        Input(name="max_files", id="field-max_files", type="number", value="50"),
-                        cls="field",
-                    ),
-                    Div(
-                        Div(
-                            Label("Planning workers", for_="field-planning_workers"),
-                            Span("\u24d8", cls="info-tooltip", data_tooltip="Parallel LLM calls in the planning phase."),
-                            cls="label-row",
-                        ),
-                        Input(name="planning_workers", id="field-planning_workers", type="number", value="1"),
-                        cls="field",
-                    ),
-                    Div(
-                        Div(
-                            Label("Generation workers", for_="field-workers"),
-                            Span("\u24d8", cls="info-tooltip", data_tooltip="Sections generated in parallel."),
-                            cls="label-row",
-                        ),
-                        Input(name="workers", id="field-workers", type="number", value="4"),
-                        cls="field",
-                    ),
-                    Div(
-                        Div(
-                            Label("Timeout (s)", for_="field-timeout"),
-                            Span("\u24d8", cls="info-tooltip", data_tooltip="Seconds before a single LLM call times out."),
-                            cls="label-row",
-                        ),
-                        Input(name="timeout", id="field-timeout", type="number", value="120"),
-                        cls="field",
-                    ),
-                    cls="advanced-grid",
-                ),
-                Div(
-                    Label("Provider", for_="field-provider"),
-                    Select(
-                        Option("Anthropic", value="anthropic"),
-                        Option("OpenAI (Compatible)", value="openai", selected=True),
-                        name="provider",
-                        id="field-provider",
-                    ),
-                    cls="field",
-                ),
-                Div(
-                    Div(
-                        Label("Model", for_="field-model"),
-                        Span("\u24d8", cls="info-tooltip", data_tooltip="Leave blank to use default (kimi-k2-0905-preview)"),
-                        cls="label-row",
-                    ),
-                    Input(name="model", id="field-model", type="text", value=_current_model, placeholder="kimi-k2-0905-preview"),
-                    cls="field",
-                    id="model-name-field",
-                    style="display: none;",
-                ),
-                Div(
-                    Div(
-                        Label("Base URL", for_="field-base_url"),
-                        Span("\u24d8", cls="info-tooltip", data_tooltip="For OpenAI-compatible APIs (e.g., Moonshot, Azure)"),
-                        cls="label-row",
-                    ),
-                    Input(
-                        name="base_url",
-                        id="field-base_url",
-                        type="text",
-                        value=_current_base_url,
-                        placeholder="https://api.moonshot.ai/v1",
-                    ),
-                    cls="field",
-                    id="base-url-field",
-                    style="display: none;",
-                ),
-                Label(
-                    Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
-                    Span("Generate notebook"),
-                    Span("\u24d8", cls="info-tooltip", data_tooltip="Saved alongside your document in the output directory.", id="app-mode-notebook-hint"),
-                    cls="checkbox-field",
-                    id="app-mode-note",
-                ),
-                cls="advanced-content",
-            ),
-            cls="advanced-section",
-        )
-    )
-
-    mid_col_children.append(Div(*advanced_card_children, cls="bp-card", style="margin-top: 1rem;"))
 
     # RIGHT COLUMN: Output & History
     right_col_children = [
