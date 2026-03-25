@@ -295,7 +295,7 @@ def index(req: Request):
     # Insight card
     left_col_children.append(
         Div(
-            H4("Architectural insight"),
+            H4("Auto Model Docs Studio"),
             P("Upload a YAML spec file to define which sections to include in your model documentation. "
               "The system will parse endpoints and data models automatically."),
             cls="insight-card",
