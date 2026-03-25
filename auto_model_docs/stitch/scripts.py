@@ -753,13 +753,15 @@ MAIN_DOM_JS = r"""
         // (when _activateStatusPolling resets it to false), not on page load polling.
         var _tabInitialized = true;
         document.body.addEventListener('htmx:afterSwap', function(e) {
-            if (e.detail && e.detail.target && e.detail.target.id === 'status-panel') {
+            var targetId = e.detail && e.detail.target ? e.detail.target.id : '';
+            // Only process status-panel swaps — ignore job-history swaps
+            if (targetId === 'status-panel') {
                 if (!_tabInitialized) {
                     showOutputTab('live');
                     _tabInitialized = true;
                 }
+                onStatusUpdate();
             }
-            onStatusUpdate();
         });
 
         // Custom event fired by smart polling after DOM update
