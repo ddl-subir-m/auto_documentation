@@ -254,7 +254,7 @@ a:hover { color: var(--primary-container); }
 .field input[type="password"],
 .field select {
     background: var(--surface-container-low);
-    border: 1px solid transparent;
+    border: 1px solid var(--ghost-border);
     border-radius: 8px;
     padding: 0.625rem 0.875rem;
     color: var(--on-surface);
