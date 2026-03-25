@@ -68,13 +68,6 @@ class TestResolveProjectId:
             ds._resolve_project_id(None)
 
 
-class TestIsCrossProject:
-    def test_same_project(self):
-        assert ds._is_cross_project("proj-123") is False
-
-    def test_different_project(self):
-        assert ds._is_cross_project("proj-other") is True
-
 
 # ---------------------------------------------------------------------------
 # list_datasets
@@ -349,49 +342,13 @@ class TestApiRequest:
         mock_client.request.return_value = mock_resp
         mock_client_cls.return_value = mock_client
 
-        ds._api_request("GET", "/api/test", cross_project=False)
+        ds._api_request("GET", "/api/test")
         headers = mock_client.request.call_args.kwargs["headers"]
         assert headers["Authorization"] == "Bearer test-jwt"
 
     @patch("httpx.Client")
-    def test_cross_project_uses_nucleus(self, mock_client_cls):
-        mock_resp = _mock_response(json_data={})
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.request.return_value = mock_resp
-        mock_client_cls.return_value = mock_client
-
-        ds._api_request("GET", "/api/test", cross_project=True)
-        url = mock_client.request.call_args.args[1]
-        assert url.startswith("https://domino.example.com")
-
-    @patch("httpx.Client")
-    @patch("httpx.get")
-    def test_falls_back_to_sidecar_when_no_jwt(self, mock_get, mock_client_cls):
-        """When no forwarded JWT, same-project falls back to sidecar token."""
-        set_request_auth_header(None)
-        mock_token_resp = MagicMock()
-        mock_token_resp.status_code = 200
-        mock_token_resp.text = "sidecar-ephemeral-token"
-        mock_get.return_value = mock_token_resp
-
-        mock_resp = _mock_response(json_data={})
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.request.return_value = mock_resp
-        mock_client_cls.return_value = mock_client
-
-        ds._api_request("GET", "/api/test", cross_project=False)
-        headers = mock_client.request.call_args.kwargs["headers"]
-        assert headers["Authorization"] == "Bearer sidecar-ephemeral-token"
-        set_request_auth_header("Bearer test-jwt")  # restore
-
-    @patch("httpx.Client")
-    @patch("httpx.get", side_effect=Exception("no sidecar"))
-    def test_falls_back_to_api_key(self, _mock_get, mock_client_cls):
-        """When no JWT and no sidecar, falls back to API key."""
+    def test_falls_back_to_api_key(self, mock_client_cls):
+        """When no forwarded JWT, falls back to API key."""
         set_request_auth_header(None)
         mock_resp = _mock_response(json_data={})
         mock_client = MagicMock()
@@ -400,23 +357,15 @@ class TestApiRequest:
         mock_client.request.return_value = mock_resp
         mock_client_cls.return_value = mock_client
 
-        ds._api_request("GET", "/api/test", cross_project=False)
+        ds._api_request("GET", "/api/test")
         headers = mock_client.request.call_args.kwargs["headers"]
         assert headers.get("X-Domino-Api-Key") == "test-api-key"
         set_request_auth_header("Bearer test-jwt")  # restore
 
-    def test_cross_project_raises_without_forwarded_jwt(self):
-        """Cross-project calls must fail if no forwarded JWT is available."""
-        set_request_auth_header(None)
-        with pytest.raises(RuntimeError, match="Cross-project.*forwarded user token"):
-            ds._api_request("GET", "/api/test", cross_project=True)
-        set_request_auth_header("Bearer test-jwt")  # restore
-
-    @patch("httpx.get", side_effect=Exception("no sidecar"))
-    def test_raises_without_any_auth(self, _mock_get, monkeypatch):
+    def test_raises_without_any_auth(self, monkeypatch):
         monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
         monkeypatch.delenv("DOMINO_API_KEY", raising=False)
         set_request_auth_header(None)
         with pytest.raises(RuntimeError, match="No Domino auth credentials"):
-            ds._api_request("GET", "/api/test", cross_project=False)
+            ds._api_request("GET", "/api/test")
         set_request_auth_header("Bearer test-jwt")  # restore

@@ -17,14 +17,12 @@ from starlette.requests import Request
 from autodoc.core.config import Settings
 
 from studio.state import (
-    JobState,
     DominoJobRecord,
-    JOB_STORE,
-    ACTIVE_JOB_ID,
     _DOMINO_AVAILABLE,
     _POLL_TASK,
     _STARTUP_WARNINGS,
-    _resolve_job,
+    _set_target_project,
+    _get_target_project_id,
     _get_default_code_root,
     _get_default_output_dir,
     _get_default_spec_path,
@@ -36,7 +34,6 @@ from studio.state import (
 from studio.styles import STUDIO_CSS
 from studio.scripts import SMART_POLLING_JS, MAIN_DOM_JS, get_output_defaults_script
 from studio.ui_components import (
-    _render_status,
     _render_domino_status,
     _render_warnings_banner,
     _render_job_history_table,
@@ -64,7 +61,8 @@ app, rt = fast_app(
         # Smart polling / HTMX JS
         Script(SMART_POLLING_JS),
         Style(STUDIO_CSS),
-        Script(get_output_defaults_script()),
+        # NOTE: output defaults script is injected per-request in index()
+        # so it picks up the resolved target project name.
         Script(MAIN_DOM_JS),
     )
 )
@@ -82,12 +80,16 @@ def index(req: Request):
         scheme = req.headers.get("x-forwarded-proto", "https")
         domino_client.set_ui_host(host, scheme)
 
-    # Capture projectId from query string (fallback for non-proxied access;
-    # Domino's reverse proxy strips query params from the iframe URL).
+    # Capture the target project from the ?projectId query param.  This is
+    # called on every page load but only takes effect the first time; all
+    # subsequent operations (specs, jobs, output, history) are scoped to
+    # this target project.
     project_id = req.query_params.get("projectId") or None
+    _set_target_project(project_id)
+    # Use the captured target for the rest of this request
+    project_id = _get_target_project_id() or project_id
 
-    # If a cross-project ID was given, resolve its metadata eagerly so the
-    # cache is warm for later job submissions and hardware-tier lookups.
+    # Resolve display name from the (now-cached) target project.
     project_display_name: Optional[str] = None
     if project_id and _DOMINO_AVAILABLE:
         info = domino_client.resolve_project(project_id)
@@ -116,14 +118,6 @@ def index(req: Request):
         except Exception:
             pass
 
-    # Auto-infer execution mode: projectId or Domino env -> domino, else -> app
-    inferred_mode = "app"
-    if project_id and _DOMINO_AVAILABLE:
-        inferred_mode = "domino"
-    elif not project_id and _DOMINO_AVAILABLE and os.environ.get("DOMINO_PROJECT_ID"):
-        inferred_mode = "domino"
-    default_mode = inferred_mode
-
     # Pre-fetch branches and hardware tiers for server-side rendering
     tier_data = []
     default_tier = ""
@@ -148,9 +142,6 @@ def index(req: Request):
             tier_options = []
         if not tier_options:
             tier_options = [Option("(default)", value="")]
-    else:
-        branch_options = [Option("(Domino not available)", value="")]
-        tier_options = [Option("(Domino not available)", value="")]
 
     # ── Build the 3-column layout ────────────────────────────────────────
 
@@ -167,88 +158,56 @@ def index(req: Request):
     spec_card_children = []
     # Hidden field that stores the resolved spec path for form submission
     spec_card_children.append(
-        Input(name="spec_path", id="field-spec_path", type="hidden",
-              value=str(default_spec) if default_mode == "app" else ""),
+        Input(name="spec_path", id="field-spec_path", type="hidden", value=""),
     )
 
-    if default_mode == "domino":
-        # Domino mode: dataset browser
-        spec_card_children.append(
+    # Dataset browser + upload
+    spec_card_children.append(
+        Div(
+            Label("Spec file", Span(" *", cls="required-star")),
             Div(
-                Label("Spec file", Span(" *", cls="required-star")),
-                Div(
-                    Select(
-                        Option("Loading datasets...", value="", disabled=True, selected=True),
-                        id="spec-dataset-select",
-                    ),
-                    cls="field",
-                ),
-                Div(id="spec-breadcrumb", cls="spec-breadcrumb"),
-                Div(
-                    Span("Select a dataset to browse spec files", style="color: var(--outline); font-size: 0.8125rem;"),
-                    id="spec-file-list",
-                    cls="spec-file-list",
-                ),
-                Div(
-                    Span("Selected: ", style="color: var(--outline);"),
-                    Span(id="spec-selected-name", style="font-weight: 600; color: var(--on-surface);"),
-                    id="spec-selected-indicator",
-                    style="display: none; padding: 8px 0; font-size: 0.8125rem;",
-                ),
-                # OR divider
-                Div(
-                    Span("OR", cls="or-divider-text"),
-                    cls="or-divider",
-                ),
-                Div(
-                    Label(
-                        "Upload from my machine",
-                        Input(
-                            type="file",
-                            accept=".yaml,.yml",
-                            id="spec-machine-upload",
-                            cls="hidden-upload",
-                        ),
-                        cls="upload-btn",
-                    ),
-                    Span(id="spec-upload-status", cls="spec-upload-status"),
-                    A("Download reference template", href="api/download-template",
-                      download="doc_spec_template.yaml",
-                      style="color: var(--primary); font-size: 0.8125rem; margin-left: auto;"),
-                    cls="spec-actions-row",
+                Select(
+                    Option("Loading datasets...", value="", disabled=True, selected=True),
+                    id="spec-dataset-select",
                 ),
                 cls="field",
-            )
-        )
-    else:
-        # App mode: simple file path + upload
-        spec_card_children.append(
+            ),
+            Div(id="spec-breadcrumb", cls="spec-breadcrumb"),
             Div(
-                Label("Spec file", Span(" *", cls="required-star"), for_="field-spec_path_display"),
-                Div(
+                Span("Select a dataset to browse spec files", style="color: var(--outline); font-size: 0.8125rem;"),
+                id="spec-file-list",
+                cls="spec-file-list",
+            ),
+            Div(
+                Span("Selected: ", style="color: var(--outline);"),
+                Span(id="spec-selected-name", style="font-weight: 600; color: var(--on-surface);"),
+                id="spec-selected-indicator",
+                style="display: none; padding: 8px 0; font-size: 0.8125rem;",
+            ),
+            Div(
+                Span("OR", cls="or-divider-text"),
+                cls="or-divider",
+            ),
+            Div(
+                Label(
+                    "Upload from my machine",
                     Input(
-                        id="field-spec_path_display",
-                        type="text",
-                        value=str(default_spec),
-                        placeholder=str(default_spec),
-                        oninput="document.getElementById('field-spec_path').value = this.value;",
+                        type="file",
+                        accept=".yaml,.yml",
+                        id="spec-machine-upload",
+                        cls="hidden-upload",
                     ),
-                    Label(
-                        "Upload",
-                        Input(
-                            name="spec_upload",
-                            type="file",
-                            accept=".yaml,.yml",
-                            cls="hidden-upload",
-                        ),
-                        cls="upload-btn",
-                    ),
-                    cls="field-inline",
+                    cls="upload-btn",
                 ),
-                Div(id="upload-filename", cls="upload-filename"),
-                cls="field",
-            )
+                Span(id="spec-upload-status", cls="spec-upload-status"),
+                A("Download reference template", href="api/download-template",
+                  download="doc_spec_template.yaml",
+                  style="color: var(--primary); font-size: 0.8125rem; margin-left: auto;"),
+                cls="spec-actions-row",
+            ),
+            cls="field",
         )
+    )
 
     spec_card_children.append(Div(id="spec-validation-result"))
 
@@ -380,109 +339,106 @@ def index(req: Request):
         )
     )
 
-    # Domino-specific fields
-    if default_mode == "domino":
-        # Target project
-        run_card_children.append(
+    # Target project
+    run_card_children.append(
+        Div(
             Div(
-                Div(
-                    Label("Target project", for_="field-project-id"),
-                    Span("\u24d8", cls="info-tooltip", data_tooltip="Domino project ID to run the job in. Leave blank to use the current project."),
-                    cls="label-row",
-                ),
-                Input(
-                    name="target_project",
-                    id="field-project-id",
-                    type="text",
-                    value="",
-                    placeholder="Leave blank for current project",
-                    autocomplete="off",
-                ),
-                Div(
-                    (f"{project_display_name}" if project_display_name else ""),
-                    id="project-id-resolved",
-                    cls="resolved" if project_display_name else "",
-                ),
-                cls="field domino-fields",
+                Label("Target project", for_="field-project-id"),
+                Span("\u24d8", cls="info-tooltip", data_tooltip="Domino project ID to run the job in. Leave blank to use the current project."),
+                cls="label-row",
+            ),
+            Input(
+                name="target_project",
+                id="field-project-id",
+                type="text",
+                value="",
+                placeholder="Leave blank for current project",
+                autocomplete="off",
+            ),
+            Div(
+                (f"{project_display_name}" if project_display_name else ""),
+                id="project-id-resolved",
+                cls="resolved" if project_display_name else "",
+            ),
+            cls="field",
+        )
+    )
+    # Branch
+    run_card_children.append(
+        Div(
+            Div(
+                Label("Branch", for_="field-branch"),
+                Span("\u24d8", cls="info-tooltip", data_tooltip="Git branch to analyze in the Domino job."),
+                cls="label-row",
+            ),
+            Select(
+                *branch_options,
+                name="branch",
+                id="field-branch",
+            ),
+            cls="field",
+        )
+    )
+    # Hardware tier (card grid)
+    tier_cards = []
+    for t in tier_data if tier_data else []:
+        tid = t.get("id", "")
+        tname = t.get("name") or tid
+        is_default = t.get("isDefault", False) or tid == default_tier
+        tier_cards.append(
+            Div(
+                Div(tname, cls="hw-tier-card-name"),
+                cls=f"hw-tier-card{' selected' if is_default else ''}",
+                data_tier_id=tid,
+                onclick=f"selectHwTier(this, '{tid}')",
             )
         )
-        # Branch
-        run_card_children.append(
+    if not tier_cards:
+        tier_cards.append(
             Div(
-                Div(
-                    Label("Branch", for_="field-branch"),
-                    Span("\u24d8", cls="info-tooltip", data_tooltip="Git branch to analyze in the Domino job."),
-                    cls="label-row",
-                ),
-                Select(
-                    *branch_options,
-                    name="branch",
-                    id="field-branch",
-                ),
-                cls="field domino-fields",
+                Div("(default)", cls="hw-tier-card-name"),
+                cls="hw-tier-card selected",
+                data_tier_id="",
+                onclick="selectHwTier(this, '')",
             )
         )
-        # Hardware tier (card grid)
-        tier_cards = []
-        for t in tier_data if tier_data else []:
-            tid = t.get("id", "")
-            tname = t.get("name") or tid
-            is_default = t.get("isDefault", False) or tid == default_tier
-            tier_cards.append(
-                Div(
-                    Div(tname, cls="hw-tier-card-name"),
-                    cls=f"hw-tier-card{' selected' if is_default else ''}",
-                    data_tier_id=tid,
-                    onclick=f"selectHwTier(this, '{tid}')",
-                )
-            )
-        if not tier_cards:
-            tier_cards.append(
-                Div(
-                    Div("(default)", cls="hw-tier-card-name"),
-                    cls="hw-tier-card selected",
-                    data_tier_id="",
-                    onclick="selectHwTier(this, '')",
-                )
-            )
-        run_card_children.append(
+    run_card_children.append(
+        Div(
             Div(
-                Div(
-                    Label("Hardware tier"),
-                    Span("\u24d8", cls="info-tooltip", data_tooltip="Compute tier for the Domino job."),
-                    cls="label-row",
-                ),
-                Input(type="hidden", name="hardware_tier", id="field-hardware_tier",
-                      value=default_tier or ""),
-                Div(*tier_cards, cls="hw-tier-grid"),
-                cls="field domino-fields",
-            )
+                Label("Hardware tier"),
+                Span("\u24d8", cls="info-tooltip", data_tooltip="Compute tier for the Domino job."),
+                cls="label-row",
+            ),
+            Input(type="hidden", name="hardware_tier", id="field-hardware_tier",
+                  value=default_tier or ""),
+            Div(*tier_cards, cls="hw-tier-grid"),
+            cls="field",
         )
+    )
 
     # More run settings (expandable)
     more_settings_children = []
-    if default_mode == "domino":
-        more_settings_children.append(
+    more_settings_children.append(
+        Div(
             Div(
-                Div(
-                    Label("Output directory", for_="field-output_dir"),
-                    Span(
-                        "\u24d8",
-                        cls="info-tooltip",
-                        data_tooltip="Output files are written here by the Domino job.",
-                        id="output-dir-hint",
-                    ),
-                    cls="label-row",
+                Label("Output directory", for_="field-output_dir"),
+                Span(
+                    "\u24d8",
+                    cls="info-tooltip",
+                    data_tooltip="Output files are written here by the Domino job.",
+                    id="output-dir-hint",
                 ),
-                Input(
-                    name="output_dir",
-                    id="field-output_dir",
-                    type="text",
-                    value=str(_get_default_output_dir()),
-                ),
-                cls="field domino-fields",
-            )
+                cls="label-row",
+            ),
+            Input(
+                name="output_dir",
+                id="field-output_dir",
+                type="text",
+                value=str(_get_default_output_dir()),
+            ),
+            cls="field",
         )
+    )
     more_settings_children.append(
         Div(
             Label("API key"),
@@ -517,7 +473,7 @@ def index(req: Request):
             ),
             cls="field",
             id="api-key-pass-field",
-            style="display: none;" if default_mode == "domino" else "",
+            style="display: none;",
         )
     )
     # Generation settings
@@ -646,9 +602,9 @@ def index(req: Request):
             ),
             Div(
                 Div(
-                    _render_domino_status(latest_domino) if (default_mode == "domino") else _render_status(_resolve_job(ACTIVE_JOB_ID)),
+                    _render_domino_status(latest_domino),
                     id="status-panel",
-                    **({"hx_get": "domino-status", "hx_trigger": "every 10s", "hx_swap": "innerHTML settle:0"} if default_mode == "domino" else {}),
+                    hx_get="domino-status", hx_trigger="every 10s", hx_swap="innerHTML settle:0",
                 ),
                 id="tab-live",
                 cls="tab-content",
@@ -667,6 +623,8 @@ def index(req: Request):
 
     return (
         Title("Auto Model Docs Studio"),
+        # Output defaults — injected per-request so it uses the resolved target project
+        Script(get_output_defaults_script()),
         # Header
         Div(
             Div(
@@ -692,7 +650,7 @@ def index(req: Request):
                     cls="studio-grid",
                 ),
                 id="main-form",
-                data_execution_mode=inferred_mode,
+                data_execution_mode="domino",
                 hx_post="run",
                 hx_target="#status-panel",
                 hx_swap="innerHTML",

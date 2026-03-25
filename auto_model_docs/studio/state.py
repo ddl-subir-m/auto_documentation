@@ -11,9 +11,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
-from uuid import uuid4
-
-from rich.console import Console
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -27,9 +24,6 @@ logging.basicConfig(
 )
 for _mod_name in ("domino_datasets", "domino_client", "auth_context"):
     logging.getLogger(_mod_name).setLevel(logging.INFO)
-
-# Rich console for terminal output
-console = Console()
 
 # ---------------------------------------------------------------------------
 # Sibling module imports  (domino_client, domino_job_store, etc.)
@@ -92,29 +86,6 @@ except Exception as _import_exc:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class JobState:
-    id: str
-    status: str = "idle"
-    phase: str = "Idle"
-    progress: float = 0.0
-    logs: list[str] = field(default_factory=list)
-    output_path: Optional[Path] = None
-    notebook_path: Optional[Path] = None
-    output_dir: Optional[Path] = None
-    spec_path: Optional[Path] = None
-    error: Optional[str] = None
-    cancel_requested: bool = False
-    task: Optional[asyncio.Task] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
-    # Progress bar tracking
-    progress_ctx: Any = None
-    progress_task_id: Optional[int] = None
-    current_phase: Optional[str] = None
-    log_version: int = 0
-
-
-@dataclass
 class JobRequest:
     spec_path: Optional[str]
     spec_content: Optional[str]
@@ -134,8 +105,6 @@ class JobRequest:
     model_names: Optional[str]  # Comma-separated list
     latest_only: bool
     verbose: bool  # Enable verbose logging
-    # Domino job fields
-    # execution_mode is auto-inferred: project_id present -> "domino", else -> "app"
     branch: Optional[str] = None
     hardware_tier: Optional[str] = None
     api_key_source: str = "domino_env"  # "domino_env" | "pass_now"
@@ -172,64 +141,73 @@ class EnvironmentWarning:
 # Mutable global state
 # ---------------------------------------------------------------------------
 
-JOB_STORE: dict[str, JobState] = {}
-ACTIVE_JOB_ID: Optional[str] = None
-LAST_API_KEY: Optional[str] = None
 _POLL_TASK: Optional[asyncio.Task] = None
 _STARTUP_WARNINGS: list = []
 
+# Target project context — captured from the ?projectId query param on
+# first request and used by all components so that specs, jobs, output,
+# and history are scoped to the target project, not the app's own project.
+_TARGET_PROJECT_ID: Optional[str] = None
+_TARGET_PROJECT_NAME: Optional[str] = None
+
 
 # ---------------------------------------------------------------------------
-# Helper functions
+# Target project helpers
 # ---------------------------------------------------------------------------
 
-def _timestamp() -> str:
-    return datetime.now().strftime("%H:%M:%S")
+def _set_target_project(project_id: Optional[str]) -> None:
+    """Capture the target project from the ?projectId query param.
+
+    Called once on the first page load.  All subsequent operations use
+    ``_get_target_project_id()`` / ``_get_target_project_name()`` so that
+    specs, jobs, output, and history are scoped to this project.
+    """
+    import studio.state as _self  # avoid stale module-level refs
+
+    if _self._TARGET_PROJECT_ID is not None:
+        return  # already captured
+
+    pid = project_id or os.environ.get("DOMINO_PROJECT_ID") or None
+    _self._TARGET_PROJECT_ID = pid
+
+    if pid and _DOMINO_AVAILABLE and domino_client:
+        info = domino_client.resolve_project(pid)
+        if info:
+            _self._TARGET_PROJECT_NAME = info.name
+            if domino_job_store:
+                domino_job_store.set_project_name(info.name)
+            return
+    # Fallback: use the app's own project name
+    fallback = os.environ.get("DOMINO_PROJECT_NAME") or None
+    _self._TARGET_PROJECT_NAME = fallback
+    if domino_job_store and fallback:
+        domino_job_store.set_project_name(fallback)
 
 
-def _log(job: JobState, message: str) -> None:
-    job.logs.append(f"[{_timestamp()}] {message}")
-    job.updated_at = datetime.utcnow()
-    job.log_version += 1
+def _get_target_project_id() -> Optional[str]:
+    """Return the captured target project ID."""
+    return _TARGET_PROJECT_ID
 
 
-def _cleanup_job(job: JobState) -> None:
-    _log(job, "Cleaning up artifacts.")
-    paths: list[Path] = []
-    if job.output_path:
-        paths.append(job.output_path)
-    if job.notebook_path:
-        paths.append(job.notebook_path)
-    if job.spec_path:
-        paths.append(job.spec_path)
-
-    for path in paths:
-        try:
-            if path.exists():
-                path.unlink()
-                _log(job, f"Removed: {path}")
-        except Exception as exc:
-            _log(job, f"Cleanup failed for {path}: {exc}")
-
-    job.output_path = None
-    job.notebook_path = None
-    job.spec_path = None
+def _get_target_project_name() -> Optional[str]:
+    """Return the resolved target project name."""
+    return _TARGET_PROJECT_NAME
 
 
-def _resolve_job(job_id: Optional[str]) -> Optional[JobState]:
-    if job_id and job_id in JOB_STORE:
-        return JOB_STORE[job_id]
-    return None
-
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
 
 def _get_default_output_dir() -> Path:
-    # In Domino, use /mnt/data/{project_name} (persisted via Datasets)
+    """Return the default output directory scoped to the target project."""
     if Path("/mnt/data").exists():
-        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
+        project_name = (
+            _TARGET_PROJECT_NAME
+            or os.environ.get("DOMINO_PROJECT_NAME", "output")
+        )
         output = Path(f"/mnt/data/{project_name}")
         output.mkdir(parents=True, exist_ok=True)
         return output
-    # Fallback for local development
     output = Path("./output")
     output.mkdir(exist_ok=True)
     return output
@@ -246,7 +224,6 @@ def _get_default_code_root() -> Path:
 
 
 def _get_default_spec_path() -> Path:
-    # spec is in auto_model_docs/ (parent of studio/)
     return Path(__file__).resolve().parent.parent / "doc_spec.yaml"
 
 
@@ -256,3 +233,30 @@ def _get_username() -> str:
 
 def _max_jobs() -> int:
     return int(os.environ.get("AUTODOC_MAX_JOBS", "1"))
+
+
+def _resolve_target_project_name(project_id: Optional[str] = None) -> Optional[str]:
+    """Resolve a Domino project ID to its project name.
+
+    Prefers the captured target project when the given *project_id* matches
+    (avoids a redundant API call).  Falls back to a live lookup.
+    """
+    if not project_id:
+        return _TARGET_PROJECT_NAME
+    if project_id == _TARGET_PROJECT_ID and _TARGET_PROJECT_NAME:
+        return _TARGET_PROJECT_NAME
+    if not _DOMINO_AVAILABLE or not domino_client:
+        return None
+    info = domino_client.resolve_project(project_id)
+    return info.name if info else None
+
+
+def _resolve_request_project_id(req) -> Optional[str]:
+    """Extract project ID from request query params, captured state, or env."""
+    for key in ("projectId", "project_id"):
+        pid = req.query_params.get(key)
+        if pid:
+            return pid
+    if _TARGET_PROJECT_ID:
+        return _TARGET_PROJECT_ID
+    return os.environ.get("DOMINO_PROJECT_ID", "") or None

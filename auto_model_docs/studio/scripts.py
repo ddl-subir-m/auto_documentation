@@ -9,14 +9,28 @@ from .state import _get_default_output_dir
 
 
 def get_output_defaults_script() -> str:
-    """Return the small inline script that sets output-dir JS constants."""
+    """Return the small inline script that sets output-dir JS constant."""
     return f"""
         const DOMINO_OUTPUT_DEFAULT = {json.dumps(str(_get_default_output_dir()))};
-        const APP_OUTPUT_DEFAULT = "/mnt/code/output";
     """
 
 
 SMART_POLLING_JS = r"""
+    // Minimal stub — app-mode smart polling removed; Domino uses HTMX.
+    window._activateStatusPolling = function() {};
+    window.showOutputTab = function(tab) {
+        document.querySelectorAll('.tab-btn').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+        document.querySelectorAll('.tab-content').forEach(function(content) {
+            content.classList.toggle('hidden', content.id !== 'tab-' + tab);
+        });
+    };
+"""
+
+# App-mode smart polling JS was removed — Domino uses HTMX polling.
+# The following block is kept only as a historical reference.
+_UNUSED = r"""
     window.addEventListener('DOMContentLoaded', function() {
         var htmxWorking = false;
         if (typeof htmx !== 'undefined' && typeof htmx.ajax === 'function') {

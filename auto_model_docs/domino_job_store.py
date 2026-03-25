@@ -10,9 +10,25 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+_PROJECT_NAME_OVERRIDE: Optional[str] = None
+
+
+def set_project_name(name: Optional[str]) -> None:
+    """Set the target project name used for the DB path.
+
+    Called once at startup after the ?projectId query param is resolved
+    so that job history is scoped to the target project.
+    """
+    global _PROJECT_NAME_OVERRIDE
+    _PROJECT_NAME_OVERRIDE = name
+
+
 def _db_path() -> Path:
     if Path("/mnt/data").exists():
-        project = os.environ.get("DOMINO_PROJECT_NAME", "autodoc")
+        project = (
+            _PROJECT_NAME_OVERRIDE
+            or os.environ.get("DOMINO_PROJECT_NAME", "autodoc")
+        )
         base = Path(f"/mnt/data/{project}")
     else:
         base = Path(".")

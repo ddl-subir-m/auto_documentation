@@ -1,8 +1,8 @@
 """Domino Datasets API client using forwarded user identity.
 
-All requests use the viewer's JWT captured by ``auth_context`` middleware,
-ensuring dataset operations respect the visiting user's permissions — not
-the app owner's.
+All requests use the viewer's JWT captured by ``auth_context`` middleware
+(extended identity propagation), ensuring dataset operations respect the
+visiting user's permissions — not the app owner's.
 """
 
 from __future__ import annotations
@@ -29,15 +29,15 @@ _DEFAULT_MAX_RETRIES = 2
 
 
 # ---------------------------------------------------------------------------
-# Host resolution (mirrors domino_client.py)
+# Host / auth resolution
 # ---------------------------------------------------------------------------
 
 def _resolve_api_host() -> str:
-    host = os.environ.get("DOMINO_API_PROXY") or os.environ.get("DOMINO_API_HOST") or ""
-    return host.rstrip("/")
+    """Return the Domino API host (DOMINO_API_HOST).
 
-
-def _resolve_nucleus_host() -> str:
+    Always uses the nucleus host directly — extended identity propagation
+    provides the viewer's JWT for auth, so the sidecar proxy is not needed.
+    """
     host = os.environ.get("DOMINO_API_HOST") or ""
     return host.rstrip("/")
 
@@ -49,53 +49,25 @@ def _resolve_project_id(project_id: Optional[str] = None) -> str:
     return pid
 
 
-def _is_cross_project(project_id: str) -> bool:
-    return project_id != os.environ.get("DOMINO_PROJECT_ID", "")
+def _get_auth_headers() -> dict[str, str]:
+    """Build auth headers using the forwarded viewer JWT.
 
-
-def _get_auth_headers(cross_project: bool = False) -> dict[str, str]:
-    """Build auth headers for Domino Datasets API calls.
-
-    Prefers the forwarded user JWT when available — it carries the
-    viewer's identity and has full RBAC permissions (reads AND writes).
-    Falls back to the sidecar ephemeral token for same-project calls
-    when no JWT is available (e.g. sync route handlers where the
-    ContextVar may not propagate).
-
-    Cross-project calls require the forwarded JWT — the sidecar token
-    is scoped to the app's own project.
+    Extended identity propagation is always on, so the viewer's JWT
+    is captured by the auth_context middleware on every request.
     """
-    # 1. Forwarded user JWT (preferred — has full user permissions)
     forwarded = get_request_auth_header()
     if forwarded:
-        logger.info("Auth: using forwarded user JWT")
         return {"Authorization": forwarded}
 
-    if cross_project:
-        raise RuntimeError(
-            "Cross-project datasets API call requires a forwarded user token, "
-            "but none was captured from the incoming request."
-        )
-
-    # 2. Sidecar ephemeral token (same-project fallback — read-only safe)
-    try:
-        resp = httpx.get("http://localhost:8899/access-token", timeout=3.0)
-        if resp.status_code == 200 and resp.text.strip():
-            logger.info("Auth: using sidecar ephemeral token (no forwarded JWT)")
-            return {"Authorization": f"Bearer {resp.text.strip()}"}
-        logger.warning("Sidecar /access-token returned status=%s body=%r", resp.status_code, resp.text[:200])
-    except Exception as exc:
-        logger.warning("Sidecar /access-token failed: %s", exc)
-
-    # 3. API key from environment
+    # Fallback: API key from environment (e.g. local development)
     api_key = os.environ.get("DOMINO_USER_API_KEY") or os.environ.get("DOMINO_API_KEY") or ""
     if api_key:
-        logger.info("Auth: using DOMINO_USER_API_KEY")
+        logger.info("Auth: using DOMINO_USER_API_KEY (no forwarded JWT)")
         return {"X-Domino-Api-Key": api_key}
 
     raise RuntimeError(
         "No Domino auth credentials available. "
-        "Need a forwarded user token, sidecar ephemeral token, or DOMINO_USER_API_KEY."
+        "Need a forwarded user token (extended identity propagation) or DOMINO_USER_API_KEY."
     )
 
 
@@ -107,7 +79,6 @@ def _api_request(
     method: str,
     path: str,
     *,
-    cross_project: bool = False,
     json: Any = None,
     params: Optional[dict[str, Any]] = None,
     files: Optional[dict[str, Any]] = None,
@@ -116,16 +87,16 @@ def _api_request(
     max_retries: int = _DEFAULT_MAX_RETRIES,
 ) -> httpx.Response:
     """Authenticated request to the Domino Datasets API."""
-    base = _resolve_api_host() if not cross_project else _resolve_nucleus_host()
+    base = _resolve_api_host()
     if not base:
         raise RuntimeError("No Domino API host configured")
 
     url = f"{base}{path}"
-    logger.debug("Datasets API %s %s (cross_project=%s)", method, path, cross_project)
+    logger.debug("Datasets API %s %s", method, path)
     last_exc: Exception | None = None
 
     for attempt in range(max_retries + 1):
-        headers = _get_auth_headers(cross_project=cross_project)
+        headers = _get_auth_headers()
         # Only set Content-Type for JSON requests (not multipart)
         if json is not None and files is None:
             headers["Content-Type"] = "application/json"
@@ -175,8 +146,8 @@ def list_datasets(project_id: Optional[str] = None) -> list[dict[str, Any]]:
     enum value and caused 500s).
     """
     pid = _resolve_project_id(project_id)
-    cross = _is_cross_project(pid)
-    logger.info("Listing datasets for project %s (cross=%s)", pid, cross)
+
+    logger.info("Listing datasets for project %s", pid)
 
     datasets: list[dict[str, Any]] = []
     offset = 0
@@ -185,7 +156,7 @@ def list_datasets(project_id: Optional[str] = None) -> list[dict[str, Any]]:
     while True:
         resp = _api_request(
             "GET", "/api/datasetrw/v2/datasets",
-            cross_project=cross,
+
             params={
                 "projectIdsToInclude": pid,
                 "offset": offset,
@@ -221,7 +192,6 @@ def list_datasets(project_id: Optional[str] = None) -> list[dict[str, Any]]:
 def _create_dataset(
     project_id: str, name: str, description: str,
 ) -> dict[str, Any]:
-    cross = _is_cross_project(project_id)
     payloads = [
         {"name": name, "projectId": project_id, "description": description},
         {"name": name, "projectId": project_id},
@@ -233,7 +203,7 @@ def _create_dataset(
         try:
             resp = _api_request(
                 "POST", "/api/datasetrw/v1/datasets",
-                cross_project=cross, json=payload,
+                json=payload,
             )
             data = resp.json()
             logger.info("Create dataset response: %s", data)
@@ -290,12 +260,12 @@ def get_rw_snapshot_id(
 ) -> Optional[str]:
     """Resolve the read-write (active) snapshot ID for a dataset."""
     pid = _resolve_project_id(project_id)
-    cross = _is_cross_project(pid)
+
 
     try:
         resp = _api_request(
             "GET", f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
-            cross_project=cross, params={"limit": 5},
+            params={"limit": 5},
         )
         data = resp.json()
         for s in data.get("snapshots", []):
@@ -321,12 +291,12 @@ def list_files(
 ) -> list[dict[str, Any]]:
     """List files in a dataset snapshot, returning only directories and yaml files."""
     pid = _resolve_project_id(project_id)
-    cross = _is_cross_project(pid)
+
     logger.debug("Browsing files in snapshot %s, path='%s'", snapshot_id, path)
 
     resp = _api_request(
         "GET", f"/v4/datasetrw/files/{snapshot_id}",
-        cross_project=cross, params={"path": path},
+        params={"path": path},
     )
     data = resp.json()
     rows = data.get("rows", [])
@@ -363,16 +333,13 @@ async def upload_file(
 ) -> None:
     """Upload a file to a dataset via the v4 chunked upload API.
 
-    Uses httpx.AsyncClient (matching AutoML Extension's pattern) — the
-    sidecar proxy returns 403 on multipart POSTs from sync httpx.Client.
+    Uses httpx.AsyncClient for multipart uploads.
     """
     import hashlib
     import io
 
     pid = _resolve_project_id(project_id)
-    # Always route uploads through the sidecar proxy — it injects auth
-    # headers that the v4 multipart upload endpoints require (per AutoML).
-    headers = _get_auth_headers(cross_project=False)
+    headers = _get_auth_headers()
     base = _resolve_api_host()
     base_url = base.rstrip("/")
     logger.info("Uploading '%s' (%d bytes) to dataset %s", file_path, len(content), dataset_id)

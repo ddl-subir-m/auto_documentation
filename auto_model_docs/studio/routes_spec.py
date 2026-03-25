@@ -10,6 +10,8 @@ from autodoc.core.models import DocumentSpec
 
 from .state import (
     _DOMINO_AVAILABLE,
+    _resolve_request_project_id,
+    _resolve_target_project_name,
     spec_store,
 )
 
@@ -57,19 +59,21 @@ def register_spec_routes(rt):
         """Auto-save an uploaded spec file and return the saved path."""
         if not _DOMINO_AVAILABLE:
             return Response("Domino not available", status_code=400)
+        project_name = _resolve_target_project_name(_resolve_request_project_id(req))
         form = await req.form()
         filename = form.get("spec_filename", "spec.yaml")
         content = form.get("spec_content", "")
-        saved = spec_store.save_spec(filename, content)
+        saved = spec_store.save_spec(filename, content, project_name=project_name)
         return Response(str(saved), media_type="text/plain")
 
     rt("/save-spec")(save_spec_route)
 
-    def spec_list():
+    def spec_list(req: Request):
         """Return HTML list of saved spec files."""
         if not _DOMINO_AVAILABLE:
             return Div(P("Domino not available.", cls="history-empty"))
-        specs = spec_store.list_specs()
+        project_name = _resolve_target_project_name(_resolve_request_project_id(req))
+        specs = spec_store.list_specs(project_name=project_name)
         if not specs:
             return Div(P("No saved spec files.", cls="history-empty"), id="spec-list-content")
         items = []
@@ -94,17 +98,19 @@ def register_spec_routes(rt):
     rt("/spec-list")(spec_list)
 
     async def delete_spec_route(req: Request):
+        project_name = _resolve_target_project_name(_resolve_request_project_id(req))
         form = await req.form()
         filename = form.get("filename", "")
         if filename and _DOMINO_AVAILABLE:
-            spec_store.delete_spec(filename)
-        return spec_list()
+            spec_store.delete_spec(filename, project_name=project_name)
+        return spec_list(req)
 
     rt("/delete-spec")(delete_spec_route)
 
-    def cleanup_specs():
+    def cleanup_specs(req: Request):
         if _DOMINO_AVAILABLE:
-            spec_store.delete_all_specs()
+            project_name = _resolve_target_project_name(_resolve_request_project_id(req))
+            spec_store.delete_all_specs(project_name=project_name)
         return Response("OK", media_type="text/plain")
 
     rt("/cleanup-specs")(cleanup_specs)

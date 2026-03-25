@@ -5,13 +5,18 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 
-def _specs_dir() -> Path:
+def _specs_dir(project_name: Optional[str] = None) -> Path:
+    """Return the specs directory, optionally scoped to a target project.
+
+    When *project_name* is given the specs land in that project's dataset
+    so the Domino job (which may run in a different project) can access them.
+    """
     if Path("/mnt/data").exists():
-        project = os.environ.get("DOMINO_PROJECT_NAME", "autodoc")
+        project = project_name or os.environ.get("DOMINO_PROJECT_NAME", "autodoc")
         base = Path(f"/mnt/data/{project}/autodoc_specs")
     else:
         base = Path("./autodoc_specs")
@@ -19,20 +24,20 @@ def _specs_dir() -> Path:
     return base
 
 
-def save_spec(original_filename: str, content: str) -> Path:
+def save_spec(original_filename: str, content: str, project_name: Optional[str] = None) -> Path:
     """Write spec content to disk with a UUID prefix.
 
     Returns the Path of the saved file.
     """
     safe_name = Path(original_filename).name  # strip any path components
-    dest = _specs_dir() / f"{uuid4()}_{safe_name}"
+    dest = _specs_dir(project_name) / f"{uuid4()}_{safe_name}"
     dest.write_text(content, encoding="utf-8")
     return dest
 
 
-def list_specs() -> list[dict[str, Any]]:
+def list_specs(project_name: Optional[str] = None) -> list[dict[str, Any]]:
     """Return metadata for all saved spec files, newest first."""
-    specs_dir = _specs_dir()
+    specs_dir = _specs_dir(project_name)
     results: list[dict[str, Any]] = []
     for p in sorted(specs_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
         if p.is_file():
@@ -50,15 +55,15 @@ def list_specs() -> list[dict[str, Any]]:
     return results
 
 
-def delete_spec(filename: str) -> None:
+def delete_spec(filename: str, project_name: Optional[str] = None) -> None:
     """Delete a spec file by its filename (basename only)."""
-    target = _specs_dir() / Path(filename).name
+    target = _specs_dir(project_name) / Path(filename).name
     if target.exists():
         target.unlink()
 
 
-def delete_all_specs() -> None:
+def delete_all_specs(project_name: Optional[str] = None) -> None:
     """Delete all spec files in the specs directory."""
-    for p in _specs_dir().iterdir():
+    for p in _specs_dir(project_name).iterdir():
         if p.is_file():
             p.unlink()

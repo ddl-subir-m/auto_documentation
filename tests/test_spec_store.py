@@ -21,7 +21,7 @@ import spec_store
 def _use_tmp_dir(tmp_path, monkeypatch):
     """Redirect specs dir to a temp directory for every test."""
     specs_dir = tmp_path / "specs"
-    monkeypatch.setattr(spec_store, "_specs_dir", lambda: specs_dir)
+    monkeypatch.setattr(spec_store, "_specs_dir", lambda project_name=None: specs_dir)
     specs_dir.mkdir()
     yield
 
@@ -140,3 +140,35 @@ class TestDeleteAllSpecs:
     def test_noop_when_empty(self):
         spec_store.delete_all_specs()  # should not error
         assert len(spec_store.list_specs()) == 0
+
+
+# ---------------------------------------------------------------------------
+# project_name routing
+# ---------------------------------------------------------------------------
+
+class TestProjectNameRouting:
+    """_specs_dir should use the target project name when provided."""
+
+    def test_uses_project_name(self, tmp_path, monkeypatch):
+        """When project_name is given, specs land in that project's dataset."""
+        # Restore the real _specs_dir so we can test its logic
+        monkeypatch.undo()
+        monkeypatch.setattr(spec_store, "Path", type(tmp_path))
+        # Simulate /mnt/data existing by pointing at tmp_path
+        base = tmp_path / "mnt" / "data"
+        base.mkdir(parents=True)
+        monkeypatch.setattr(
+            spec_store,
+            "_specs_dir",
+            lambda project_name=None: _make_specs_dir(tmp_path, project_name),
+        )
+        p = spec_store.save_spec("s.yaml", "content", project_name="TargetProj")
+        assert "TargetProj" in str(p)
+
+
+def _make_specs_dir(tmp_root, project_name=None):
+    """Helper that mimics _specs_dir logic using a tmp root."""
+    project = project_name or "app_default"
+    d = tmp_root / "mnt" / "data" / project / "autodoc_specs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d

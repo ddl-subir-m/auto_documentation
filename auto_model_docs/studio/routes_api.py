@@ -15,20 +15,12 @@ from starlette.responses import FileResponse, Response
 from .state import (
     _DOMINO_AVAILABLE,
     _get_default_code_root,
+    _resolve_request_project_id,
     domino_client,
     domino_datasets,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_request_project_id(req: Request) -> Optional[str]:
-    """Resolve project ID from query params or env."""
-    for key in ("projectId", "project_id"):
-        pid = req.query_params.get(key)
-        if pid:
-            return pid
-    return os.environ.get("DOMINO_PROJECT_ID", "") or None
 
 
 def register_api_routes(rt):

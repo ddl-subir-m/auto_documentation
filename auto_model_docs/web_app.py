@@ -217,6 +217,38 @@ ACTIVE_JOB_ID: Optional[str] = None
 LAST_API_KEY: Optional[str] = None
 _POLL_TASK: Optional[asyncio.Task] = None
 
+# Target project context — captured from ?projectId on first request
+_TARGET_PROJECT_ID: Optional[str] = None
+_TARGET_PROJECT_NAME: Optional[str] = None
+
+
+def _set_target_project(project_id: Optional[str]) -> None:
+    """Capture the target project from the ?projectId query param."""
+    global _TARGET_PROJECT_ID, _TARGET_PROJECT_NAME
+    if _TARGET_PROJECT_ID is not None:
+        return
+    pid = project_id or os.environ.get("DOMINO_PROJECT_ID") or None
+    _TARGET_PROJECT_ID = pid
+    if pid and _DOMINO_AVAILABLE and domino_client:
+        info = domino_client.resolve_project(pid)
+        if info:
+            _TARGET_PROJECT_NAME = info.name
+            if domino_job_store:
+                domino_job_store.set_project_name(info.name)
+            return
+    fallback = os.environ.get("DOMINO_PROJECT_NAME") or None
+    _TARGET_PROJECT_NAME = fallback
+    if domino_job_store and fallback:
+        domino_job_store.set_project_name(fallback)
+
+
+def _get_target_project_id() -> Optional[str]:
+    return _TARGET_PROJECT_ID
+
+
+def _get_target_project_name() -> Optional[str]:
+    return _TARGET_PROJECT_NAME
+
 
 def _timestamp() -> str:
     return datetime.now().strftime("%H:%M:%S")
@@ -252,9 +284,12 @@ def _cleanup_job(job: JobState) -> None:
 
 
 def _get_default_output_dir() -> Path:
-    # In Domino, use /mnt/data/{project_name} (persisted via Datasets)
+    """Return the default output directory scoped to the target project."""
     if Path("/mnt/data").exists():
-        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
+        project_name = (
+            _TARGET_PROJECT_NAME
+            or os.environ.get("DOMINO_PROJECT_NAME", "output")
+        )
         output = Path(f"/mnt/data/{project_name}")
         output.mkdir(parents=True, exist_ok=True)
         return output
@@ -859,10 +894,11 @@ async def _parse_request(req: Request) -> JobRequest:
         spec_content = content.decode("utf-8", errors="replace")
         spec_filename = getattr(spec_upload, "filename", None)
 
-    # projectId: prefer form field, fall back to query param, then env var
+    # projectId: prefer form field, fall back to captured target, query param, env var
     project_id = (
         form.get("target_project")
         or form.get("project_id")
+        or _get_target_project_id()
         or req.query_params.get("projectId")
         or os.environ.get("DOMINO_PROJECT_ID")
         or None
@@ -1159,10 +1195,13 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     # Ensure DB is initialised
     domino_job_store.init_db()
 
+    # Resolve target project name so specs land in the right dataset
+    target_project_name = _resolve_target_project_name(req.project_id)
+
     # Resolve spec path
     spec_path: Optional[str] = None
     if req.spec_content and req.spec_filename:
-        saved = spec_store.save_spec(req.spec_filename, req.spec_content)
+        saved = spec_store.save_spec(req.spec_filename, req.spec_content, project_name=target_project_name)
         spec_path = str(saved)
     elif req.spec_path:
         # Resolve dataset:// references to actual mount paths
@@ -3150,12 +3189,12 @@ def index(req: Request):
         scheme = req.headers.get("x-forwarded-proto", "https")
         domino_client.set_ui_host(host, scheme)
 
-    # Capture projectId from query string (fallback for non-proxied access;
-    # Domino's reverse proxy strips query params from the iframe URL).
+    # Capture the target project from ?projectId on first load.
     project_id = req.query_params.get("projectId") or None
+    _set_target_project(project_id)
+    project_id = _get_target_project_id() or project_id
 
-    # If a cross-project ID was given, resolve its metadata eagerly so the
-    # cache is warm for later job submissions and hardware-tier lookups.
+    # Resolve display name from the (now-cached) target project.
     project_display_name: Optional[str] = None
     if project_id and _DOMINO_AVAILABLE:
         info = domino_client.resolve_project(project_id)
@@ -3949,12 +3988,26 @@ def api_detect_language(req: Request):
 # ---------------------------------------------------------------------------
 
 def _resolve_request_project_id(req: Request) -> Optional[str]:
-    """Resolve project ID from query params or env."""
+    """Extract project ID from request query params, captured state, or env."""
     for key in ("projectId", "project_id"):
         pid = req.query_params.get(key)
         if pid:
             return pid
+    if _TARGET_PROJECT_ID:
+        return _TARGET_PROJECT_ID
     return os.environ.get("DOMINO_PROJECT_ID", "") or None
+
+
+def _resolve_target_project_name(project_id: Optional[str] = None) -> Optional[str]:
+    """Resolve a Domino project ID to its project name."""
+    if not project_id:
+        return _TARGET_PROJECT_NAME
+    if project_id == _TARGET_PROJECT_ID and _TARGET_PROJECT_NAME:
+        return _TARGET_PROJECT_NAME
+    if not _DOMINO_AVAILABLE:
+        return None
+    info = domino_client.resolve_project(project_id)
+    return info.name if info else None
 
 
 @rt("/api/datasets")
@@ -4232,19 +4285,21 @@ async def save_spec_route(req: Request):
     """Auto-save an uploaded spec file and return the saved path."""
     if not _DOMINO_AVAILABLE:
         return Response("Domino not available", status_code=400)
+    project_name = _resolve_target_project_name(_resolve_request_project_id(req))
     form = await req.form()
     filename = form.get("spec_filename", "spec.yaml")
     content = form.get("spec_content", "")
-    saved = spec_store.save_spec(filename, content)
+    saved = spec_store.save_spec(filename, content, project_name=project_name)
     return Response(str(saved), media_type="text/plain")
 
 
 @rt("/spec-list")
-def spec_list():
+def spec_list(req: Request):
     """Return HTML list of saved spec files."""
     if not _DOMINO_AVAILABLE:
         return Div(P("Domino not available.", cls="history-empty"))
-    specs = spec_store.list_specs()
+    project_name = _resolve_target_project_name(_resolve_request_project_id(req))
+    specs = spec_store.list_specs(project_name=project_name)
     if not specs:
         return Div(P("No saved spec files.", cls="history-empty"), id="spec-list-content")
     items = []
@@ -4269,17 +4324,19 @@ def spec_list():
 
 @rt("/delete-spec")
 async def delete_spec_route(req: Request):
+    project_name = _resolve_target_project_name(_resolve_request_project_id(req))
     form = await req.form()
     filename = form.get("filename", "")
     if filename and _DOMINO_AVAILABLE:
-        spec_store.delete_spec(filename)
-    return spec_list()
+        spec_store.delete_spec(filename, project_name=project_name)
+    return spec_list(req)
 
 
 @rt("/cleanup-specs")
-def cleanup_specs():
+def cleanup_specs(req: Request):
     if _DOMINO_AVAILABLE:
-        spec_store.delete_all_specs()
+        project_name = _resolve_target_project_name(_resolve_request_project_id(req))
+        spec_store.delete_all_specs(project_name=project_name)
     return Response("OK", media_type="text/plain")
 
 

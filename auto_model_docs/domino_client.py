@@ -52,39 +52,25 @@ _project_cache: dict[str, ProjectInfo] = {}
 # ---------------------------------------------------------------------------
 
 def _resolve_api_host() -> str:
-    """Return the Domino API base URL (proxy-preferred).
+    """Return the Domino API host (DOMINO_API_HOST).
 
-    Priority: DOMINO_API_PROXY > DOMINO_API_HOST.
-    The proxy (localhost:8899) is scoped to the current project.
-    """
-    host = os.environ.get("DOMINO_API_PROXY") or os.environ.get("DOMINO_API_HOST") or ""
-    return host.rstrip("/")
-
-
-def _resolve_nucleus_host() -> str:
-    """Return the full Domino API host (not the sidecar proxy).
-
-    Use this for cross-project calls that the local proxy doesn't route.
+    Always uses the nucleus host directly — extended identity propagation
+    provides the viewer's JWT for auth, so the sidecar proxy is not needed.
     """
     host = os.environ.get("DOMINO_API_HOST") or ""
     return host.rstrip("/")
 
 
 def _get_auth_headers() -> dict[str, str]:
-    """Build Domino auth headers.
+    """Build Domino auth headers using the forwarded viewer JWT.
 
-    Priority:
-    1. Ephemeral token from Domino sidecar (localhost:8899)
-    2. DOMINO_USER_API_KEY / DOMINO_API_KEY env var
+    Extended identity propagation is always on; falls back to API key
+    for local development.
     """
-    # Try ephemeral token first (available in Domino Apps / Runs)
-    try:
-        import httpx
-        resp = httpx.get("http://localhost:8899/access-token", timeout=3.0)
-        if resp.status_code == 200 and resp.text.strip():
-            return {"Authorization": f"Bearer {resp.text.strip()}"}
-    except Exception:
-        pass
+    from auth_context import get_request_auth_header
+    forwarded = get_request_auth_header()
+    if forwarded:
+        return {"Authorization": forwarded}
 
     api_key = os.environ.get("DOMINO_USER_API_KEY") or os.environ.get("DOMINO_API_KEY") or ""
     if api_key:
@@ -104,21 +90,16 @@ def _domino_request(
     json: Any = None,
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRIES,
-    cross_project: bool = False,
 ) -> Any:
-    """Send a synchronous HTTP request to the Domino API with retry logic.
-
-    When *cross_project* is True, bypasses the sidecar proxy and uses
-    DOMINO_API_HOST directly (required for cross-project lookups).
-    """
+    """Send a synchronous HTTP request to the Domino API with retry logic."""
     import httpx
 
-    base_url = _resolve_nucleus_host() if cross_project else _resolve_api_host()
+    base_url = _resolve_api_host()
     if not base_url:
-        raise RuntimeError("Domino API host is not configured. Set DOMINO_API_PROXY or DOMINO_API_HOST.")
+        raise RuntimeError("Domino API host is not configured. Set DOMINO_API_HOST.")
 
     url = f"{base_url}{path}"
-    logger.debug("Domino API %s %s (cross_project=%s, base=%s)", method, url, cross_project, base_url)
+    logger.debug("Domino API %s %s", method, url)
     last_exc: Exception | None = None
 
     for attempt in range(max_retries + 1):
@@ -199,7 +180,7 @@ def resolve_project(project_id: str) -> Optional[ProjectInfo]:
             f"/api/projects/v1/projects/{project_id}",
         ):
             try:
-                data = _domino_request("GET", path, cross_project=True)
+                data = _domino_request("GET", path)
                 break
             except Exception as path_exc:
                 logger.debug("Project resolve path %s failed: %s", path, path_exc)
@@ -311,14 +292,8 @@ def list_hardware_tiers(project_id: Optional[str] = None) -> list[dict[str, Any]
         logger.warning("No project ID available to list hardware tiers")
         return []
 
-    # Use the full API host when querying a different project
-    is_cross = bool(project_id) and project_id != _env_project_id()
-
     try:
-        # The proxy supports the project-scoped /v4/ path; the documented
-        # global endpoint requires nucleus auth, so use /v4/ for both cases
-        # and route cross-project calls through DOMINO_API_HOST.
-        data = _domino_request("GET", f"/v4/projects/{pid}/hardwareTiers", cross_project=is_cross)
+        data = _domino_request("GET", f"/v4/projects/{pid}/hardwareTiers")
         tiers = data if isinstance(data, list) else data.get("hardwareTiers", data.get("data", []))
         results = []
         for t in tiers:
@@ -379,21 +354,16 @@ def submit_job(
     if branch:
         payload["mainRepoGitRef"] = {"type": "branches", "value": branch}
 
-    is_cross = bool(project_id) and project_id != _env_project_id()
-
-    logger.info(
-        "submit_job: project_id=%s, pid=%s, is_cross=%s",
-        project_id, pid, is_cross,
-    )
+    logger.info("submit_job: project_id=%s, pid=%s", project_id, pid)
 
     try:
-        data = _domino_request("POST", "/v4/jobs/start", json=payload, cross_project=is_cross)
+        data = _domino_request("POST", "/v4/jobs/start", json=payload)
     except Exception:
         # Retry without commit pin if Domino can't resolve the ref
         if branch and payload.get("mainRepoGitRef"):
             logger.warning("Retrying job start without mainRepoGitRef")
             payload.pop("mainRepoGitRef", None)
-            data = _domino_request("POST", "/v4/jobs/start", json=payload, cross_project=is_cross)
+            data = _domino_request("POST", "/v4/jobs/start", json=payload)
         else:
             raise
 
