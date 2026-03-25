@@ -361,7 +361,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
                 cls="terminal-header",
             ),
             Div(
-                "Submit in Domino Job mode to offload compute to a dedicated job container.",
+                "Click Generate Documentation to start.",
                 cls="terminal terminal-idle",
             ),
             cls="terminal-card",
