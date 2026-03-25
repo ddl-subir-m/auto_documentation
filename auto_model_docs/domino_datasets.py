@@ -145,6 +145,11 @@ def _api_request(
                     )
                     time.sleep(backoff)
                     continue
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "Datasets API %s %s → %s body=%s",
+                        method, path, resp.status_code, resp.text[:500],
+                    )
                 resp.raise_for_status()
                 return resp
         except httpx.HTTPStatusError:
