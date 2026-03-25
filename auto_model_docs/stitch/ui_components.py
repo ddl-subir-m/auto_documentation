@@ -497,7 +497,7 @@ def _render_job_history_table(username: str) -> FT:
         ),
         Div(
             A(
-                "Clear completed",
+                "Clear history",
                 hx_post="clear-job-history",
                 hx_target="#job-history-content",
                 hx_swap="innerHTML",
