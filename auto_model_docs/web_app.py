@@ -3288,6 +3288,8 @@ def index(req: Request):
                                 id="spec-selected-indicator",
                                 style="display: none; padding: 8px 0; font-size: 0.875rem;",
                             ),
+                            # OR divider
+                            Div("(OR)", style="text-align: center; color: #7F8385; font-size: 0.8rem; padding: 4px 0;"),
                             # Upload from machine + download template
                             Div(
                                 Label(
