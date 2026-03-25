@@ -626,7 +626,6 @@ def index(req: Request):
                 cls="advanced-content",
             ),
             cls="advanced-section",
-            open=True,
         )
     )
 
