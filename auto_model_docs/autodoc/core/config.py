@@ -37,21 +37,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AUTODOC_LLM_MODEL", "LLM_MODEL"),
     )
     llm_max_retries: int = Field(
-        default=3,
+        default=5,
         ge=0,
         le=10,
         description="Max retries for LLM requests",
         validation_alias=AliasChoices("AUTODOC_LLM_MAX_RETRIES", "LLM_MAX_RETRIES"),
     )
     llm_initial_backoff: float = Field(
-        default=3.0,
+        default=10.0,
         ge=0.1,
         le=60.0,
         description="Initial backoff delay in seconds",
         validation_alias=AliasChoices("AUTODOC_LLM_INITIAL_BACKOFF", "LLM_INITIAL_BACKOFF"),
     )
     llm_max_backoff: float = Field(
-        default=30.0,
+        default=120.0,
         ge=1.0,
         le=300.0,
         description="Maximum backoff delay in seconds",

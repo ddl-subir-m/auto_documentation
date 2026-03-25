@@ -79,7 +79,9 @@ class LLMClient:
             if not key:
                 raise LLMError("OPENAI_API_KEY not set")
             url = base_url or os.environ.get("OPENAI_BASE_URL")
-            self.client = AsyncOpenAI(api_key=key, base_url=url)
+            # Disable OpenAI SDK's own retries — we handle retries with
+            # longer backoffs suited to providers like Moonshot.
+            self.client = AsyncOpenAI(api_key=key, base_url=url, max_retries=0)
 
         else:
             raise LLMError(f"Unknown provider: {provider}")
