@@ -163,6 +163,14 @@ SMART_POLLING_JS = r"""
 
 
 MAIN_DOM_JS = r"""
+    // ── Hardware tier card selection ──
+    function selectHwTier(card, tierId) {
+        var grid = card.closest('.hw-tier-grid');
+        grid.querySelectorAll('.hw-tier-card').forEach(function(c) { c.classList.remove('selected'); });
+        card.classList.add('selected');
+        document.getElementById('field-hardware_tier').value = tierId;
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
 
         // ── Auto-fill projectId from URL or postMessage ──

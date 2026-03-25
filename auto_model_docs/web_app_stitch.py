@@ -125,6 +125,8 @@ def index(req: Request):
     default_mode = inferred_mode
 
     # Pre-fetch branches and hardware tiers for server-side rendering
+    tier_data = []
+    default_tier = ""
     if _DOMINO_AVAILABLE:
         try:
             _branches_raw = domino_client.list_branches()
@@ -156,7 +158,7 @@ def index(req: Request):
     left_col_children = [
         Div(
             H2("What to document"),
-            Span("STEP 01", cls="step-badge"),
+            Span("Section 01", cls="step-badge"),
             cls="col-header",
         ),
     ]
@@ -194,7 +196,10 @@ def index(req: Request):
                     style="display: none; padding: 8px 0; font-size: 0.8125rem;",
                 ),
                 # OR divider
-                Div("(OR)", style="text-align: center; color: var(--outline); font-size: 0.8rem; padding: 4px 0;"),
+                Div(
+                    Span("OR", cls="or-divider-text"),
+                    cls="or-divider",
+                ),
                 Div(
                     Label(
                         "Upload from my machine",
@@ -308,7 +313,7 @@ def index(req: Request):
     mid_col_children = [
         Div(
             H2("Configuration & Run"),
-            Span("STEP 02", cls="step-badge"),
+            Span("Section 02", cls="step-badge"),
             cls="col-header",
         ),
     ]
@@ -417,19 +422,39 @@ def index(req: Request):
                 cls="field domino-fields",
             )
         )
-        # Hardware tier
+        # Hardware tier (card grid)
+        tier_cards = []
+        for t in tier_data if tier_data else []:
+            tid = t.get("id", "")
+            tname = t.get("name") or tid
+            is_default = t.get("isDefault", False) or tid == default_tier
+            tier_cards.append(
+                Div(
+                    Div(tname, cls="hw-tier-card-name"),
+                    cls=f"hw-tier-card{' selected' if is_default else ''}",
+                    data_tier_id=tid,
+                    onclick=f"selectHwTier(this, '{tid}')",
+                )
+            )
+        if not tier_cards:
+            tier_cards.append(
+                Div(
+                    Div("(default)", cls="hw-tier-card-name"),
+                    cls="hw-tier-card selected",
+                    data_tier_id="",
+                    onclick="selectHwTier(this, '')",
+                )
+            )
         run_card_children.append(
             Div(
                 Div(
-                    Label("Hardware tier", for_="field-hardware_tier"),
+                    Label("Hardware tier"),
                     Span("\u24d8", cls="info-tooltip", data_tooltip="Compute tier for the Domino job."),
                     cls="label-row",
                 ),
-                Select(
-                    *tier_options,
-                    name="hardware_tier",
-                    id="field-hardware_tier",
-                ),
+                Input(type="hidden", name="hardware_tier", id="field-hardware_tier",
+                      value=default_tier or ""),
+                Div(*tier_cards, cls="hw-tier-grid"),
                 cls="field domino-fields",
             )
         )
@@ -611,7 +636,7 @@ def index(req: Request):
     right_col_children = [
         Div(
             H2("Output & History"),
-            Span("STEP 03", cls="step-badge"),
+            Span("Section 03", cls="step-badge"),
             cls="col-header",
         ),
     ]
@@ -650,18 +675,14 @@ def index(req: Request):
         # Header
         Div(
             Div(
-                H2("Auto Model Docs Studio", cls="domino-header-title"),
+                H1("Auto Model Docs Studio", cls="domino-header-title"),
+                P("Enterprise Architectural Documentation Suite", cls="domino-header-subtitle"),
                 cls="domino-header-inner",
             ),
             cls="domino-header",
         ),
         # Page content
         Div(
-            # Tagline
-            Div(
-                P("Generate model documentation with a single, guided workflow.", cls="hero-tagline"),
-                cls="hero",
-            ),
             # Environment warnings
             *_render_warnings_banner(_STARTUP_WARNINGS),
             # Form wrapping 3 columns

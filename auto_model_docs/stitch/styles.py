@@ -96,27 +96,30 @@ a:hover { color: var(--primary-container); }
 
 /* ── Header ───────────────────────────────────────────────────────── */
 .domino-header {
-    background: var(--on-surface);
+    background: var(--surface);
     width: 100%;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    padding: 0 2rem;
+    padding: 2rem 3rem 0.5rem;
 }
 .domino-header-inner {
     max-width: 1440px;
     margin: 0 auto;
     width: 100%;
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    flex-direction: column;
+    gap: 0.35rem;
 }
 .domino-header-title {
-    color: var(--on-primary);
+    color: var(--on-surface);
     font-family: var(--font-headline);
-    font-size: 1rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+.domino-header-subtitle {
+    font-family: var(--font-body);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--outline);
 }
 .domino-header-version {
     font-family: var(--font-body);
@@ -134,9 +137,9 @@ a:hover { color: var(--primary-container); }
 .page {
     max-width: 1440px;
     margin: 0 auto;
-    padding: 1.5rem 2rem 6rem;
+    padding: 0.5rem 3rem 6rem;
     width: 100%;
-    min-height: calc(100vh - 48px);
+    min-height: calc(100vh - 100px);
 }
 .hero {
     padding: 0.25rem 0 1rem 0;
@@ -198,8 +201,9 @@ a:hover { color: var(--primary-container); }
 .col-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 0.5rem;
     margin-bottom: 0.75rem;
+    padding: 0 0.125rem;
 }
 .col-header h2 {
     font-family: var(--font-headline);
@@ -210,27 +214,21 @@ a:hover { color: var(--primary-container); }
 }
 .step-badge {
     font-family: var(--font-body);
-    font-size: 10px;
+    font-size: 0.6875rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.15em;
     color: var(--outline);
-    background: var(--surface-container);
-    padding: 3px 10px;
-    border-radius: 2px;
+    order: -1;
 }
 
-/* ── Cards (No-Line Rule: no 1px borders for sectioning) ──────────── */
+/* ── Cards (No-Line Rule: tonal layering, not borders) ───────────── */
 .bp-card {
     background: var(--surface-container-lowest);
-    border-radius: 4px;
+    border-radius: 12px;
     padding: 1.5rem;
     box-shadow: var(--shadow-sm);
-    border: 1px solid var(--ghost-border);
     transition: box-shadow 0.2s ease;
-}
-.bp-card:hover {
-    box-shadow: var(--shadow-md);
 }
 
 /* ── Form Fields ──────────────────────────────────────────────────── */
@@ -256,9 +254,9 @@ a:hover { color: var(--primary-container); }
 .field input[type="password"],
 .field select {
     background: var(--surface-container-low);
-    border: 1px solid var(--ghost-border);
-    border-radius: 2px;
-    padding: 0.5rem 0.75rem;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0.625rem 0.875rem;
     color: var(--on-surface);
     font-family: var(--font-body);
     font-size: 0.8125rem;
@@ -289,10 +287,10 @@ a:hover { color: var(--primary-container); }
 /* Code root combo */
 .code-root-wrap {
     display: flex;
-    border: 1px solid var(--ghost-border);
-    border-radius: 2px;
+    border: 1px solid transparent;
+    border-radius: 8px;
     overflow: hidden;
-    background: var(--surface-container-lowest);
+    background: var(--surface-container-low);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .code-root-wrap:focus-within {
@@ -300,12 +298,12 @@ a:hover { color: var(--primary-container); }
     box-shadow: 0 0 0 2px rgba(67, 67, 213, 0.12);
 }
 .code-root-prefix {
-    padding: 0.5rem 0.75rem;
+    padding: 0.625rem 0.875rem;
     background: var(--surface-container);
     border: none;
     border-right: 1px solid var(--ghost-border);
     font-size: 0.8125rem;
-    color: var(--on-surface-variant);
+    color: var(--primary);
     font-family: ui-monospace, monospace;
     white-space: nowrap;
     user-select: none;
@@ -313,7 +311,7 @@ a:hover { color: var(--primary-container); }
 .code-root-suffix {
     flex: 1;
     border: none;
-    padding: 0.5rem 0.75rem;
+    padding: 0.625rem 0.875rem;
     font-size: 0.8125rem;
     color: var(--on-surface);
     background: transparent;
@@ -385,8 +383,8 @@ a:hover { color: var(--primary-container); }
 }
 .upload-btn {
     background: var(--surface-container);
-    border: 1px solid var(--ghost-border);
-    border-radius: 2px;
+    border: 1px solid transparent;
+    border-radius: 8px;
     padding: 0 0.875rem;
     color: var(--on-surface-variant);
     font-size: 0.75rem;
@@ -416,8 +414,8 @@ a:hover { color: var(--primary-container); }
 /* ── Drag-drop zone ───────────────────────────────────────────────── */
 .drop-zone {
     position: relative;
-    border: 2px dashed var(--outline-variant);
-    border-radius: 4px;
+    border: 2px dashed rgba(199, 196, 215, 0.5);
+    border-radius: 8px;
     padding: 2rem 1.5rem;
     display: flex;
     flex-direction: column;
@@ -426,10 +424,11 @@ a:hover { color: var(--primary-container); }
     text-align: center;
     cursor: pointer;
     transition: border-color 0.2s ease, background 0.2s ease;
-    background: var(--surface-container-low);
+    background: transparent;
+    min-height: 160px;
 }
 .drop-zone:hover {
-    border-color: rgba(67, 67, 213, 0.4);
+    border-color: rgba(67, 67, 213, 0.5);
     background: rgba(67, 67, 213, 0.03);
 }
 .drop-zone-icon {
@@ -470,7 +469,7 @@ a:hover { color: var(--primary-container); }
 .spec-breadcrumb-current { color: var(--on-surface); font-weight: 600; }
 .spec-file-list {
     border: 1px solid var(--ghost-border);
-    border-radius: 4px;
+    border-radius: 8px;
     max-height: 220px;
     overflow-y: auto;
     background: var(--surface-container-lowest);
@@ -590,7 +589,7 @@ a:hover { color: var(--primary-container); }
 .advanced-section {
     margin-top: 0.75rem;
     background: var(--surface-container-low);
-    border-radius: 4px;
+    border-radius: 8px;
     overflow: hidden;
 }
 .advanced-section summary {
@@ -730,34 +729,35 @@ a:hover { color: var(--primary-container); }
 button.primary {
     background: linear-gradient(135deg, var(--primary) 0%, var(--primary-container) 100%);
     border: none;
-    border-radius: 4px;
-    padding: 0.625rem 1.5rem;
+    border-radius: 8px;
+    padding: 0.875rem 1.5rem;
     color: var(--on-primary);
-    font-family: var(--font-body);
-    font-size: 10px;
+    font-family: var(--font-headline);
+    font-size: 0.875rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
     cursor: pointer;
     transition: all 0.2s ease;
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 8px 24px rgba(67, 67, 213, 0.25);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
 }
 button.primary:hover {
-    box-shadow: var(--shadow-lg);
-    transform: translateY(-1px);
+    box-shadow: 0 12px 32px rgba(67, 67, 213, 0.3);
+    transform: scale(0.98);
 }
 button.primary:active {
-    transform: translateY(0);
-    box-shadow: var(--shadow-sm);
+    transform: scale(0.96);
+    box-shadow: 0 4px 16px rgba(67, 67, 213, 0.2);
 }
 
 /* ── Terminal Card ────────────────────────────────────────────────── */
 .terminal-card {
     background: var(--surface-container-lowest);
-    border-radius: 4px;
+    border-radius: 12px;
     padding: 1rem 1.25rem;
     box-shadow: var(--shadow-sm);
-    border: 1px solid var(--ghost-border);
 }
 .terminal-header {
     display: flex;
@@ -850,7 +850,7 @@ button.primary:active {
     margin-bottom: 0.75rem;
     padding: 0.625rem;
     background: var(--surface-container-low);
-    border-radius: 4px;
+    border-radius: 8px;
 }
 .phase-item {
     flex: 1;
@@ -922,27 +922,29 @@ button.primary:active {
 
 /* ── Dark Terminal Console ────────────────────────────────────────── */
 .terminal {
-    background: #14141f;
-    border-radius: 4px;
+    background: #0f172a;
+    border-radius: 0 0 12px 12px;
     padding: 1rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 11px;
     line-height: 1.65;
-    color: #b8b8d0;
+    color: #cbd5e1;
     min-height: 0;
-    max-height: 320px;
+    max-height: 360px;
     overflow-y: auto;
     white-space: pre-wrap;
     margin-top: 0.5rem;
+    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.3);
 }
 .terminal-idle {
     min-height: 0;
-    color: #5a5a7a;
+    color: #475569;
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: var(--font-body);
     font-size: 0.8125rem;
+    border-radius: 12px;
 }
 .terminal-line-active {
     color: #8888ff;
@@ -1017,9 +1019,8 @@ button.primary:active {
     flex: 1;
     min-height: 0;
     background: var(--surface-container-lowest);
-    border-radius: 4px;
+    border-radius: 12px;
     box-shadow: var(--shadow-sm);
-    border: 1px solid var(--ghost-border);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -1239,11 +1240,69 @@ button.primary:active {
     color: var(--outline);
 }
 
+/* ── OR Divider ──────────────────────────────────────────────────── */
+.or-divider {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 0;
+}
+.or-divider::before,
+.or-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid rgba(199, 196, 215, 0.3);
+}
+.or-divider-text {
+    font-family: var(--font-body);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--outline);
+}
+
+/* ── Hardware Tier Card Grid ─────────────────────────────────────── */
+.hw-tier-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.625rem;
+}
+.hw-tier-card {
+    padding: 0.75rem;
+    border: 1px solid rgba(199, 196, 215, 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    background: transparent;
+}
+.hw-tier-card:hover {
+    background: var(--surface-container-low);
+}
+.hw-tier-card.selected {
+    border-color: rgba(67, 67, 213, 0.3);
+    background: rgba(67, 67, 213, 0.04);
+}
+.hw-tier-card-name {
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--on-surface);
+}
+.hw-tier-card.selected .hw-tier-card-name {
+    color: var(--primary);
+}
+.hw-tier-card-detail {
+    font-size: 10px;
+    color: var(--on-surface-variant);
+    margin-top: 0.125rem;
+}
+
 /* ── Insight card ─────────────────────────────────────────────────── */
 .insight-card {
     background: var(--surface-container-high);
     border-left: 3px solid var(--primary);
-    border-radius: 2px;
+    border-radius: 8px;
     padding: 1rem 1.25rem;
     margin-top: 1rem;
 }
