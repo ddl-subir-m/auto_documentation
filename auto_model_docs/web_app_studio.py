@@ -80,18 +80,51 @@ def index(req: Request):
         scheme = req.headers.get("x-forwarded-proto", "https")
         domino_client.set_ui_host(host, scheme)
 
-    # Capture the target project from the ?projectId query param.  This is
-    # called on every page load but only takes effect the first time; all
-    # subsequent operations (specs, jobs, output, history) are scoped to
-    # this target project.
+    # Capture the target project from the ?projectId query param.
     project_id = req.query_params.get("projectId") or None
     _set_target_project(project_id)
-    # Use the captured target for the rest of this request
     project_id = _get_target_project_id() or project_id
+
+    # Guard: projectId is required — show an error page if missing.
+    if not project_id:
+        return (
+            Title("Auto Model Docs Studio"),
+            Div(
+                Div(
+                    H1("Auto Model Docs Studio", cls="domino-header-title"),
+                    P("Enterprise Architectural Documentation Suite", cls="domino-header-subtitle"),
+                    cls="domino-header-inner",
+                ),
+                cls="domino-header",
+            ),
+            Div(
+                Div(
+                    Div(
+                        H2("Project ID required"),
+                        P(
+                            "This app must be launched with a ",
+                            Code("projectId"),
+                            " query parameter so it knows which project to run jobs in, "
+                            "store spec files to, and write output to.",
+                        ),
+                        P(
+                            "If you're running this as a Domino App, make sure the app is "
+                            "configured to pass the project ID to the iframe URL.",
+                            style="color: var(--outline); margin-top: 0.5rem;",
+                        ),
+                        style="background: rgba(186,26,26,0.06); border-left: 3px solid #ba1a1a; "
+                              "border-radius: 2px; padding: 1.5rem; max-width: 640px; "
+                              "font-family: Inter, sans-serif;",
+                    ),
+                    style="display: flex; justify-content: center; padding-top: 4rem;",
+                ),
+                cls="page",
+            ),
+        )
 
     # Resolve display name from the (now-cached) target project.
     project_display_name: Optional[str] = None
-    if project_id and _DOMINO_AVAILABLE:
+    if _DOMINO_AVAILABLE:
         info = domino_client.resolve_project(project_id)
         if info:
             project_display_name = f"{info.owner_username}/{info.name}"

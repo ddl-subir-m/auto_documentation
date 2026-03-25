@@ -30,6 +30,14 @@ def register_job_routes(rt):
 
     async def run(req: Request):
         job_request = await _parse_request(req)
+        if not job_request.project_id:
+            err_record = DominoJobRecord(
+                id=str(uuid4()),
+                username=_get_username(),
+                status="failed",
+                domino_status="No target project ID. Reload the app with ?projectId= in the URL.",
+            )
+            return _render_domino_status(err_record)
         username = _get_username()
         try:
             record = await _submit_domino_job(job_request, username)
