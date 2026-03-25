@@ -409,13 +409,15 @@ async def upload_file(
             "resumableRelativePath": file_path,
             "checksum": checksum,
         }
+        # Csrf-Token: nocheck bypasses Play framework CSRF protection on multipart POSTs
+        chunk_headers = {**headers, "Csrf-Token": "nocheck"}
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.request(
                 "POST",
                 f"{base_url}/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
                 params=chunk_params,
                 files={file_path: (file_path, io.BytesIO(content), "application/octet-stream")},
-                headers=headers,
+                headers=chunk_headers,
             )
             if resp.status_code >= 400:
                 logger.warning("Upload chunk failed: %s body=%s", resp.status_code, resp.text[:500])
