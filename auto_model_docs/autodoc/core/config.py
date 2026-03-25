@@ -108,6 +108,50 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AUTODOC_MAX_FILE_SIZE", "MAX_FILE_SIZE"),
     )
 
+    # Two-Pass Scanning Configuration
+    exclude_patterns: list = Field(
+        default=["tests/", "test_", "__pycache__/", ".git/", "node_modules/",
+                 "vendor/", "vendored/", ".tox/", ".venv/", "venv/",
+                 ".egg-info/", "dist/", "build/", ".mypy_cache/"],
+        description="Path patterns to exclude from scanning",
+        validation_alias=AliasChoices("AUTODOC_EXCLUDE_PATTERNS", "EXCLUDE_PATTERNS"),
+    )
+    max_selected_files: int = Field(
+        default=15,
+        ge=1,
+        le=50,
+        description="Maximum files selected for deep analysis after ranking",
+        validation_alias=AliasChoices("AUTODOC_MAX_SELECTED_FILES", "MAX_SELECTED_FILES"),
+    )
+    batch_size: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description="Files per deep analysis batch",
+        validation_alias=AliasChoices("AUTODOC_BATCH_SIZE", "BATCH_SIZE"),
+    )
+    analysis_timeout: float = Field(
+        default=90.0,
+        ge=10.0,
+        le=300.0,
+        description="Per-batch timeout in seconds for scanning LLM calls",
+        validation_alias=AliasChoices("AUTODOC_ANALYSIS_TIMEOUT", "ANALYSIS_TIMEOUT"),
+    )
+    scan_retries: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Retries per scanning batch (fail fast)",
+        validation_alias=AliasChoices("AUTODOC_SCAN_RETRIES", "SCAN_RETRIES"),
+    )
+    scan_workers: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description="Parallel batch workers for scanning (separate from generation workers)",
+        validation_alias=AliasChoices("AUTODOC_SCAN_WORKERS", "SCAN_WORKERS"),
+    )
+
     # Generation Configuration
     parallel_workers: int = Field(
         default=1,

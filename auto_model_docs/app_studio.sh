@@ -19,4 +19,4 @@ fi
 
 # Run the FastHTML web app
 cd /mnt/code/auto_model_docs
-python web_app_stitch.py
+python web_app_studio.py

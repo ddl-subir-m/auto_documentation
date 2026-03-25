@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-STITCH_CSS = """
+STUDIO_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
@@ -177,22 +177,22 @@ a:hover { color: var(--primary-container); }
 }
 
 /* ── 3-Column Grid ────────────────────────────────────────────────── */
-.stitch-grid {
+.studio-grid {
     display: grid;
     grid-template-columns: 3fr 5fr 4fr;
     gap: 1.5rem;
     align-items: start;
 }
 @media (max-width: 1200px) {
-    .stitch-grid {
+    .studio-grid {
         grid-template-columns: 1fr 1fr;
     }
-    .stitch-grid .stitch-col-right {
+    .studio-grid .studio-col-right {
         grid-column: 1 / -1;
     }
 }
 @media (max-width: 800px) {
-    .stitch-grid {
+    .studio-grid {
         grid-template-columns: 1fr;
     }
 }

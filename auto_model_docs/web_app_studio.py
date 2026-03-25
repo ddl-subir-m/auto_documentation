@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FastHTML UI for Auto Model Documentation — Blueprint Enterprise redesign.
 
-This is the slim orchestrator that imports from the stitch package and
+This is the slim orchestrator that imports from the studio package and
 assembles the application.
 """
 
@@ -16,7 +16,7 @@ from starlette.requests import Request
 
 from autodoc.core.config import Settings
 
-from stitch.state import (
+from studio.state import (
     JobState,
     DominoJobRecord,
     JOB_STORE,
@@ -33,9 +33,9 @@ from stitch.state import (
     domino_job_store,
     logger,
 )
-from stitch.styles import STITCH_CSS
-from stitch.scripts import SMART_POLLING_JS, MAIN_DOM_JS, get_output_defaults_script
-from stitch.ui_components import (
+from studio.styles import STUDIO_CSS
+from studio.scripts import SMART_POLLING_JS, MAIN_DOM_JS, get_output_defaults_script
+from studio.ui_components import (
     _render_status,
     _render_domino_status,
     _render_warnings_banner,
@@ -43,13 +43,13 @@ from stitch.ui_components import (
     _validate_environment,
     _db_record_to_dataclass,
 )
-from stitch.job_engine import (
+from studio.job_engine import (
     _poll_domino_jobs,
     _reconcile_stale_jobs,
 )
-from stitch.routes_api import register_api_routes
-from stitch.routes_spec import register_spec_routes
-from stitch.routes_job import register_job_routes
+from studio.routes_api import register_api_routes
+from studio.routes_spec import register_spec_routes
+from studio.routes_job import register_job_routes
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ app, rt = fast_app(
         Script(src="https://unpkg.com/htmx.org@1.9.10"),
         # Smart polling / HTMX JS
         Script(SMART_POLLING_JS),
-        Style(STITCH_CSS),
+        Style(STUDIO_CSS),
         Script(get_output_defaults_script()),
         Script(MAIN_DOM_JS),
     )
@@ -682,12 +682,12 @@ def index(req: Request):
             Form(
                 Div(
                     # Left column
-                    Div(*left_col_children, cls="stitch-col-left"),
+                    Div(*left_col_children, cls="studio-col-left"),
                     # Middle column
-                    Div(*mid_col_children, cls="stitch-col-mid"),
+                    Div(*mid_col_children, cls="studio-col-mid"),
                     # Right column
-                    Div(*right_col_children, cls="stitch-col-right"),
-                    cls="stitch-grid",
+                    Div(*right_col_children, cls="studio-col-right"),
+                    cls="studio-grid",
                 ),
                 id="main-form",
                 data_execution_mode=inferred_mode,
@@ -749,7 +749,7 @@ async def add_security_headers(request, call_next):
 
 @app.middleware("http")
 async def capture_auth_context(request, call_next):
-    from stitch.state import auth_context as _auth_context, _DOMINO_AVAILABLE as _da
+    from studio.state import auth_context as _auth_context, _DOMINO_AVAILABLE as _da
     if _da:
         forwarded = request.headers.get("authorization")
         _auth_context.set_request_auth_header(forwarded)
@@ -767,7 +767,7 @@ async def capture_auth_context(request, call_next):
 
 @app.on_event("startup")
 async def _on_startup():
-    import stitch.state as _state
+    import studio.state as _state
     _state._STARTUP_WARNINGS = _validate_environment()
     for w in _state._STARTUP_WARNINGS:
         logger.warning(f"Startup: [{w.level}] {w.message} {w.action}")
@@ -779,7 +779,7 @@ async def _on_startup():
 
 @app.on_event("shutdown")
 async def _on_shutdown():
-    import stitch.state as _state
+    import studio.state as _state
     if _state._POLL_TASK:
         _state._POLL_TASK.cancel()
 

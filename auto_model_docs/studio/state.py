@@ -1,4 +1,4 @@
-"""Shared mutable state, core types, and helpers used across all stitch modules."""
+"""Shared mutable state, core types, and helpers used across all studio modules."""
 
 from __future__ import annotations
 
@@ -36,9 +36,9 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 def _import_sibling(name: str):
-    """Import a .py file from the auto_model_docs directory (parent of stitch/)."""
+    """Import a .py file from the auto_model_docs directory (parent of studio/)."""
     import sys
-    # stitch/state.py -> stitch/ -> auto_model_docs/
+    # studio/state.py -> studio/ -> auto_model_docs/
     path = Path(__file__).resolve().parent.parent / f"{name}.py"
     if not path.exists():
         raise FileNotFoundError(f"Sibling module not found: {path}")
@@ -246,7 +246,7 @@ def _get_default_code_root() -> Path:
 
 
 def _get_default_spec_path() -> Path:
-    # spec is in auto_model_docs/ (parent of stitch/)
+    # spec is in auto_model_docs/ (parent of studio/)
     return Path(__file__).resolve().parent.parent / "doc_spec.yaml"
 
 

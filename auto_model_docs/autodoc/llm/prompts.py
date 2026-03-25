@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from autodoc.core.models import LanguageProfile
+    from autodoc.scanning.file_card import FileCard
 
 
 # =============================================================================
@@ -52,6 +53,76 @@ SYSTEM_LIST_GENERATOR = (
     "Include citation markers [@citation_id] when list items reference specific data sources."
 )
 
+SYSTEM_FILE_RANKER = (
+    "You are an expert at analyzing ML codebases. "
+    "Classify files by their role in the ML pipeline and rank them by documentation importance. "
+    "Only classify based on the evidence in the file cards provided."
+)
+
+
+# =============================================================================
+# File Ranking Prompts (Stage 2)
+# =============================================================================
+
+def build_ranking_prompt(
+    file_cards: List["FileCard"],
+    profile: Optional["LanguageProfile"] = None,
+) -> str:
+    """Build prompt for ranking files by ML relevance.
+
+    Args:
+        file_cards: List of FileCard objects with extracted metadata.
+        profile: Language profile for framework hints.
+
+    Returns:
+        Formatted prompt string for LLM ranking.
+    """
+    cards_text = "\n\n".join(card.to_prompt_text() for card in file_cards)
+
+    framework_line = ""
+    if profile:
+        framework_line = f"\nLanguage: {profile.display_name}\n{profile.framework_hints}"
+
+    return f"""Analyze the following file cards from an ML codebase and rank them by importance for documentation.
+{framework_line}
+
+{cards_text}
+
+For each file, classify its role as one of: entrypoint, training, preprocessing, inference, evaluation, config, utility, irrelevant.
+
+Return the files ranked by documentation importance (most important first). Include only files that are relevant to ML model documentation (exclude irrelevant utility/config files that don't relate to the ML pipeline)."""
+
+
+RANKING_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "ranked_files": {
+            "type": "array",
+            "description": "Files ranked by documentation importance, most important first",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative file path"},
+                    "role": {
+                        "type": "string",
+                        "description": "ML role: entrypoint, training, preprocessing, inference, evaluation, config, utility, irrelevant",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence in classification (0.0 to 1.0)",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief reason for this classification",
+                    },
+                },
+                "required": ["path", "role"],
+            },
+        }
+    },
+    "required": ["ranked_files"],
+}
+
 
 # =============================================================================
 # Code Scanner Prompts
@@ -60,21 +131,26 @@ SYSTEM_LIST_GENERATOR = (
 def build_code_analysis_prompt(
     code_contents: List[Dict[str, str]],
     profile: Optional["LanguageProfile"] = None,
+    file_roles: Optional[Dict[str, str]] = None,
 ) -> str:
     """Build prompt for analyzing ML codebase.
 
     Args:
         code_contents: List of dicts with 'file' and 'content' keys.
         profile: Language profile for code-fence and framework hints.
+        file_roles: Optional dict mapping file paths to ML roles from ranking.
 
     Returns:
         Formatted prompt string.
     """
     fence_lang = profile.code_fence_lang if profile else "python"
-    code_text = "\n\n".join([
-        f"### File: {c['file']}\n```{fence_lang}\n{c['content']}\n```"
-        for c in code_contents
-    ])
+    parts = []
+    for c in code_contents:
+        role_hint = ""
+        if file_roles and c["file"] in file_roles:
+            role_hint = f" (role: {file_roles[c['file']]})"
+        parts.append(f"### File: {c['file']}{role_hint}\n```{fence_lang}\n{c['content']}\n```")
+    code_text = "\n\n".join(parts)
 
     # Language-specific framework and library hints
     if profile:
@@ -109,8 +185,7 @@ CRITICAL INSTRUCTIONS:
 - Do NOT claim SMOTE, cross-validation, or other techniques unless they are explicitly imported and used
 - For the "insights" field, only describe what is demonstrably in the code - no assumptions or common practices
 - For "code_evidence", provide concise statements that can be quoted in the report.
-- Each evidence item must include: statement, file path, symbol (class/function), a short snippet, and the start_line and end_line numbers from the line-numbered source.
-- The source code is annotated with line numbers (e.g., "42: code_here"). Use these to report accurate start_line and end_line values."""
+- Each evidence item must include: statement, file path, symbol (class/function name), and a short code snippet that demonstrates the claim."""
 
 
 CODE_ANALYSIS_SCHEMA: Dict[str, Any] = {
@@ -172,14 +247,6 @@ CODE_ANALYSIS_SCHEMA: Dict[str, Any] = {
                     "file": {"type": "string"},
                     "symbol": {"type": "string"},
                     "snippet": {"type": "string"},
-                    "start_line": {
-                        "type": "integer",
-                        "description": "Starting line number from the line-numbered source",
-                    },
-                    "end_line": {
-                        "type": "integer",
-                        "description": "Ending line number from the line-numbered source",
-                    },
                 },
                 "required": ["statement", "file"],
             },

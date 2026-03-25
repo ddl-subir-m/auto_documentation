@@ -57,7 +57,7 @@ def register_job_routes(rt):
             return _render_domino_status(record)
 
         # App mode (or Domino unavailable)
-        import stitch.state as _state
+        import studio.state as _state
         active = _resolve_job(_state.ACTIVE_JOB_ID)
         if active and active.status == "running":
             _log(active, "A job is already running. Please wait for completion.")
@@ -70,7 +70,7 @@ def register_job_routes(rt):
     rt("/run")(run)
 
     def status():
-        import stitch.state as _state
+        import studio.state as _state
         job = _resolve_job(_state.ACTIVE_JOB_ID)
         return _render_status(job)
 
@@ -78,7 +78,7 @@ def register_job_routes(rt):
 
     def status_check():
         """Lightweight endpoint returning only version + status (no HTML)."""
-        import stitch.state as _state
+        import studio.state as _state
         job = _resolve_job(_state.ACTIVE_JOB_ID)
         if not job:
             return Response(json.dumps({"status": "idle", "logVersion": 0}), media_type="application/json")
@@ -87,7 +87,7 @@ def register_job_routes(rt):
     rt("/status-check")(status_check)
 
     def clear_terminal():
-        import stitch.state as _state
+        import studio.state as _state
         job = _resolve_job(_state.ACTIVE_JOB_ID)
         if job and job.status != "running":
             job.logs.clear()
@@ -99,7 +99,7 @@ def register_job_routes(rt):
     rt("/clear-terminal")(clear_terminal)
 
     def stop():
-        import stitch.state as _state
+        import studio.state as _state
         job = _resolve_job(_state.ACTIVE_JOB_ID)
         if not job:
             return _render_status(job)
@@ -137,7 +137,7 @@ def register_job_routes(rt):
 
     def status_progress(req: Request):
         """Return progress bar HTML fragment for incremental polling."""
-        import stitch.state as _state
+        import studio.state as _state
         job_id = req.query_params.get("job_id", "")
         job = JOB_STORE.get(job_id or _state.ACTIVE_JOB_ID or "")
         if not job:
@@ -159,7 +159,7 @@ def register_job_routes(rt):
 
     def status_badge(req: Request):
         """Return status badge HTML fragment for incremental polling."""
-        import stitch.state as _state
+        import studio.state as _state
         job_id = req.query_params.get("job_id", "")
         job = JOB_STORE.get(job_id or _state.ACTIVE_JOB_ID or "")
         if not job:
@@ -171,7 +171,7 @@ def register_job_routes(rt):
 
     def status_logs_since(req: Request):
         """Return only new log lines since a given version for append-only updates."""
-        import stitch.state as _state
+        import studio.state as _state
         job_id = req.query_params.get("job_id", "")
         since = int(req.query_params.get("since", "0"))
         job = JOB_STORE.get(job_id or _state.ACTIVE_JOB_ID or "")

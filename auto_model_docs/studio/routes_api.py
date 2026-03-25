@@ -235,7 +235,7 @@ def register_api_routes(rt):
 
     def api_download_template():
         """Serve the bundled doc_spec.yaml as a downloadable reference template."""
-        # doc_spec.yaml is in auto_model_docs/ (parent of stitch/)
+        # doc_spec.yaml is in auto_model_docs/ (parent of studio/)
         template_path = Path(__file__).resolve().parent.parent / "doc_spec.yaml"
         if not template_path.exists():
             return Response("Template not found", status_code=404)

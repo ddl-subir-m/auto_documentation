@@ -112,7 +112,7 @@ class JobLogHandler(logging.Handler):
 # ---------------------------------------------------------------------------
 
 async def _run_generation(job: JobState, request: JobRequest) -> None:
-    import stitch.state as _state
+    import studio.state as _state
     progress_ctx = None
     log_handler = None
     try:
@@ -243,10 +243,17 @@ async def _run_generation(job: JobState, request: JobRequest) -> None:
             parallel_workers=settings.parallel_workers,
             planning_workers=settings.planning_workers,
             max_files=settings.max_files,
+            max_file_size=settings.max_file_size,
             generate_notebook=request.notebook or bool(request.notebook_path),
             notebook_path=Path(request.notebook_path)
             if request.notebook_path
             else None,
+            exclude_patterns=settings.exclude_patterns,
+            max_selected_files=settings.max_selected_files,
+            batch_size=settings.batch_size,
+            analysis_timeout=settings.analysis_timeout,
+            scan_retries=settings.scan_retries,
+            scan_workers=settings.scan_workers,
             experiment_names=_parse_comma_list(request.experiment_names),
             model_names=_parse_comma_list(request.model_names),
             latest_only=request.latest_only,
@@ -418,7 +425,7 @@ async def _parse_request(req: Request) -> JobRequest:
 # ---------------------------------------------------------------------------
 
 def _start_job(job_request: JobRequest) -> JobState:
-    import stitch.state as _state
+    import studio.state as _state
     job = JobState(id=str(uuid4()))
     JOB_STORE[job.id] = job
     _state.ACTIVE_JOB_ID = job.id

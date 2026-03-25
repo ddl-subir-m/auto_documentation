@@ -393,6 +393,8 @@ class CodeContext:
     readme: Optional[str] = None
     code_evidence: List[CodeEvidence] = field(default_factory=list)
     language: str = "python"
+    skipped_files: List[str] = field(default_factory=list)
+    scan_incomplete: bool = False
 
 
 @dataclass
