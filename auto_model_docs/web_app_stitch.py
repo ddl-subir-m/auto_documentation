@@ -193,6 +193,8 @@ def index(req: Request):
                     id="spec-selected-indicator",
                     style="display: none; padding: 8px 0; font-size: 0.8125rem;",
                 ),
+                # OR divider
+                Div("(OR)", style="text-align: center; color: var(--outline); font-size: 0.8rem; padding: 4px 0;"),
                 Div(
                     Label(
                         "Upload from my machine",
