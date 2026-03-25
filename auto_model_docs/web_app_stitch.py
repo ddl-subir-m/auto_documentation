@@ -626,7 +626,7 @@ def index(req: Request):
                 Div(
                     _render_domino_status(latest_domino) if (default_mode == "domino") else _render_status(_resolve_job(ACTIVE_JOB_ID)),
                     id="status-panel",
-                    **({"hx_get": "domino-status", "hx_trigger": "every 10s", "hx_swap": "innerHTML"} if default_mode == "domino" else {}),
+                    **({"hx_get": "domino-status", "hx_trigger": "every 10s", "hx_swap": "innerHTML settle:0"} if default_mode == "domino" else {}),
                 ),
                 id="tab-live",
                 cls="tab-content",
@@ -637,7 +637,7 @@ def index(req: Request):
                     id="job-history-content",
                     hx_get="job-history",
                     hx_trigger="every 15s",
-                    hx_swap="innerHTML",
+                    hx_swap="innerHTML settle:0",
                 ),
                 id="tab-history",
                 cls="tab-content hidden",

@@ -136,10 +136,15 @@ a:hover { color: var(--primary-container); }
     margin: 0 auto;
     padding: 1.5rem 2rem 6rem;
     width: 100%;
-    min-height: calc(100vh - 48px);
+    /* Fill remaining viewport below the header, minus sticky footer */
+    height: calc(100vh - 48px - 4.5rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 .hero {
     padding: 0.25rem 0 1rem 0;
+    flex-shrink: 0;
 }
 .hero-tagline {
     font-family: var(--font-body);
@@ -178,7 +183,13 @@ a:hover { color: var(--primary-container); }
     display: grid;
     grid-template-columns: 3fr 5fr 4fr;
     gap: 1.5rem;
-    align-items: start;
+    flex: 1;
+    min-height: 0;  /* allow grid to shrink inside flex parent */
+    overflow: hidden;
+}
+.stitch-grid > * {
+    overflow-y: auto;
+    min-height: 0;
 }
 @media (max-width: 1200px) {
     .stitch-grid {
@@ -954,8 +965,14 @@ button.primary:active {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
 }
-.log-line {
+/* Only animate new log lines appended via JS, not on HTMX swap */
+.log-line.new {
     animation: fadeIn 0.2s ease forwards;
+}
+/* Suppress transitions inside HTMX-swapped panels to prevent flicker */
+#status-panel * ,
+#job-history-content * {
+    animation: none !important;
 }
 
 /* ── Download Buttons ─────────────────────────────────────────────── */
