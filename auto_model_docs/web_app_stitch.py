@@ -120,8 +120,6 @@ def index(req: Request):
     inferred_mode = "app"
     if project_id and _DOMINO_AVAILABLE:
         inferred_mode = "domino"
-    elif not project_id and _DOMINO_AVAILABLE and os.environ.get("DOMINO_PROJECT_ID"):
-        inferred_mode = "domino"
     default_mode = inferred_mode
 
     # Pre-fetch branches and hardware tiers for server-side rendering
