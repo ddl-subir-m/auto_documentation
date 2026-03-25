@@ -481,7 +481,12 @@ def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
     """
     parts = _build_job_command(req, spec_path)
     cli_cmd = " ".join(parts)
-    output_dir = req.output_dir or "/mnt/data"
+    # Use shell variable expansion so the output dir resolves at job runtime,
+    # matching what the CLI infers from the job's own environment.
+    if req.output_dir:
+        output_dir = req.output_dir
+    else:
+        output_dir = '/mnt/data/${DOMINO_PROJECT_NAME:-output}'
     artifacts_dir = "/mnt/artifacts/auto_ml"
     return (
         f"{cli_cmd}"

@@ -557,3 +557,10 @@ class TestBuildJobCommandStr:
         cmd = _bld_cmd(req, spec_path=None)
         assert "mkdir -p /mnt/artifacts/auto_ml" in cmd
         assert "cp -r /mnt/data/output/*" in cmd
+
+    @skip_no_webapp
+    def test_artifacts_copy_infers_output_dir(self):
+        """When output_dir is None, cp should use shell expansion for DOMINO_PROJECT_NAME."""
+        req = _make_job_request(output_dir=None)
+        cmd = _bld_cmd(req, spec_path=None)
+        assert "cp -r /mnt/data/${DOMINO_PROJECT_NAME:-output}/*" in cmd
