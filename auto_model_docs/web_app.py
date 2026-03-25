@@ -4066,8 +4066,8 @@ async def api_upload_spec_to_dataset(req: Request):
     logger.info("POST /api/upload-spec-to-dataset — file='%s' (%d bytes) → dataset=%s", filename, len(content), dataset_id)
 
     try:
-        domino_datasets.upload_file(dataset_id, filename, content, pid)
         dataset_name = form.get("datasetName", domino_datasets.AUTODOC_SPECS_DATASET)
+        await domino_datasets.upload_file(dataset_id, filename, content, pid)
         mount_path = domino_datasets.build_spec_mount_path(dataset_name, filename)
         logger.info("POST /api/upload-spec-to-dataset — success, mount=%s", mount_path)
         return Response(

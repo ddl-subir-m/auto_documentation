@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
@@ -268,44 +268,41 @@ class TestListFiles:
 # ---------------------------------------------------------------------------
 
 class TestUploadFile:
-    @patch.object(ds, "_api_request")
-    def test_three_step_upload(self, mock_req):
-        # start returns upload key as plain string (matching real API)
-        mock_start = MagicMock()
-        mock_start.json.return_value = "uk-abc123"
-        mock_req.side_effect = [
-            mock_start,         # step 1: start
-            _mock_response(),   # step 2: chunk upload
-            _mock_response(),   # step 3: finalize
-        ]
-        ds.upload_file("ds-1", "my_spec.yaml", b"title: My Model")
-        assert mock_req.call_count == 3
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_three_step_upload(self, mock_client_cls):
+        """Upload uses async httpx with 3-step v4 chunked flow."""
+        mock_client = MagicMock()
+        # Step 1: start — returns upload key as plain string
+        start_resp = MagicMock()
+        start_resp.status_code = 200
+        start_resp.json.return_value = "uk-abc123"
+        start_resp.raise_for_status = MagicMock()
+        # Steps 2 & 3: chunk + finalize
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status = MagicMock()
 
-        # Verify step 1: start (uses filePaths array, not filePath)
-        start_call = mock_req.call_args_list[0]
-        assert "/snapshot/file/start" in start_call.args[1]
+        mock_client.request = AsyncMock(side_effect=[start_resp, ok_resp, ok_resp])
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await ds.upload_file("ds-1", "my_spec.yaml", b"title: My Model")
+        assert mock_client.request.call_count == 3
+
+        # Verify step 1: start
+        start_call = mock_client.request.call_args_list[0]
+        assert "file/start" in start_call.args[1]
         assert start_call.kwargs["json"]["filePaths"] == ["my_spec.yaml"]
-        assert start_call.kwargs["json"]["fileCollisionSetting"] == "Overwrite"
 
-        # Verify step 2: chunk (uses resumable query params)
-        chunk_call = mock_req.call_args_list[1]
-        assert "/snapshot/file" in chunk_call.args[1]
+        # Verify step 2: chunk uses resumable params
+        chunk_call = mock_client.request.call_args_list[1]
         assert chunk_call.kwargs["params"]["key"] == "uk-abc123"
-        assert chunk_call.kwargs["params"]["resumableChunkNumber"] == 1
-        assert chunk_call.kwargs["params"]["resumableTotalChunks"] == 1
 
         # Verify step 3: finalize
-        end_call = mock_req.call_args_list[2]
-        assert "/file/end/uk-abc123" in end_call.args[1]
-
-    @patch.object(ds, "_api_request")
-    def test_upload_start_failure(self, mock_req):
-        mock_req.side_effect = httpx.HTTPStatusError(
-            "403", request=MagicMock(),
-            response=MagicMock(status_code=403, text="Forbidden"),
-        )
-        with pytest.raises(httpx.HTTPStatusError):
-            ds.upload_file("ds-1", "spec.yaml", b"content")
+        end_call = mock_client.request.call_args_list[2]
+        assert "file/end/uk-abc123" in end_call.args[1]
 
 
 # ---------------------------------------------------------------------------

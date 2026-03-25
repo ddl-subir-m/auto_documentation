@@ -355,7 +355,7 @@ def list_files(
 # File upload (v4 chunked API)
 # ---------------------------------------------------------------------------
 
-def upload_file(
+async def upload_file(
     dataset_id: str,
     file_path: str,
     content: bytes,
@@ -363,26 +363,30 @@ def upload_file(
 ) -> None:
     """Upload a file to a dataset via the v4 chunked upload API.
 
-    Follows the same three-step workflow as the AutoML Extension:
-      1. POST .../snapshot/file/start → get upload_key
-      2. POST .../snapshot/file (multipart chunk with resumable params)
-      3. GET  .../snapshot/file/end/{key} → finalize
+    Uses httpx.AsyncClient (matching AutoML Extension's pattern) — the
+    sidecar proxy returns 403 on multipart POSTs from sync httpx.Client.
     """
     import hashlib
+    import io
 
     pid = _resolve_project_id(project_id)
-    cross = _is_cross_project(pid)
+    headers = _get_auth_headers(cross_project=_is_cross_project(pid))
+    base = _resolve_api_host() if not _is_cross_project(pid) else _resolve_nucleus_host()
+    base_url = base.rstrip("/")
     logger.info("Uploading '%s' (%d bytes) to dataset %s", file_path, len(content), dataset_id)
 
     # Step 1: start upload session
-    resp = _api_request(
-        "POST", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/start",
-        cross_project=cross,
-        json={
-            "filePaths": [file_path],
-            "fileCollisionSetting": "Overwrite",
-        },
-    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.request(
+            "POST",
+            f"{base_url}/v4/datasetrw/datasets/{dataset_id}/snapshot/file/start",
+            json={"filePaths": [file_path], "fileCollisionSetting": "Overwrite"},
+            headers=headers,
+        )
+        if resp.status_code >= 400:
+            logger.warning("Upload start failed: %s body=%s", resp.status_code, resp.text[:500])
+        resp.raise_for_status()
+
     upload_key = resp.json()
     if not isinstance(upload_key, str):
         upload_key = upload_key.get("upload_key") or upload_key.get("uploadKey") or upload_key.get("key")
@@ -390,39 +394,49 @@ def upload_file(
         raise RuntimeError(f"Failed to start upload session for dataset {dataset_id}")
 
     try:
-        # Step 2: upload single chunk (spec files are small)
+        # Step 2: upload single chunk
         identifier = file_path.replace(".", "-").replace("/", "-")
         checksum = hashlib.md5(content).hexdigest()
-        _api_request(
-            "POST", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
-            cross_project=cross,
-            params={
-                "key": upload_key,
-                "resumableChunkNumber": 1,
-                "resumableChunkSize": len(content),
-                "resumableCurrentChunkSize": len(content),
-                "resumableTotalChunks": 1,
-                "resumableIdentifier": identifier,
-                "resumableRelativePath": file_path,
-                "checksum": checksum,
-            },
-            files={file_path: (file_path, content, "application/octet-stream")},
-        )
+        chunk_params = {
+            "key": upload_key,
+            "resumableChunkNumber": 1,
+            "resumableChunkSize": len(content),
+            "resumableCurrentChunkSize": len(content),
+            "resumableTotalChunks": 1,
+            "resumableIdentifier": identifier,
+            "resumableRelativePath": file_path,
+            "checksum": checksum,
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.request(
+                "POST",
+                f"{base_url}/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
+                params=chunk_params,
+                files={file_path: (file_path, io.BytesIO(content), "application/octet-stream")},
+                headers=headers,
+            )
+            if resp.status_code >= 400:
+                logger.warning("Upload chunk failed: %s body=%s", resp.status_code, resp.text[:500])
+            resp.raise_for_status()
 
         # Step 3: finalize
-        _api_request(
-            "GET", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
-            cross_project=cross,
-        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.request(
+                "GET",
+                f"{base_url}/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
+                headers=headers,
+            )
+            resp.raise_for_status()
         logger.info("Upload complete: '%s' → dataset %s", file_path, dataset_id)
 
     except Exception:
-        # Cancel on failure
         try:
-            _api_request(
-                "GET", f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/cancel/{upload_key}",
-                cross_project=cross,
-            )
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.request(
+                    "GET",
+                    f"{base_url}/v4/datasetrw/datasets/{dataset_id}/snapshot/file/cancel/{upload_key}",
+                    headers=headers,
+                )
         except Exception:
             pass
         raise
