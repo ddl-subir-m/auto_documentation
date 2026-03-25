@@ -618,8 +618,8 @@ def index(req: Request):
     right_col_children.append(
         Div(
             Div(
-                Button("Current Run", cls="tab-btn active", data_tab="live", onclick="showOutputTab('live')"),
-                Button("History", cls="tab-btn", data_tab="history", onclick="showOutputTab('history')"),
+                Button("Current Run", type="button", cls="tab-btn active", data_tab="live", onclick="showOutputTab('live')"),
+                Button("History", type="button", cls="tab-btn", data_tab="history", onclick="showOutputTab('history')"),
                 cls="tab-bar",
             ),
             Div(

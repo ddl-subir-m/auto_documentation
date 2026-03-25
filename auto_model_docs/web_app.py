@@ -3627,8 +3627,8 @@ def index(req: Request):
             Div(
                 Div(
                     Div(
-                        Button("Output", cls="tab-btn active", data_tab="live", onclick="showOutputTab('live')"),
-                        Button("History", cls="tab-btn", data_tab="history", onclick="showOutputTab('history')"),
+                        Button("Output", type="button", cls="tab-btn active", data_tab="live", onclick="showOutputTab('live')"),
+                        Button("History", type="button", cls="tab-btn", data_tab="history", onclick="showOutputTab('history')"),
                         cls="tab-bar",
                     ),
                     Div(
