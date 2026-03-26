@@ -688,6 +688,13 @@ def index(req: Request):
         )
     )
 
+    run_card_children.append(
+        Div(
+            Button("Generate Documentation", type="submit", id="generate-btn", cls="primary"),
+            cls="card-footer",
+        )
+    )
+
     mid_col_children.append(Div(*run_card_children, cls="bp-card"))
 
     # RIGHT COLUMN: History
@@ -744,20 +751,6 @@ def index(req: Request):
                 hx_swap="innerHTML",
                 hx_encoding="multipart/form-data",
                 enctype="multipart/form-data",
-            ),
-            # Sticky action bar
-            Div(
-                Div(
-                    Div(cls="action-bar-dot"),
-                    Span("Ready", cls="action-bar-label"),
-                    cls="action-bar-status",
-                ),
-                Div(
-                    Button("Generate Documentation", type="submit", id="generate-btn", cls="primary", form="main-form"),
-                    cls="btn-row",
-                    style="margin-top: 0;",
-                ),
-                cls="action-bar",
             ),
             cls="page",
         ),

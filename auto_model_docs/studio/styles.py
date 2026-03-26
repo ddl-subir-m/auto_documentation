@@ -703,12 +703,6 @@ a:hover { color: var(--primary-container); }
 }
 
 /* ── Primary Button ───────────────────────────────────────────────── */
-.btn-row {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.75rem;
-    margin-top: 1.25rem;
-}
 button.primary {
     background: linear-gradient(135deg, var(--primary) 0%, var(--primary-container) 100%);
     border: none;
@@ -1140,50 +1134,13 @@ button.primary:active {
     margin-top: 0.25rem;
 }
 
-/* ── Sticky Action Bar (Glassmorphism) ────────────────────────────── */
-.action-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 40;
-    padding: 1rem 2rem;
-    background: rgba(250, 249, 255, 0.8);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+/* ── Card Footer (Generate button) ────────────────────────────────── */
+.card-footer {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    max-width: 1440px;
-    margin: 0 auto;
-}
-.action-bar-status {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-.action-bar-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--success);
-}
-.action-bar-dot.error { background: var(--error); }
-.action-bar-dot.running {
-    background: var(--primary);
-    animation: pulse 2s ease infinite;
-}
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-}
-.action-bar-label {
-    font-family: var(--font-body);
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--outline);
+    justify-content: flex-end;
+    padding-top: 1rem;
+    margin-top: 0.5rem;
+    border-top: 1px solid var(--outline-variant);
 }
 
 /* ── OR Divider ──────────────────────────────────────────────────── */
@@ -1344,9 +1301,4 @@ button.primary:active {
 }
 
 /* ── Responsive ───────────────────────────────────────────────────── */
-@media (max-width: 1100px) {
-    .action-bar {
-        padding: 1rem;
-    }
-}
 """
