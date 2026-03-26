@@ -217,21 +217,23 @@ def list_branches_api(project_id: str, search: str = "") -> list[dict[str, Any]]
             f"/v4/projects/{project_id}/gitRepositories/{info.main_repo_id}/git/branches",
             params={"count": 300, "searchPattern": search},
         )
-        logger.info("Branches API response keys: %s", list(data.keys()) if isinstance(data, dict) else type(data).__name__)
-        if isinstance(data, dict) and "data" in data:
-            _sample = data["data"][:2] if isinstance(data["data"], list) else type(data["data"]).__name__
-            logger.info("Branches API data sample: %s", _sample)
         branches = []
-        if isinstance(data, list):
-            items = data
-        elif isinstance(data, dict):
-            # Domino paginates as {"items": [...], "currentItemCount": …, …}
+        # Unwrap nested pagination: {"data": {"items": [...], ...}}
+        payload = data
+        if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+            payload = payload["data"]
+        if isinstance(payload, list):
+            items = payload
+        elif isinstance(payload, dict):
             items = (
-                data.get("items")
-                or data.get("branches")
-                or data.get("data")
+                payload.get("items")
+                or payload.get("branches")
+                or payload.get("data")
                 or []
             )
+            # Ensure we got a list, not another nested dict
+            if not isinstance(items, list):
+                items = []
         else:
             items = []
         for item in items:
