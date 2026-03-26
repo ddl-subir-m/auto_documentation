@@ -204,8 +204,7 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
         run_id = domino_client.submit_job(
             command_str,
             branch=req.branch,
-            hardware_tier=req.hardware_tier,
-            api_key=req.api_key if req.api_key_source == "pass_now" else None,
+            tier_id=req.hardware_tier,
             project_id=req.project_id,
         )
         job_url = domino_client.build_job_url(run_id, project_id=req.project_id)
@@ -274,7 +273,7 @@ async def _poll_domino_jobs() -> None:
                         run_id = domino_client.submit_job(
                             cmd,
                             branch=oldest.get("branch"),
-                            hardware_tier=oldest.get("hardware_tier"),
+                            tier_id=oldest.get("hardware_tier"),
                             project_id=oldest.get("project_id"),
                         )
                         job_url = domino_client.build_job_url(run_id, project_id=oldest.get("project_id"))
