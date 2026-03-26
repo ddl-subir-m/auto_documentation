@@ -9,7 +9,6 @@ the Domino platform (``DOMINO_PROJECT_ID``, ``DOMINO_PROJECT_OWNER``,
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import time
@@ -117,22 +116,6 @@ def _domino_request(
             raise
 
     raise last_exc or RuntimeError("Domino request failed after retries")
-
-
-# ---------------------------------------------------------------------------
-# Environment-variable helpers (fallbacks when no project_id is provided)
-# ---------------------------------------------------------------------------
-
-def _env_project_id() -> str:
-    return os.environ.get("DOMINO_PROJECT_ID", "")
-
-
-def _env_project_owner() -> str:
-    return os.environ.get("DOMINO_PROJECT_OWNER", "")
-
-
-def _env_project_name() -> str:
-    return os.environ.get("DOMINO_PROJECT_NAME", "")
 
 
 # ---------------------------------------------------------------------------
@@ -249,47 +232,6 @@ def list_branches_api(project_id: str, search: str = "") -> list[dict[str, Any]]
     except Exception as exc:
         logger.warning("Failed to list branches via API: %s", exc)
         return []
-
-
-
-def list_branches() -> list[dict[str, Any]]:
-    """Return git branches from the local repo (fallback)."""
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ["git", "branch", "-r", "--format=%(refname:short)"],
-            capture_output=True, text=True, timeout=5,
-            cwd="/mnt/code",
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            branches = []
-            for line in result.stdout.strip().splitlines():
-                name = line.strip()
-                if name.startswith("origin/"):
-                    name = name[len("origin/"):]
-                if name == "HEAD" or "->" in name:
-                    continue
-                if name:
-                    branches.append({"name": name})
-            if branches:
-                return branches
-
-        result = subprocess.run(
-            ["git", "branch", "--format=%(refname:short)"],
-            capture_output=True, text=True, timeout=5,
-            cwd="/mnt/code",
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return [
-                {"name": line.strip()}
-                for line in result.stdout.strip().splitlines()
-                if line.strip()
-            ]
-    except Exception as exc:
-        logger.warning("Failed to list branches from git: %s", exc)
-
-    return []
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +387,7 @@ def stop_job(run_id: str, project_id: Optional[str] = None) -> None:
         raise ValueError("project_id is required to stop a job")
     payload: dict[str, Any] = {"jobId": run_id, "commitResults": True, "projectId": project_id}
     try:
-        logger.info("Stopping job %s (project=%s)", run_id, pid)
+        logger.info("Stopping job %s (project=%s)", run_id, project_id)
         _domino_request("POST", "/v4/jobs/stop", json=payload)
         logger.info("Stop request succeeded for job %s", run_id)
     except Exception as exc:

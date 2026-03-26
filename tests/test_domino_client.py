@@ -70,17 +70,10 @@ try:
 except ImportError:
     _HAS_SUBMIT = False
 
-try:
-    from auto_model_docs.domino_client import _build_job_command_str  # noqa: F811
-    _HAS_CMD_STR = True
-except ImportError:
-    _HAS_CMD_STR = False
-
 skip_no_resolve = pytest.mark.skipif(not _HAS_RESOLVE, reason="resolve_project not yet in domino_client")
 skip_no_request = pytest.mark.skipif(not _HAS_DOMINO_REQUEST, reason="_domino_request not yet in domino_client")
 skip_no_ctx = pytest.mark.skipif(not _HAS_GET_CTX, reason="get_project_context not yet in domino_client")
 skip_no_submit = pytest.mark.skipif(not _HAS_SUBMIT, reason="submit_job not yet in domino_client (new sig)")
-skip_no_cmd_str = pytest.mark.skipif(not _HAS_CMD_STR, reason="_build_job_command_str not in domino_client")
 
 
 # ---------------------------------------------------------------------------
@@ -478,12 +471,13 @@ class TestSubmitJob:
 # ===================================================================
 
 try:
-    from auto_model_docs.web_app import _build_job_command_str as _bld_cmd, JobRequest as _JR
+    from auto_model_docs.studio.job_engine import _build_job_command_str as _bld_cmd
+    from auto_model_docs.studio.state import JobRequest as _JR
     _HAS_WEBAPP = True
 except Exception:
     _HAS_WEBAPP = False
 
-skip_no_webapp = pytest.mark.skipif(not _HAS_WEBAPP, reason="web_app not importable (fasthtml missing)")
+skip_no_webapp = pytest.mark.skipif(not _HAS_WEBAPP, reason="studio package not importable (fasthtml missing)")
 
 
 def _make_job_request(**overrides) -> Any:
@@ -492,7 +486,7 @@ def _make_job_request(**overrides) -> Any:
     Avoids having to specify every required field in each test.
     """
     if not _HAS_WEBAPP:
-        pytest.skip("web_app not importable")
+        pytest.skip("studio package not importable")
 
     defaults = dict(
         spec_path=None,
@@ -513,7 +507,6 @@ def _make_job_request(**overrides) -> Any:
         model_names=None,
         latest_only=False,
         verbose=False,
-        execution_mode="domino",
         branch="main",
         hardware_tier="small",
         api_key_source="domino_env",
@@ -525,7 +518,7 @@ def _make_job_request(**overrides) -> Any:
 
 @skip_no_webapp
 class TestBuildJobCommandStr:
-    """Tests for _build_job_command_str (in web_app.py)."""
+    """Tests for _build_job_command_str (in studio/job_engine.py)."""
 
     def test_paths_with_spaces_are_quoted(self):
         """Output dir containing spaces should be properly handled."""

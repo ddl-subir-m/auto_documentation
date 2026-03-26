@@ -1,7 +1,7 @@
 """Per-request context for forwarded authentication headers.
 
 Domino's App proxy forwards the visiting user's JWT in the standard
-``Authorization`` header.  The middleware in ``web_app.py`` captures it
+``Authorization`` header.  The middleware in ``web_app_studio.py`` captures it
 into a ContextVar so that outbound Domino API calls (datasets, jobs)
 run as the *viewer*, not the app owner.
 """

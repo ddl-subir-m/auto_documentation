@@ -55,49 +55,6 @@ class TestHostResolution:
 
 
 # ---------------------------------------------------------------------------
-# list_branches
-# ---------------------------------------------------------------------------
-
-class TestListBranches:
-    @patch("subprocess.run")
-    def test_remote_branches(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="origin/main\norigin/dev\norigin/feature/foo\n",
-        )
-        branches = dc.list_branches()
-        assert branches == [
-            {"name": "main"},
-            {"name": "dev"},
-            {"name": "feature/foo"},
-        ]
-
-    @patch("subprocess.run")
-    def test_skips_head(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="origin/HEAD -> origin/main\norigin/main\n",
-        )
-        branches = dc.list_branches()
-        assert branches == [{"name": "main"}]
-
-    @patch("subprocess.run")
-    def test_fallback_to_local(self, mock_run):
-        # First call (remote) returns empty, second (local) returns branches
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=""),
-            MagicMock(returncode=0, stdout="main\ndev\n"),
-        ]
-        branches = dc.list_branches()
-        assert branches == [{"name": "main"}, {"name": "dev"}]
-
-    @patch("subprocess.run")
-    def test_returns_empty_on_error(self, mock_run):
-        mock_run.side_effect = Exception("git not found")
-        assert dc.list_branches() == []
-
-
-# ---------------------------------------------------------------------------
 # list_hardware_tiers
 # ---------------------------------------------------------------------------
 
