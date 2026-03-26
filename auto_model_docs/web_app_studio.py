@@ -80,11 +80,70 @@ def index(req: Request):
         scheme = req.headers.get("x-forwarded-proto", "https")
         domino_client.set_ui_host(host, scheme)
 
-    # Guard: projectId query param is required.
+    # Guard: projectId query param is required.  Domino's reverse proxy
+    # strips query params from the iframe URL, so if it's missing we serve
+    # a bootstrap page whose JS extracts the ID from the parent frame,
+    # hash fragment, or postMessage and reloads with it in the URL.
     project_id = req.query_params.get("projectId") or None
     if not project_id:
         return (
             Title("Auto Model Docs Studio"),
+            Style(STUDIO_CSS),
+            Script(r"""
+                (function() {
+                    var pid = null;
+
+                    // 1. Hash fragment (#projectId=xxx — survives proxies)
+                    if (window.location.hash) {
+                        var h = window.location.hash.substring(1);
+                        if (h.charAt(0) === '?') h = h.substring(1);
+                        pid = new URLSearchParams(h).get('projectId');
+                    }
+
+                    // 2. Parent frame (same-origin deployments)
+                    if (!pid && window.parent !== window) {
+                        try {
+                            var pLoc = window.parent.location;
+                            pid = new URLSearchParams(pLoc.search).get('projectId');
+                            if (!pid && pLoc.hash) {
+                                var ph = pLoc.hash.substring(1);
+                                if (ph.charAt(0) === '?') ph = ph.substring(1);
+                                pid = new URLSearchParams(ph).get('projectId');
+                            }
+                        } catch(e) { /* cross-origin */ }
+                    }
+
+                    // 3. Referrer URL (Domino sets this on the outer page)
+                    if (!pid && document.referrer) {
+                        try {
+                            pid = new URL(document.referrer).searchParams.get('projectId');
+                        } catch(e) {}
+                    }
+
+                    if (pid) {
+                        // Reload with projectId in the query string
+                        var url = new URL(window.location.href);
+                        url.searchParams.set('projectId', pid);
+                        window.location.replace(url.toString());
+                        return;
+                    }
+
+                    // 4. Listen for postMessage from Domino parent frame
+                    window.addEventListener('message', function(e) {
+                        if (e.data && typeof e.data === 'object' && e.data.projectId) {
+                            var url = new URL(window.location.href);
+                            url.searchParams.set('projectId', e.data.projectId);
+                            window.location.replace(url.toString());
+                        }
+                    });
+
+                    // Show error after a short wait if nothing found
+                    setTimeout(function() {
+                        var el = document.getElementById('project-id-error');
+                        if (el) el.style.display = '';
+                    }, 2000);
+                })();
+            """),
             Div(
                 Div(
                     H1("Auto Model Docs Studio", cls="domino-header-title"),
@@ -94,6 +153,13 @@ def index(req: Request):
                 cls="domino-header",
             ),
             Div(
+                Div(
+                    Div(
+                        Span("Resolving project...",
+                             style="color: var(--outline); font-size: 0.875rem;"),
+                    ),
+                    style="display: flex; justify-content: center; padding-top: 4rem;",
+                ),
                 Div(
                     Div(
                         H2("Project ID required"),
@@ -112,7 +178,8 @@ def index(req: Request):
                               "border-radius: 2px; padding: 1.5rem; max-width: 640px; "
                               "font-family: Inter, sans-serif;",
                     ),
-                    style="display: flex; justify-content: center; padding-top: 4rem;",
+                    id="project-id-error",
+                    style="display: none; justify-content: center; padding-top: 2rem;",
                 ),
                 cls="page",
             ),
