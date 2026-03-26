@@ -218,6 +218,9 @@ def list_branches_api(project_id: str, search: str = "") -> list[dict[str, Any]]
             params={"count": 300, "searchPattern": search},
         )
         logger.info("Branches API response keys: %s", list(data.keys()) if isinstance(data, dict) else type(data).__name__)
+        if isinstance(data, dict) and "data" in data:
+            _sample = data["data"][:2] if isinstance(data["data"], list) else type(data["data"]).__name__
+            logger.info("Branches API data sample: %s", _sample)
         branches = []
         if isinstance(data, list):
             items = data
