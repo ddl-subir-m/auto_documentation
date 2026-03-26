@@ -27,7 +27,19 @@ def register_api_routes(rt):
     """Register all /api/* routes on the given rt decorator."""
 
     def api_branches(req: Request):
-        """Return an HTML text input for branch selection."""
+        """Return an HTML fragment for branch selection.
+
+        Fetches branches from the target project's git repo via the
+        Domino API.  Falls back to a text input if the API fails.
+        """
+        project_id = req.query_params.get("projectId") or None
+        search = req.query_params.get("search", "")
+        if project_id and _DOMINO_AVAILABLE:
+            branches = domino_client.list_branches_api(project_id, search=search)
+            if branches:
+                options = [Option(b["name"], value=b["name"]) for b in branches]
+                return Select(*options, name="branch", id="field-branch")
+        # Fallback: free-text input
         return Input(name="branch", id="field-branch", type="text", value="", placeholder="Default branch")
 
     rt("/api/branches")(api_branches)

@@ -43,6 +43,7 @@ class ProjectInfo:
     id: str
     name: str
     owner_username: str
+    main_repo_id: Optional[str] = None
 
 
 _project_cache: dict[str, ProjectInfo] = {}
@@ -69,6 +70,7 @@ def _domino_request(
     path: str,
     *,
     json: Any = None,
+    params: dict[str, Any] | None = None,
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRIES,
 ) -> Any:
@@ -88,7 +90,7 @@ def _domino_request(
         headers["Content-Type"] = "application/json"
         try:
             with httpx.Client(timeout=timeout) as client:
-                resp = client.request(method, url, json=json, headers=headers)
+                resp = client.request(method, url, json=json, params=params, headers=headers)
                 if resp.status_code in _RETRYABLE_STATUS_CODES and attempt < max_retries:
                     backoff = 2 ** attempt
                     logger.warning(
@@ -180,7 +182,10 @@ def resolve_project(project_id: str) -> Optional[ProjectInfo]:
             )
             return None
 
-        info = ProjectInfo(id=project_id, name=name, owner_username=owner)
+        main_repo = data.get("mainRepository") or {}
+        main_repo_id = main_repo.get("id") if isinstance(main_repo, dict) else None
+
+        info = ProjectInfo(id=project_id, name=name, owner_username=owner, main_repo_id=main_repo_id)
         _project_cache[project_id] = info
         logger.info("Resolved project %s → %s/%s", project_id, owner, name)
         return info
@@ -215,6 +220,41 @@ def get_project_context(
 # ---------------------------------------------------------------------------
 # Branches
 # ---------------------------------------------------------------------------
+
+def list_branches_api(project_id: str, search: str = "") -> list[dict[str, Any]]:
+    """List branches in the target project via the Domino git API.
+
+    Requires the project to have been resolved first (to obtain the repo ID).
+    Returns a list of ``{"name": branch_name}`` dicts, or empty on failure.
+    """
+    info = _project_cache.get(project_id)
+    if not info or not info.main_repo_id:
+        info = resolve_project(project_id)
+    if not info or not info.main_repo_id:
+        logger.warning("Cannot list branches: no repo ID for project %s", project_id)
+        return []
+
+    try:
+        data = _domino_request(
+            "GET",
+            f"/v4/projects/{project_id}/gitRepositories/{info.main_repo_id}/git/branches",
+            params={"count": 300, "searchPattern": search},
+        )
+        branches = []
+        items = data if isinstance(data, list) else data.get("branches", data.get("data", []))
+        for item in items:
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("value", "")
+            elif isinstance(item, str):
+                name = item
+            else:
+                continue
+            if name:
+                branches.append({"name": name})
+        return branches
+    except Exception as exc:
+        logger.warning("Failed to list branches via API: %s", exc)
+        return []
 
 
 

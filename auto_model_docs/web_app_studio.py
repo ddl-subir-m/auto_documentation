@@ -202,10 +202,17 @@ def index(req: Request):
         _current_model = "kimi-k2-0905-preview"
         _current_base_url = "https://api.moonshot.ai/v1"
 
-    # Pre-fetch hardware tiers for server-side rendering
+    # Pre-fetch branches and hardware tiers for server-side rendering
+    branch_options = []
     tier_data = []
     default_tier = ""
     if _DOMINO_AVAILABLE:
+        if project_id:
+            try:
+                _branches_raw = domino_client.list_branches_api(project_id)
+                branch_options = [Option(b["name"], value=b["name"]) for b in _branches_raw]
+            except Exception:
+                pass
         try:
             tier_data = domino_client.list_hardware_tiers(project_id=project_id)
             default_tier = domino_client.get_project_default_tier()
@@ -440,7 +447,11 @@ def index(req: Request):
             cls="field",
         )
     )
-    # Branch (free-text — no Domino API to enumerate target project branches)
+    # Branch
+    if branch_options:
+        branch_input = Select(*branch_options, name="branch", id="field-branch")
+    else:
+        branch_input = Input(name="branch", id="field-branch", type="text", value="", placeholder="Default branch")
     run_card_children.append(
         Div(
             Div(
@@ -448,7 +459,7 @@ def index(req: Request):
                 Span("\u24d8", cls="info-tooltip", data_tooltip="Leave blank to use the project's default branch."),
                 cls="label-row",
             ),
-            Input(name="branch", id="field-branch", type="text", value="", placeholder="Default branch"),
+            branch_input,
             cls="field",
         )
     )
