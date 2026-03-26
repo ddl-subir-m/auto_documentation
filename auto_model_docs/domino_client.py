@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Domino status → local status mapping
 # ---------------------------------------------------------------------------
-_PENDING_STATUSES = {"submitted", "queued", "pending", "initializing", "provisioning"}
+_PENDING_STATUSES = {"queued", "pending", "initializing", "provisioning"}
 _RUNNING_STATUSES = {"running", "executing"}
-_SUCCEEDED_STATUSES = {"succeeded", "success", "completed", "done"}
+_SUCCEEDED_STATUSES = {"succeeded", "success", "successful", "completed", "complete", "done", "finished"}
 _FAILED_STATUSES = {"failed", "error"}
-_CANCELLED_STATUSES = {"stopped", "cancelled", "archived"}
+_CANCELLED_STATUSES = {"stopped", "cancelled", "canceled", "archived"}
 
 # ---------------------------------------------------------------------------
 # Retryable HTTP status codes & defaults
@@ -393,6 +393,10 @@ def get_job_status(run_id: str) -> dict[str, Any]:
         local = "cancelled"
     elif raw_lower in _RUNNING_STATUSES:
         local = "running"
+    elif raw_lower in _PENDING_STATUSES:
+        local = "pending"
+    elif raw_lower == "submitted":
+        local = "submitted"
     else:
         local = "submitted"
 

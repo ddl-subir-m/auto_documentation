@@ -997,7 +997,7 @@ button.primary:active {
     font-size: 1rem;
 }
 
-/* ── Output Panel (Tabbed) ────────────────────────────────────────── */
+/* ── Output Panel ─────────────────────────────────────────────────── */
 .output-panel {
     flex: 1;
     min-height: 0;
@@ -1007,6 +1007,7 @@ button.primary:active {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    padding: 1rem;
 }
 /* ── Job History ──────────────────────────────────────────────────── */
 .job-history-section {
@@ -1094,6 +1095,7 @@ button.primary:active {
 }
 .history-status-queued { background: rgba(144,68,0,0.1); color: var(--warning); }
 .history-status-submitted { background: rgba(67,67,213,0.1); color: var(--primary); }
+.history-status-pending { background: rgba(144,68,0,0.1); color: var(--warning); }
 .history-status-running { background: rgba(67,67,213,0.1); color: var(--primary); }
 .history-status-succeeded { background: rgba(40,164,100,0.1); color: var(--success); }
 .history-status-failed { background: rgba(186,26,26,0.1); color: var(--error); }

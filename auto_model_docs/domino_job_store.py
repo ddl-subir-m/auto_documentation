@@ -152,12 +152,12 @@ def get_user_jobs(username: str, limit: int = 50) -> list[dict[str, Any]]:
 
 
 def count_active_jobs(username: str) -> int:
-    """Count queued + submitted + running jobs for a user."""
+    """Count queued + submitted + pending + running jobs for a user."""
     with _conn() as con:
         row = con.execute(
             """
             SELECT COUNT(*) as cnt FROM domino_jobs
-            WHERE username = ? AND status IN ('queued', 'submitted', 'running')
+            WHERE username = ? AND status IN ('queued', 'submitted', 'pending', 'running')
             """,
             (username,),
         ).fetchone()

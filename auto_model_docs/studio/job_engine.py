@@ -223,7 +223,7 @@ async def _poll_domino_jobs() -> None:
             # Update active jobs
             with domino_job_store._conn() as con:
                 rows = con.execute(
-                    "SELECT * FROM domino_jobs WHERE status IN ('submitted', 'running')"
+                    "SELECT * FROM domino_jobs WHERE status IN ('submitted', 'pending', 'running')"
                 ).fetchall()
             for row in rows:
                 row = dict(row)
@@ -282,15 +282,21 @@ async def _poll_domino_jobs() -> None:
 
 def _map_domino_status(domino_status: str) -> str:
     """Map a raw Domino API status string to our internal status."""
+    from domino_client import (
+        _SUCCEEDED_STATUSES, _FAILED_STATUSES, _CANCELLED_STATUSES,
+        _RUNNING_STATUSES, _PENDING_STATUSES,
+    )
     ds = domino_status.lower()
-    if ds in ("succeeded", "completed"):
+    if ds in _SUCCEEDED_STATUSES:
         return "succeeded"
-    if ds in ("failed", "error"):
+    if ds in _FAILED_STATUSES:
         return "failed"
-    if ds in ("stopped", "cancelled"):
+    if ds in _CANCELLED_STATUSES:
         return "cancelled"
-    if ds in ("running", "executing"):
+    if ds in _RUNNING_STATUSES:
         return "running"
+    if ds in _PENDING_STATUSES:
+        return "pending"
     return "submitted"
 
 
@@ -303,7 +309,7 @@ def _reconcile_stale_jobs() -> None:
                 """
                 UPDATE domino_jobs
                 SET status = 'failed', domino_status = 'App restarted'
-                WHERE status IN ('submitted', 'running')
+                WHERE status IN ('submitted', 'pending', 'running')
                   AND domino_run_id IS NULL
                 """
             )

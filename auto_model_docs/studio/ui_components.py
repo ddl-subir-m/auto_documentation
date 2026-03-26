@@ -302,7 +302,7 @@ def _render_job_history_table(username: str) -> FT:
         tier_val = j.get("hardware_tier") or "\u2014"
         # Stop button for active jobs
         action_cell = Td()
-        if status in ("submitted", "running", "queued"):
+        if status in ("submitted", "pending", "running", "queued"):
             action_cell = Td(
                 A(
                     "Stop",
