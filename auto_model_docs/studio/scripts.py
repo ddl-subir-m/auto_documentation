@@ -520,7 +520,12 @@ MAIN_DOM_JS = r"""
             if (!el) return;
             fetch('job-history')
                 .then(function(r) { return r.text(); })
-                .then(function(html) { if (!_htmxBusy) el.innerHTML = html; })
+                .then(function(html) {
+                    if (!_htmxBusy) {
+                        el.innerHTML = html;
+                        if (window.htmx) htmx.process(el);
+                    }
+                })
                 .catch(function() {});
         }, 10000);
     });
