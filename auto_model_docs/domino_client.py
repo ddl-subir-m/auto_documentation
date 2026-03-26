@@ -407,10 +407,16 @@ def get_job_status(run_id: str) -> dict[str, Any]:
 # Job stop
 # ---------------------------------------------------------------------------
 
-def stop_job(run_id: str) -> None:
+def stop_job(run_id: str, project_id: Optional[str] = None) -> None:
     """Stop a running Domino job."""
+    pid = project_id or _env_project_id()
+    payload: dict[str, Any] = {"jobId": run_id, "commitResults": True}
+    if pid:
+        payload["projectId"] = pid
     try:
-        _domino_request("POST", "/v4/jobs/stop", json={"jobId": run_id, "commitResults": True})
+        logger.info("Stopping job %s (project=%s)", run_id, pid)
+        _domino_request("POST", "/v4/jobs/stop", json=payload)
+        logger.info("Stop request succeeded for job %s", run_id)
     except Exception as exc:
         logger.warning("Failed to stop run %s: %s", run_id, exc)
 

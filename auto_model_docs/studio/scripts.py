@@ -504,13 +504,23 @@ MAIN_DOM_JS = r"""
             sync();
         })();
 
-        // Poll job history
+        // Poll job history — pause while an HTMX request targets the history panel
+        var _htmxBusy = false;
+        document.body.addEventListener('htmx:beforeRequest', function(e) {
+            var tgt = e.detail && e.detail.target;
+            if (tgt && tgt.id === 'job-history-content') _htmxBusy = true;
+        });
+        document.body.addEventListener('htmx:afterRequest', function(e) {
+            var tgt = e.detail && e.detail.target;
+            if (tgt && tgt.id === 'job-history-content') _htmxBusy = false;
+        });
         setInterval(function() {
+            if (_htmxBusy) return;
             var el = document.getElementById('job-history-content');
             if (!el) return;
             fetch('job-history')
                 .then(function(r) { return r.text(); })
-                .then(function(html) { el.innerHTML = html; })
+                .then(function(html) { if (!_htmxBusy) el.innerHTML = html; })
                 .catch(function() {});
         }, 10000);
     });

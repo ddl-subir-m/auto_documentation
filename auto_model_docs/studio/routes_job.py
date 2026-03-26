@@ -91,7 +91,10 @@ def register_job_routes(rt):
             row = domino_job_store.get_job(job_id)
             if row and row.get("domino_run_id"):
                 try:
-                    domino_client.stop_job(row["domino_run_id"])
+                    domino_client.stop_job(
+                        row["domino_run_id"],
+                        project_id=row.get("project_id"),
+                    )
                 except Exception:
                     pass
             if row:
