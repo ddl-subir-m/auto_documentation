@@ -325,7 +325,25 @@ def _render_job_history_table(username: str) -> FT:
             )
         )
 
+    # Queue-full warning when any job is queued
+    queue_banner = None
+    has_queued = any(j.get("status") == "queued" and not j.get("domino_run_id") for j in jobs)
+    if has_queued:
+        max_j = _max_jobs()
+        queue_banner = Div(
+            Span("\u26a0 "),
+            Span(f"Job queued \u2014 you already have {max_j} active job{'s' if max_j != 1 else ''}. "
+                 "It will start automatically when a slot opens. To free a slot, stop a running job or use "),
+            Span("Cancel queued", style="font-weight: 600;"),
+            Span(" below."),
+            style="background: rgba(144,68,0,0.06); border-left: 3px solid #904400; "
+                  "border-radius: 2px; padding: 0.625rem 1rem; margin-bottom: 0.75rem; "
+                  "font-size: 0.8125rem; color: #191b22; line-height: 1.5; font-family: Inter, sans-serif;",
+            role="alert",
+        )
+
     return Div(
+        queue_banner,
         Div(
             Table(
                 Thead(
@@ -358,7 +376,7 @@ def _render_job_history_table(username: str) -> FT:
                 hx_swap="innerHTML",
                 cls="terminal-action",
                 title="Cancel all queued jobs that haven't been submitted yet",
-            ) if any(j.get("status") == "queued" and not j.get("domino_run_id") for j in jobs) else None,
+            ) if has_queued else None,
             cls="history-actions",
         ),
     )

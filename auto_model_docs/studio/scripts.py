@@ -15,12 +15,6 @@ def get_output_defaults_script() -> str:
     """
 
 
-SMART_POLLING_JS = r"""
-    window._activateStatusPolling = function() {};
-"""
-
-
-
 MAIN_DOM_JS = r"""
     // ── Hardware tier card selection ──
     function selectHwTier(card, tierId) {
@@ -488,71 +482,6 @@ MAIN_DOM_JS = r"""
                 });
         }
 
-        // Highlight active terminal lines with spinner
-        function styleTerminalLines() {
-            const terminal = document.querySelector('.terminal:not(.terminal-idle)');
-            if (!terminal) return;
-
-            const text = terminal.textContent;
-            const lines = text.split('\n');
-            const totalLines = lines.length;
-
-            // Check if job is still running (look for completion indicators)
-            const isComplete = lines.some(line =>
-                line.includes('Generation complete') ||
-                line.includes('Error:') ||
-                line.includes('Cancelled') ||
-                line.includes('Cleanup complete')
-            );
-
-            // Find last active line index (the most recent activity)
-            let lastActiveIndex = -1;
-            if (!isComplete) {
-                for (let i = lines.length - 1; i >= 0; i--) {
-                    const line = lines[i].trim();
-                    if (line && line.match(/^\[\d{2}:\d{2}:\d{2}\]/)) {
-                        lastActiveIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            // Style the lines
-            let styledHtml = lines.map((line, index) => {
-                const escapedLine = line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-                // Show spinner on the last active timestamped line
-                if (index === lastActiveIndex) {
-                    return '<span class="terminal-line-active">' + escapedLine + '</span>';
-                }
-                // Style completion messages
-                if (line.includes('Complete') || line.includes('Generation complete')) {
-                    return '<span class="terminal-line-complete">' + escapedLine + '</span>';
-                }
-                return escapedLine;
-            }).join('\n');
-
-            terminal.innerHTML = styledHtml;
-        }
-
-        // Auto-scroll terminal to bottom to show latest logs
-        function scrollTerminalToBottom() {
-            const terminal = document.querySelector('.terminal:not(.terminal-idle)');
-            if (terminal) {
-                terminal.scrollTop = terminal.scrollHeight;
-            }
-        }
-
-        // Tab switcher — on window so inline onclick can call it
-        window.showOutputTab = function(tab) {
-            document.querySelectorAll('.tab-btn').forEach(function(btn) {
-                btn.classList.toggle('active', btn.dataset.tab === tab);
-            });
-            document.querySelectorAll('.tab-content').forEach(function(content) {
-                content.classList.toggle('hidden', content.id !== 'tab-' + tab);
-            });
-        };
-
         // ── Code root prefix+suffix sync ──────────────────────────────────
         (function() {
             const prefix = document.getElementById('code-root-prefix');
@@ -575,42 +504,7 @@ MAIN_DOM_JS = r"""
             sync();
         })();
 
-        // Run styling/scrolling after any status update (HTMX swap or smart poll)
-        function onStatusUpdate() {
-            styleTerminalLines();
-            scrollTerminalToBottom();
-        }
-
-        // One-shot flag: show Output tab only after a NEW job submit
-        // (when _activateStatusPolling resets it to false), not on page load polling.
-        var _tabInitialized = true;
-        document.body.addEventListener('htmx:afterSwap', function(e) {
-            var targetId = e.detail && e.detail.target ? e.detail.target.id : '';
-            // Only process status-panel swaps — ignore job-history swaps
-            if (targetId === 'status-panel') {
-                if (!_tabInitialized) {
-                    showOutputTab('live');
-                    _tabInitialized = true;
-                }
-                onStatusUpdate();
-            }
-        });
-
-        // Custom event fired by smart polling after DOM update
-        document.body.addEventListener('statusUpdated', onStatusUpdate);
-
-        // Re-activate smart polling when HTMX submits the form
-        document.body.addEventListener('htmx:afterRequest', function(e) {
-            if (e.detail && e.detail.pathInfo && e.detail.pathInfo.requestPath === '/run') {
-                if (typeof window._activateStatusPolling === 'function') {
-                    window._activateStatusPolling();
-                }
-            }
-        });
-
-        setInterval(styleTerminalLines, 500);
-
-        // Poll job history via plain fetch (not HTMX) to avoid ID-settling interference
+        // Poll job history
         setInterval(function() {
             var el = document.getElementById('job-history-content');
             if (!el) return;
@@ -618,6 +512,6 @@ MAIN_DOM_JS = r"""
                 .then(function(r) { return r.text(); })
                 .then(function(html) { el.innerHTML = html; })
                 .catch(function() {});
-        }, 15000);
+        }, 10000);
     });
 """

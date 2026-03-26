@@ -1008,45 +1008,6 @@ button.primary:active {
     display: flex;
     flex-direction: column;
 }
-.tab-bar {
-    display: flex;
-    padding: 0 1rem;
-    background: var(--surface-container-low);
-}
-.tab-btn {
-    font-family: var(--font-body);
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--outline);
-    padding: 0.75rem 1rem 0.625rem;
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: none;
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s;
-}
-.tab-btn.active {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
-}
-.tab-btn:not(.active):hover {
-    color: var(--on-surface);
-}
-.tab-content {
-    padding: 1rem;
-    flex: 1;
-    overflow-y: auto;
-    min-height: 0;
-}
-.tab-content.hidden { display: none; }
-.tab-content .terminal-card {
-    border: none;
-    box-shadow: none;
-    padding: 0;
-}
-
 /* ── Job History ──────────────────────────────────────────────────── */
 .job-history-section {
     margin-top: 1rem;

@@ -17,7 +17,6 @@ from starlette.requests import Request
 from autodoc.core.config import Settings
 
 from studio.state import (
-    DominoJobRecord,
     _DOMINO_AVAILABLE,
     _POLL_TASK,
     _STARTUP_WARNINGS,
@@ -32,13 +31,11 @@ from studio.state import (
     logger,
 )
 from studio.styles import STUDIO_CSS
-from studio.scripts import SMART_POLLING_JS, MAIN_DOM_JS, get_output_defaults_script
+from studio.scripts import MAIN_DOM_JS, get_output_defaults_script
 from studio.ui_components import (
-    _render_domino_status,
     _render_warnings_banner,
     _render_job_history_table,
     _validate_environment,
-    _db_record_to_dataclass,
 )
 from studio.job_engine import (
     _poll_domino_jobs,
@@ -58,8 +55,6 @@ app, rt = fast_app(
     hdrs=(
         # Load htmx synchronously to ensure it's ready before user interaction
         Script(src="https://unpkg.com/htmx.org@1.9.10"),
-        # Smart polling / HTMX JS
-        Script(SMART_POLLING_JS),
         Style(STUDIO_CSS),
         # NOTE: output defaults script is injected per-request in index()
         # so it picks up the resolved target project name.
@@ -206,18 +201,6 @@ def index(req: Request):
     except Exception:
         _current_model = "kimi-k2-0905-preview"
         _current_base_url = "https://api.moonshot.ai/v1"
-
-    # Determine initial status panel content based on latest Domino job
-    initial_status_panel: FT
-    latest_domino: Optional[DominoJobRecord] = None
-    if _DOMINO_AVAILABLE:
-        try:
-            domino_job_store.init_db()
-            jobs = domino_job_store.get_user_jobs(username, limit=1)
-            if jobs:
-                latest_domino = _db_record_to_dataclass(jobs[0])
-        except Exception:
-            pass
 
     # Pre-fetch branches and hardware tiers for server-side rendering
     tier_data = []
@@ -707,39 +690,20 @@ def index(req: Request):
 
     mid_col_children.append(Div(*run_card_children, cls="bp-card"))
 
-    # RIGHT COLUMN: Output & History
+    # RIGHT COLUMN: History
     right_col_children = [
         Div(
-            H2("Output & History"),
+            H2("History"),
             Span("Section 03", cls="step-badge"),
             cls="col-header",
         ),
     ]
 
-    # Tabbed output panel
     right_col_children.append(
         Div(
             Div(
-                Button("Current Run", type="button", cls="tab-btn active", data_tab="live", onclick="showOutputTab('live')"),
-                Button("History", type="button", cls="tab-btn", data_tab="history", onclick="showOutputTab('history')"),
-                cls="tab-bar",
-            ),
-            Div(
-                Div(
-                    _render_domino_status(latest_domino),
-                    id="status-panel",
-                    hx_get="domino-status", hx_trigger="every 10s", hx_swap="innerHTML settle:0",
-                ),
-                id="tab-live",
-                cls="tab-content",
-            ),
-            Div(
-                Div(
-                    _render_job_history_table(username),
-                    id="job-history-content",
-                ),
-                id="tab-history",
-                cls="tab-content hidden",
+                _render_job_history_table(username),
+                id="job-history-content",
             ),
             cls="output-panel",
         )
@@ -776,7 +740,7 @@ def index(req: Request):
                 id="main-form",
                 data_execution_mode="domino",
                 hx_post="run",
-                hx_target="#status-panel",
+                hx_target="#job-history-content",
                 hx_swap="innerHTML",
                 hx_encoding="multipart/form-data",
                 enctype="multipart/form-data",

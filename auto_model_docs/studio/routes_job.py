@@ -1,23 +1,18 @@
-"""Job-related routes: run, Domino status, stop, history."""
+"""Job-related routes: run, stop, history."""
 
 from __future__ import annotations
-
-from uuid import uuid4
 
 from fasthtml.common import *
 from starlette.requests import Request
 
 from .state import (
-    DominoJobRecord,
     _DOMINO_AVAILABLE,
     _get_username,
     domino_client,
     domino_job_store,
 )
 from .ui_components import (
-    _render_domino_status,
     _render_job_history_table,
-    _db_record_to_dataclass,
 )
 from .job_engine import (
     _parse_request,
@@ -30,60 +25,31 @@ def register_job_routes(rt):
 
     async def run(req: Request):
         job_request = await _parse_request(req)
+        username = _get_username()
         if not job_request.project_id:
-            err_record = DominoJobRecord(
-                id=str(uuid4()),
-                username=_get_username(),
-                status="failed",
+            # Still create a failed record so the history table shows the error
+            domino_job_store.init_db()
+            job_id = domino_job_store.create_job(
+                username=username, branch=None, tier=None, spec_path=None,
+            )
+            domino_job_store.update_job(
+                job_id, status="failed",
                 domino_status="No target project ID. Reload the app with ?projectId= in the URL.",
             )
-            return _render_domino_status(err_record)
-        username = _get_username()
+            return _render_job_history_table(username)
         try:
-            record = await _submit_domino_job(job_request, username)
+            await _submit_domino_job(job_request, username)
         except Exception as exc:
-            err_record = DominoJobRecord(
-                id=str(uuid4()),
-                username=username,
-                status="failed",
-                domino_status=str(exc),
+            domino_job_store.init_db()
+            job_id = domino_job_store.create_job(
+                username=username, branch=job_request.branch,
+                tier=job_request.hardware_tier, spec_path=job_request.spec_path,
+                project_id=job_request.project_id,
             )
-            return _render_domino_status(err_record)
-        return _render_domino_status(record)
+            domino_job_store.update_job(job_id, status="failed", domino_status=str(exc))
+        return _render_job_history_table(username)
 
     rt("/run")(run)
-
-    async def stop_domino(req: Request):
-        form = await req.form()
-        job_id = form.get("job_id")
-        username = _get_username()
-        if job_id and _DOMINO_AVAILABLE:
-            row = domino_job_store.get_job(job_id)
-            if row and row.get("domino_run_id"):
-                try:
-                    domino_client.stop_job(row["domino_run_id"])
-                except Exception:
-                    pass
-            if row:
-                domino_job_store.update_job(job_id, status="cancelled")
-                row = domino_job_store.get_job(job_id)
-                return _render_domino_status(_db_record_to_dataclass(row))
-        return _render_domino_status(None)
-
-    rt("/stop-domino")(stop_domino)
-
-    def domino_status():
-        """Return the Domino job status panel for the latest active job."""
-        username = _get_username()
-        if not _DOMINO_AVAILABLE:
-            return _render_domino_status(None)
-        domino_job_store.init_db()
-        jobs = domino_job_store.get_user_jobs(username, limit=1)
-        if not jobs:
-            return _render_domino_status(None)
-        return _render_domino_status(_db_record_to_dataclass(jobs[0]))
-
-    rt("/domino-status")(domino_status)
 
     def job_history():
         username = _get_username()
