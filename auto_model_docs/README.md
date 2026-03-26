@@ -34,20 +34,11 @@ The scanner uses a **two-pass relevance-aware pipeline**:
 ### Web UI (Domino App)
 
 ```bash
-python auto_model_docs/web_app.py
-# Opens at http://0.0.0.0:8888
-```
-
-The web UI provides a 3-column workflow: spec file selection, configuration, and output/history. Supports both "Run in App" (interactive) and "Domino Job" (batch) execution modes.
-
-### Stitch UI (Blueprint Enterprise)
-
-```bash
 python auto_model_docs/web_app_studio.py
 # Opens at http://0.0.0.0:8888
 ```
 
-Redesigned UI with the Blueprint Enterprise design system: tonal surface layering, Manrope/Inter typography, hardware tier card grid, and glassmorphism action bar.
+The Studio UI provides a 3-column workflow: spec file selection (Domino Dataset browser), configuration (branch, hardware tier, output directory), and output/history. Jobs always run as Domino Jobs in the target project specified by `?projectId=` in the URL. Extended identity propagation forwards the viewer's JWT for all API calls.
 
 ### CLI
 
@@ -86,8 +77,8 @@ All settings can be configured via environment variables (with or without `AUTOD
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PARALLEL_WORKERS` | `1` | Parallel content generation workers |
-| `PLANNING_WORKERS` | `1` | Parallel section planning workers |
+| `PARALLEL_WORKERS` | `4` | Parallel content generation workers |
+| `PLANNING_WORKERS` | `3` | Parallel section planning workers |
 | `CACHE_ENABLED` | `true` | Enable LLM response caching |
 | `MLFLOW_TRACKING_URI` | -- | MLflow tracking server URI |
 
@@ -116,9 +107,14 @@ auto_model_docs/
       notebook_builder.py     # Jupyter notebook generation
       citations.py            # Citation building, parsing, registry
     orchestrator.py           # 4-phase pipeline coordinator
-  web_app.py                  # FastHTML web UI (original)
-  web_app_studio.py           # FastHTML web UI (Blueprint Enterprise)
-  studio/                     # Studio UI package (styles, scripts, routes)
+  web_app_studio.py           # FastHTML web UI (Studio)
+  studio/                     # Studio UI package (state, styles, scripts, routes)
+  domino_auth.py              # Shared Domino API host + auth (JWT-first)
+  domino_client.py            # Domino API client (jobs, projects, hardware tiers)
+  domino_datasets.py          # Domino Datasets API client (browse, upload)
+  domino_job_store.py         # SQLite job history
+  spec_store.py               # Spec file persistence to target project dataset
+  auth_context.py             # Per-request JWT forwarding via ContextVar
   main.py                     # CLI entry point
   doc_spec.yaml               # Default spec file
 ```
@@ -160,18 +156,17 @@ CodeContext (same output contract for downstream)
 
 ## Domino integration
 
-When deployed as a Domino App:
+The app is designed to run as a Domino App with extended identity propagation enabled. It requires a `?projectId=` query parameter that scopes all operations to the target project:
 
-- **Execution modes**: "Run in App" (interactive, results in browser) or "Domino Job" (batch, results in Artifacts tab)
-- **Dataset browser**: Browse Domino Datasets for spec files
+- **Target project scoping**: Specs, jobs, output, and history all live in the target project's dataset — the app project is only used for hosting the app process
+- **Dataset browser**: Browse Domino Datasets in the target project for spec files, or upload from your machine
 - **Hardware tiers**: Select compute tier for Domino Jobs (card grid UI)
 - **Job history**: SQLite-backed job tracking with status polling
-- **Cross-project**: Run jobs against other Domino projects via `projectId` query param
+- **Auth**: All API calls use the viewer's forwarded JWT (no sidecar proxy)
 
-Key environment variables for Domino:
-- `DOMINO_API_HOST`, `DOMINO_API_PROXY`, `DOMINO_USER_API_KEY`
-- `DOMINO_PROJECT_NAME`, `DOMINO_PROJECT_OWNER`
-- `AUTODOC_MAX_JOBS` (default: 1 per user)
+Key environment variables:
+- `DOMINO_API_HOST` — Domino API host (required)
+- `AUTODOC_MAX_JOBS` — max concurrent jobs per user (default: 1)
 
 ## Testing
 

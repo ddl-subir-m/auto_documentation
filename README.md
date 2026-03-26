@@ -24,7 +24,7 @@ The pipeline runs in four phases:
 
 ```
  SCAN ──────────► PLAN ──────────► GENERATE ──────────► BUILD
- (parallel)       (sequential)     (parallel)           (sequential)
+ (parallel)       (parallel)       (parallel)           (sequential)
 
  CodeScanner      SectionPlanner   ContentGenerator     DocumentBuilder
  └─ Python files  └─ LLM plans     └─ Narratives        └─ .docx
@@ -98,12 +98,12 @@ cd auto_model_docs
 python main.py --spec doc_spec.yaml --provider openai
 ```
 
-**Web UI:**
+**Web UI (Studio):**
 
 ```bash
 cd auto_model_docs
-python web_app.py
-# Open http://localhost:8000
+python web_app_studio.py
+# Open http://localhost:8888
 ```
 
 The generated document will be saved to the `output/` directory.
@@ -215,7 +215,11 @@ python main.py -s doc_spec.yaml -p openai --notebook -v
 ```
 auto_model_docs/
 ├── main.py                  # CLI entry point
-├── web_app.py               # FastHTML web UI
+├── web_app_studio.py        # FastHTML web UI (Studio)
+├── studio/                  # Studio UI package (state, styles, scripts, routes)
+├── domino_auth.py           # Shared Domino API host + auth
+├── domino_client.py         # Domino API client (jobs, projects)
+├── domino_datasets.py       # Domino Datasets API client
 ├── doc_spec.yaml            # Example document specification
 ├── autodoc/
 │   ├── orchestrator.py      # 4-phase pipeline coordinator
