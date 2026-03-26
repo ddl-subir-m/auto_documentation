@@ -1,8 +1,8 @@
 # Auto Model Documentation
 
-Automatically generate professional ML model documentation from Python codebases and MLflow artifacts using LLM-powered analysis.
+Automatically generate professional ML model documentation from codebases and MLflow artifacts using LLM-powered analysis.
 
-Auto Model Docs scans your ML codebase, queries MLflow for model metadata (metrics, parameters, artifacts), and uses an LLM to produce comprehensive Word documents and Jupyter notebooks — no manual writing required.
+Auto Model Docs scans your ML codebase (Python, R, SAS, or MATLAB), queries MLflow for model metadata (metrics, parameters, artifacts), and uses an LLM to produce comprehensive Word documents and Jupyter notebooks — no manual writing required.
 
 
 ## Key Features
@@ -129,7 +129,7 @@ python main.py --spec <YAML> [OPTIONS]
 | `--latest-only` | | Only include the latest version of each model |
 | `--generation-workers` | `-w` | Parallel content generation workers (default: 4) |
 | `--planning-workers` | | Parallel section planning workers (default: 4) |
-| `--max-files` | | Maximum number of Python files to scan (default: 50) |
+| `--max-files` | | Maximum number of source files to scan (default: 50) |
 | `--timeout` | | Timeout per LLM API call in seconds (default: 120) |
 | `--verbose` | `-v` | Enable verbose logging |
 
@@ -159,7 +159,7 @@ The web interface provides form-based configuration, real-time progress monitori
 </p>
 
 ```bash
-python web_app.py
+python web_app_studio.py
 ```
 
 
@@ -178,7 +178,7 @@ All settings can be set via environment variables, a `.env` file, or CLI flags. 
 | `OUTPUT_DIR` | `/mnt/data/{project}` or `./output` | Output directory |
 | `MLFLOW_TRACKING_URI` | — | MLflow tracking server URI |
 | `MAX_FILES` | `50` | Max Python files to scan (1-200) |
-| `MAX_FILE_SIZE` | `50000` | Max file size in characters |
+| `MAX_FILE_SIZE` | `15000` | Max file size in characters |
 | `PARALLEL_WORKERS` | `4` | Content generation workers |
 | `CACHE_ENABLED` | `true` | Enable LLM response caching |
 
@@ -228,7 +228,7 @@ auto_model_docs/
 │   │   ├── models.py        # Domain models (CodeContext, ArtifactContext, etc.)
 │   │   └── exceptions.py    # Custom exceptions
 │   ├── scanning/
-│   │   ├── code_scanner.py  # LLM-based Python code analysis
+│   │   ├── code_scanner.py  # Two-pass code analysis (Python, R, SAS, MATLAB)
 │   │   ├── artifact_scanner.py  # MLflow metadata extraction
 │   │   └── sanitizer.py     # Secret removal before LLM calls
 │   ├── generation/

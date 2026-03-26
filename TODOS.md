@@ -1,15 +1,5 @@
 # TODOS
 
-## Design Debt
-
-### Tokenize cross-project banner colors
-**What:** Replace hardcoded `#EDECFB`, `#C9C5F2`, `#1820A0` in `.cross-project-banner` with CSS variables (`--banner-bg`, `--banner-border`, `--banner-text`).
-**Why:** Hardcoded colors bypass the design system and make theming/maintenance harder. All other colors use CSS variables.
-**Pros:** Consistency with design system, easier to update.
-**Cons:** Minor refactor, no visual change.
-**Context:** Identified during design review (2026-03-24). The new error banner colors (`--error-bg`, `--error-border`) are already specified as variables — the success banner should follow the same pattern.
-**Depends on:** Nothing.
-
 ## Test Infrastructure
 
 ### Add E2E browser tests (Playwright)

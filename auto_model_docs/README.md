@@ -38,7 +38,7 @@ python auto_model_docs/web_app_studio.py
 # Opens at http://0.0.0.0:8888
 ```
 
-The Studio UI provides a 3-column workflow: spec file selection (Domino Dataset browser), configuration (branch, hardware tier, output directory), and output/history. Jobs always run as Domino Jobs in the target project specified by `?projectId=` in the URL. Extended identity propagation forwards the viewer's JWT for all API calls.
+The Studio UI provides a 3-column workflow: spec file selection (Domino Dataset browser), configuration (branch, hardware tier, advanced settings via gear icon), and job history. Jobs always run as Domino Jobs in the target project specified by `?projectId=` in the URL. Extended identity propagation forwards the viewer's JWT for all API calls.
 
 ### CLI
 
@@ -64,7 +64,7 @@ All settings can be configured via environment variables (with or without `AUTOD
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MAX_FILES` | `100` | Max files discovered for ranking |
+| `MAX_FILES` | `50` | Max files discovered for ranking |
 | `MAX_FILE_SIZE` | `15000` | Max chars per file in deep analysis |
 | `MAX_SELECTED_FILES` | `15` | Files selected for deep analysis after ranking |
 | `BATCH_SIZE` | `4` | Files per deep analysis batch |

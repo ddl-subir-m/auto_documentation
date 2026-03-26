@@ -40,15 +40,7 @@ Extracted from the codebase's CSS variables and component patterns. Source of tr
 | `--error` | `#C20A29` | Error text, required star, error states |
 | `--info` | `#0070CC` | Informational states |
 
-### Cross-Project Banner (hardcoded, not yet tokenized)
-
-| Value | Usage |
-|-------|-------|
-| `#EDECFB` | Banner background |
-| `#C9C5F2` | Banner border |
-| `#1820A0` | Banner text (bold, resolved state) |
-
-### Error Banner (new — to be added)
+### Banners
 
 | Token | Value | Usage |
 |-------|-------|-------|
@@ -83,28 +75,20 @@ Extracted from the codebase's CSS variables and component patterns. Source of tr
 ### Page Structure
 
 ```
-┌─────────────────────────────────────────────┐
-│ .domino-header (full-width, 48px, --header-bg) │
-├─────────────────────────────────────────────┤
-│ .page (max-width: 1500px, padding: 1rem 2rem) │
-│   .hero (tagline)                              │
-│   warnings banner (if any)                     │
-│   lang-detection-row                           │
-│   .cross-project-banner (if cross-project)     │
-│   .page-split (2-column grid)                  │
-│     LEFT: Form (.config-grid: 3 cards)         │
-│     RIGHT: Terminal + output panel              │
-│   .btn-row (Generate button, right-aligned)    │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ .domino-header (full-width, 48px, --header-bg)   │
+├──────────────────────────────────────────────────┤
+│ .page (max-width: 1500px, padding: 1rem 2rem)   │
+│   warnings banner (if any)                       │
+│   .studio-grid (3-column layout)                 │
+│     LEFT: What to document (spec file, filters)  │
+│     MID: Configuration & Run (code root,         │
+│          language, branch, tiers, more settings,  │
+│          gear icon → advanced settings modal,     │
+│          Generate button)                         │
+│     RIGHT: History (job history table)            │
+└──────────────────────────────────────────────────┘
 ```
-
-### Responsive Breakpoints
-
-| Breakpoint | Config Grid | Page Split |
-|------------|-------------|------------|
-| >1100px | 3 columns | 2 columns (minmax(420px, 1fr) minmax(400px, 1.2fr)) |
-| 700–1100px | 2 columns | 1 column (stacked) |
-| <700px | 1 column | 1 column (stacked) |
 
 ## Components
 
