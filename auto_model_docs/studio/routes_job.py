@@ -27,8 +27,6 @@ def register_job_routes(rt):
         job_request = await _parse_request(req)
         username = _get_username()
         if not job_request.project_id:
-            # Still create a failed record so the history table shows the error
-            domino_job_store.init_db()
             job_id = domino_job_store.create_job(
                 username=username, branch=None, tier=None, spec_path=None,
             )
@@ -40,7 +38,6 @@ def register_job_routes(rt):
         try:
             await _submit_domino_job(job_request, username)
         except Exception as exc:
-            domino_job_store.init_db()
             job_id = domino_job_store.create_job(
                 username=username, branch=job_request.branch,
                 tier=job_request.hardware_tier, spec_path=job_request.spec_path,
@@ -69,15 +66,7 @@ def register_job_routes(rt):
         """Cancel all queued (not yet submitted) jobs for the current user."""
         username = _get_username()
         if _DOMINO_AVAILABLE:
-            with domino_job_store._conn() as con:
-                con.execute(
-                    """
-                    UPDATE domino_jobs
-                    SET status = 'cancelled'
-                    WHERE username = ? AND status = 'queued' AND domino_run_id IS NULL
-                    """,
-                    (username,),
-                )
+            domino_job_store.cancel_queued_jobs(username)
         return _render_job_history_table(username)
 
     rt("/cancel-queued-jobs")(cancel_queued_jobs)

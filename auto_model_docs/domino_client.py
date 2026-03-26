@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -89,7 +90,6 @@ def _domino_request(
             with httpx.Client(timeout=timeout) as client:
                 resp = client.request(method, url, json=json, headers=headers)
                 if resp.status_code in _RETRYABLE_STATUS_CODES and attempt < max_retries:
-                    import time
                     backoff = 2 ** attempt
                     logger.warning(
                         "Domino API %s %s returned %s, retrying in %ss (attempt %s/%s)",
@@ -105,7 +105,6 @@ def _domino_request(
         except Exception as exc:
             last_exc = exc
             if attempt < max_retries:
-                import time
                 backoff = 2 ** attempt
                 logger.warning(
                     "Domino API %s %s failed (%s), retrying in %ss (attempt %s/%s)",
@@ -395,8 +394,6 @@ def get_job_status(run_id: str) -> dict[str, Any]:
         local = "running"
     elif raw_lower in _PENDING_STATUSES:
         local = "pending"
-    elif raw_lower == "submitted":
-        local = "submitted"
     else:
         local = "submitted"
 

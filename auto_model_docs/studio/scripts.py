@@ -40,12 +40,6 @@ MAIN_DOM_JS = r"""
                 }
             }
             var pid = null;
-            // Diagnostic: log origin info
-            if (window.parent !== window) {
-                try {
-                } catch(e) {
-                }
-            }
             // 1. Own query string (direct / non-proxied access)
             pid = new URLSearchParams(window.location.search).get('projectId');
             // 2. Own hash fragment (#projectId=xxx — survives proxies)

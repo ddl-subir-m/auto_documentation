@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
@@ -29,7 +28,6 @@ from .state import (
 from .ui_components import (
     _sanitize_optional_int,
     _sanitize_optional_float,
-    _parse_comma_list,
     _db_record_to_dataclass,
 )
 
@@ -240,7 +238,7 @@ async def _poll_domino_jobs() -> None:
                     if mapped != row.get("status"):
                         updates["status"] = mapped
                     if mapped in ("succeeded", "failed", "cancelled"):
-                        updates["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
+                        updates["completed_at"] = domino_job_store._now_iso()
                     if updates:
                         domino_job_store.update_job(row["id"], **updates)
                 except Exception as exc:
@@ -280,30 +278,9 @@ async def _poll_domino_jobs() -> None:
             logger.warning("Domino poll loop error: %s", exc, exc_info=True)
 
 
-def _map_domino_status(domino_status: str) -> str:
-    """Map a raw Domino API status string to our internal status."""
-    from domino_client import (
-        _SUCCEEDED_STATUSES, _FAILED_STATUSES, _CANCELLED_STATUSES,
-        _RUNNING_STATUSES, _PENDING_STATUSES,
-    )
-    ds = domino_status.lower()
-    if ds in _SUCCEEDED_STATUSES:
-        return "succeeded"
-    if ds in _FAILED_STATUSES:
-        return "failed"
-    if ds in _CANCELLED_STATUSES:
-        return "cancelled"
-    if ds in _RUNNING_STATUSES:
-        return "running"
-    if ds in _PENDING_STATUSES:
-        return "pending"
-    return "submitted"
-
-
 def _reconcile_stale_jobs() -> None:
     """On startup, mark any submitted/running jobs as failed (app restarted)."""
     try:
-        import sqlite3
         with domino_job_store._conn() as con:
             con.execute(
                 """

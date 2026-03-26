@@ -47,7 +47,7 @@ def _migrate_project_id(con: sqlite3.Connection) -> None:
 @contextmanager
 def _conn():
     path = _db_path()
-    con = sqlite3.connect(str(path), check_same_thread=False)
+    con = sqlite3.connect(str(path), check_same_thread=False, timeout=5.0)
     con.row_factory = sqlite3.Row
     try:
         yield con
@@ -186,6 +186,19 @@ def clear_terminal_jobs(username: str) -> None:
             """
             DELETE FROM domino_jobs
             WHERE username = ? AND status IN ('succeeded', 'failed', 'cancelled')
+            """,
+            (username,),
+        )
+
+
+def cancel_queued_jobs(username: str) -> None:
+    """Cancel all queued (not yet submitted) jobs for a user."""
+    with _conn() as con:
+        con.execute(
+            """
+            UPDATE domino_jobs
+            SET status = 'cancelled'
+            WHERE username = ? AND status = 'queued' AND domino_run_id IS NULL
             """,
             (username,),
         )
