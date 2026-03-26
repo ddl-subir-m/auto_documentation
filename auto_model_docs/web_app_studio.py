@@ -526,8 +526,7 @@ def index(req: Request):
                 Span(
                     "\u24d8",
                     cls="info-tooltip",
-                    data_tooltip="Output files are written here by the Domino job.",
-                    id="output-dir-hint",
+                    data_tooltip="Output files are written to this path in the project's dataset.",
                 ),
                 cls="label-row",
             ),

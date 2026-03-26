@@ -551,16 +551,9 @@ class TestBuildJobCommandStr:
         assert "--spec" in cmd
         assert "/mnt/data/specs/my_spec.yaml" in cmd
 
-    def test_artifacts_copy_step(self):
-        """Command should end with a cp step to /mnt/artifacts/auto_ml."""
-        req = _make_job_request(output_dir="/mnt/data/output")
-        cmd = _bld_cmd(req, spec_path=None)
-        assert "mkdir -p /mnt/artifacts/auto_ml" in cmd
-        assert "cp -r /mnt/data/output/*" in cmd
-
-    @skip_no_webapp
-    def test_artifacts_copy_infers_output_dir(self):
-        """When output_dir is None, cp should use shell expansion for DOMINO_PROJECT_NAME."""
+    def test_no_artifacts_copy(self):
+        """Command should not include any cp or artifacts step."""
         req = _make_job_request(output_dir=None)
         cmd = _bld_cmd(req, spec_path=None)
-        assert "cp -r /mnt/data/${DOMINO_PROJECT_NAME:-output}/*" in cmd
+        assert "cp" not in cmd
+        assert "artifacts" not in cmd

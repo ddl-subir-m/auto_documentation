@@ -124,26 +124,9 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
 
 
 def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
-    """Build the full shell command for a Domino job.
-
-    Wraps the CLI command and appends a copy step to write results
-    to /mnt/artifacts/auto_ml so they appear in the Domino job's
-    Artifacts tab.
-    """
+    """Build the full shell command for a Domino job."""
     parts = _build_job_command(req, spec_path)
-    cli_cmd = " ".join(parts)
-    # Use shell variable expansion so the output dir resolves at job runtime,
-    # matching what the CLI infers from the job's own environment.
-    if req.output_dir:
-        output_dir = req.output_dir
-    else:
-        output_dir = '/mnt/data/${DOMINO_PROJECT_NAME:-output}'
-    artifacts_dir = "/mnt/artifacts/auto_ml"
-    return (
-        f"{cli_cmd}"
-        f" && mkdir -p {artifacts_dir}"
-        f" && cp -r {output_dir}/* {artifacts_dir}/"
-    )
+    return " ".join(parts)
 
 
 # ---------------------------------------------------------------------------
