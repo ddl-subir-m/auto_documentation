@@ -1106,7 +1106,7 @@ button.primary:active {
 }
 .history-toggle::-webkit-details-marker { display: none; }
 .history-toggle::before {
-    content: "\25b6";
+    content: "\\25b6";
     display: inline-block;
     font-size: 0.5rem;
     margin-right: 0.375rem;

@@ -544,11 +544,24 @@ MAIN_DOM_JS = r"""
             if (_htmxBusy) return;
             var el = document.getElementById('job-history-content');
             if (!el) return;
+            // Preserve <details> open state; auto-open when completed count changes
+            var wasOpen = false;
+            var prevCount = 0;
+            var details = el.querySelector('details');
+            if (details) {
+                wasOpen = details.open;
+                prevCount = details.querySelectorAll('tbody tr').length;
+            }
             fetch('job-history')
                 .then(function(r) { return r.text(); })
                 .then(function(html) {
                     if (!_htmxBusy) {
                         el.innerHTML = html;
+                        var d = el.querySelector('details');
+                        if (d) {
+                            var newCount = d.querySelectorAll('tbody tr').length;
+                            if (wasOpen || newCount > prevCount) d.open = true;
+                        }
                         if (window.htmx) htmx.process(el);
                     }
                 })
