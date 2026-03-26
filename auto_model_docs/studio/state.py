@@ -155,10 +155,11 @@ _TARGET_PROJECT_NAME: Optional[str] = None
 # Target project helpers
 # ---------------------------------------------------------------------------
 
-def _set_target_project(project_id: Optional[str]) -> None:
+def _set_target_project(project_id: str) -> None:
     """Capture the target project from the ?projectId query param.
 
-    Called once on the first page load.  All subsequent operations use
+    Called once on the first page load (after the guard confirms the
+    param is present).  All subsequent operations use
     ``_get_target_project_id()`` / ``_get_target_project_name()`` so that
     specs, jobs, output, and history are scoped to this project.
     """
@@ -167,21 +168,17 @@ def _set_target_project(project_id: Optional[str]) -> None:
     if _self._TARGET_PROJECT_ID is not None:
         return  # already captured
 
-    pid = project_id or os.environ.get("DOMINO_PROJECT_ID") or None
-    _self._TARGET_PROJECT_ID = pid
+    _self._TARGET_PROJECT_ID = project_id
 
-    if pid and _DOMINO_AVAILABLE and domino_client:
-        info = domino_client.resolve_project(pid)
+    if _DOMINO_AVAILABLE and domino_client:
+        info = domino_client.resolve_project(project_id)
         if info:
             _self._TARGET_PROJECT_NAME = info.name
             if domino_job_store:
                 domino_job_store.set_project_name(info.name)
             return
-    # Fallback: use the app's own project name
-    fallback = os.environ.get("DOMINO_PROJECT_NAME") or None
-    _self._TARGET_PROJECT_NAME = fallback
-    if domino_job_store and fallback:
-        domino_job_store.set_project_name(fallback)
+
+    logger.warning("Could not resolve project name for %s", project_id)
 
 
 def _get_target_project_id() -> Optional[str]:

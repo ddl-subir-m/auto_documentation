@@ -80,12 +80,8 @@ def index(req: Request):
         scheme = req.headers.get("x-forwarded-proto", "https")
         domino_client.set_ui_host(host, scheme)
 
-    # Capture the target project from the ?projectId query param.
+    # Guard: projectId query param is required.
     project_id = req.query_params.get("projectId") or None
-    _set_target_project(project_id)
-    project_id = _get_target_project_id() or project_id
-
-    # Guard: projectId is required — show an error page if missing.
     if not project_id:
         return (
             Title("Auto Model Docs Studio"),
@@ -121,6 +117,9 @@ def index(req: Request):
                 cls="page",
             ),
         )
+
+    # Capture the target project for all downstream operations.
+    _set_target_project(project_id)
 
     # Resolve display name from the (now-cached) target project.
     project_display_name: Optional[str] = None
