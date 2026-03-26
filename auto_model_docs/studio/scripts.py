@@ -442,7 +442,7 @@ MAIN_DOM_JS = r"""
                 baseUrlField.style.display = isOpenAI ? 'flex' : 'none';
             }
             if (modelNameField) {
-                modelNameField.style.display = isOpenAI ? 'flex' : 'none';
+                modelNameField.style.display = 'flex';
             }
             var modelInput = document.getElementById('field-model');
             if (modelInput) {
@@ -450,10 +450,12 @@ MAIN_DOM_JS = r"""
                     if (!modelInput.value || modelInput.value === ANTHROPIC_DEFAULT_MODEL) {
                         modelInput.value = OPENAI_DEFAULT_MODEL;
                     }
+                    modelInput.placeholder = OPENAI_DEFAULT_MODEL;
                 } else {
                     if (!modelInput.value || modelInput.value === OPENAI_DEFAULT_MODEL) {
                         modelInput.value = ANTHROPIC_DEFAULT_MODEL;
                     }
+                    modelInput.placeholder = ANTHROPIC_DEFAULT_MODEL;
                 }
             }
         }
