@@ -232,8 +232,8 @@ async def _poll_domino_jobs() -> None:
                     continue
                 try:
                     status_info = domino_client.get_job_status(run_id)
-                    domino_status = status_info.get("status", "")
-                    mapped = _map_domino_status(domino_status)
+                    domino_status = status_info.get("domino_status", "")
+                    mapped = status_info.get("local_status", "submitted")
                     updates: dict[str, Any] = {}
                     if domino_status != row.get("domino_status"):
                         updates["domino_status"] = domino_status
