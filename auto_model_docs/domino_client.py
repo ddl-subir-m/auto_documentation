@@ -217,8 +217,20 @@ def list_branches_api(project_id: str, search: str = "") -> list[dict[str, Any]]
             f"/v4/projects/{project_id}/gitRepositories/{info.main_repo_id}/git/branches",
             params={"count": 300, "searchPattern": search},
         )
+        logger.info("Branches API response keys: %s", list(data.keys()) if isinstance(data, dict) else type(data).__name__)
         branches = []
-        items = data if isinstance(data, list) else data.get("branches", data.get("data", []))
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            # Domino paginates as {"items": [...], "currentItemCount": …, …}
+            items = (
+                data.get("items")
+                or data.get("branches")
+                or data.get("data")
+                or []
+            )
+        else:
+            items = []
         for item in items:
             if isinstance(item, dict):
                 name = item.get("name") or item.get("value", "")
