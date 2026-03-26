@@ -115,3 +115,21 @@ def register_job_routes(rt):
         return _render_job_history_table(username)
 
     rt("/cancel-queued-jobs")(cancel_queued_jobs)
+
+    async def stop_job_history(req: Request):
+        """Stop a job and return the updated history table."""
+        form = await req.form()
+        job_id = form.get("job_id")
+        username = _get_username()
+        if job_id and _DOMINO_AVAILABLE:
+            row = domino_job_store.get_job(job_id)
+            if row and row.get("domino_run_id"):
+                try:
+                    domino_client.stop_job(row["domino_run_id"])
+                except Exception:
+                    pass
+            if row:
+                domino_job_store.update_job(job_id, status="cancelled")
+        return _render_job_history_table(username)
+
+    rt("/stop-job-history")(stop_job_history)

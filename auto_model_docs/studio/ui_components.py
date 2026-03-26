@@ -292,20 +292,36 @@ def _render_job_history_table(username: str) -> FT:
 
     rows = []
     for j in jobs:
-        status_cls = f"history-status history-status-{j.get('status', 'queued')}"
+        status = j.get("status", "queued")
+        status_cls = f"history-status history-status-{status}"
         job_url = j.get("job_url")
         link_cell = Td(
             A("View \u2192", href=job_url, target="_blank") if job_url else "\u2014"
         )
         branch_val = j.get("branch") or "\u2014"
         tier_val = j.get("hardware_tier") or "\u2014"
+        # Stop button for active jobs
+        action_cell = Td()
+        if status in ("submitted", "running", "queued"):
+            action_cell = Td(
+                A(
+                    "Stop",
+                    hx_post="stop-job-history",
+                    hx_vals=f'{{"job_id": "{j.get("id")}"}}',
+                    hx_target="#job-history-content",
+                    hx_swap="innerHTML",
+                    cls="terminal-action",
+                    title="Stop this job",
+                ),
+            )
         rows.append(
             Tr(
                 Td(branch_val, title=branch_val),
                 Td(tier_val, title=tier_val),
-                Td(Span(j.get("status", "\u2014").upper(), cls=status_cls)),
+                Td(Span(status.upper(), cls=status_cls)),
                 Td((j.get("submitted_at") or "\u2014")[:16].replace("T", " ")),
                 link_cell,
+                action_cell,
             )
         )
 
@@ -319,6 +335,7 @@ def _render_job_history_table(username: str) -> FT:
                         Th("Status"),
                         Th("Submitted"),
                         Th("Link"),
+                        Th(""),
                     )
                 ),
                 Tbody(*rows),
