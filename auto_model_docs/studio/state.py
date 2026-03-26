@@ -149,6 +149,7 @@ _STARTUP_WARNINGS: list = []
 # and history are scoped to the target project, not the app's own project.
 _TARGET_PROJECT_ID: Optional[str] = None
 _TARGET_PROJECT_NAME: Optional[str] = None
+_warned_no_project_name: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -198,10 +199,11 @@ def _get_target_project_name() -> Optional[str]:
 def _get_default_output_dir() -> Path:
     """Return the default output directory scoped to the target project."""
     if Path("/mnt/data").exists():
-        project_name = (
-            _TARGET_PROJECT_NAME
-            or os.environ.get("DOMINO_PROJECT_NAME", "output")
-        )
+        global _warned_no_project_name
+        if not _TARGET_PROJECT_NAME and not _warned_no_project_name:
+            logger.warning("No target project name set; defaulting output dir to 'output'")
+            _warned_no_project_name = True
+        project_name = _TARGET_PROJECT_NAME or "output"
         output = Path(f"/mnt/data/{project_name}")
         output.mkdir(parents=True, exist_ok=True)
         return output
@@ -249,11 +251,11 @@ def _resolve_target_project_name(project_id: Optional[str] = None) -> Optional[s
 
 
 def _resolve_request_project_id(req) -> Optional[str]:
-    """Extract project ID from request query params, captured state, or env."""
+    """Extract project ID from request query params or captured state."""
     for key in ("projectId", "project_id"):
         pid = req.query_params.get(key)
         if pid:
             return pid
     if _TARGET_PROJECT_ID:
         return _TARGET_PROJECT_ID
-    return os.environ.get("DOMINO_PROJECT_ID", "") or None
+    return None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -9,8 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+logger = logging.getLogger(__name__)
 
 _PROJECT_NAME_OVERRIDE: Optional[str] = None
+_warned_no_project: bool = False
 
 
 def set_project_name(name: Optional[str]) -> None:
@@ -25,10 +28,11 @@ def set_project_name(name: Optional[str]) -> None:
 
 def _db_path() -> Path:
     if Path("/mnt/data").exists():
-        project = (
-            _PROJECT_NAME_OVERRIDE
-            or os.environ.get("DOMINO_PROJECT_NAME", "autodoc")
-        )
+        global _warned_no_project
+        if not _PROJECT_NAME_OVERRIDE and not _warned_no_project:
+            logger.warning("No target project name set for job store; defaulting to 'autodoc'")
+            _warned_no_project = True
+        project = _PROJECT_NAME_OVERRIDE or "autodoc"
         base = Path(f"/mnt/data/{project}")
     else:
         base = Path(".")

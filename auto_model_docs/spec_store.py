@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
+_warned_no_project: bool = False
 
 
 def _specs_dir(project_name: Optional[str] = None) -> Path:
@@ -16,7 +20,11 @@ def _specs_dir(project_name: Optional[str] = None) -> Path:
     so the Domino job (which may run in a different project) can access them.
     """
     if Path("/mnt/data").exists():
-        project = project_name or os.environ.get("DOMINO_PROJECT_NAME", "autodoc")
+        global _warned_no_project
+        if not project_name and not _warned_no_project:
+            logger.warning("No target project name for spec store; defaulting to 'autodoc'")
+            _warned_no_project = True
+        project = project_name or "autodoc"
         base = Path(f"/mnt/data/{project}/autodoc_specs")
     else:
         base = Path("./autodoc_specs")

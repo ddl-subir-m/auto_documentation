@@ -46,15 +46,15 @@ async def _parse_request(req: Request) -> JobRequest:
         spec_content = content.decode("utf-8", errors="replace")
         spec_filename = getattr(spec_upload, "filename", None)
 
-    # projectId: prefer form field, fall back to captured target, query param, env var
+    # projectId: prefer form field, fall back to captured target or query param
     project_id = (
         form.get("target_project")
         or form.get("project_id")
         or _get_target_project_id()
         or req.query_params.get("projectId")
-        or os.environ.get("DOMINO_PROJECT_ID")
-        or None
     )
+    if not project_id:
+        raise RuntimeError("No target project ID available. The app requires ?projectId= in the URL.")
 
     return JobRequest(
         spec_path=form.get("spec_path") or None,

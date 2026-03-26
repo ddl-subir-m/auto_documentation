@@ -41,8 +41,7 @@ def get_auth_headers(*, required: bool = True) -> dict[str, str]:
 
 
 def resolve_project_id(project_id: Optional[str] = None) -> str:
-    """Return the given project ID, falling back to DOMINO_PROJECT_ID env var."""
-    pid = project_id or os.environ.get("DOMINO_PROJECT_ID", "")
-    if not pid:
+    """Return the given project ID. Does not fall back to the app project."""
+    if not project_id:
         raise RuntimeError("No project ID available")
-    return pid
+    return project_id

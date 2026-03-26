@@ -200,21 +200,15 @@ def get_project_context(
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve (project_id, project_name, project_owner).
 
-    When *project_id* is provided, calls the Domino API to look up the
-    project name and owner.  Otherwise falls back to env vars.
+    Requires *project_id* — does not fall back to the app project.
     """
-    if project_id:
-        info = resolve_project(project_id)
-        if info:
-            return info.id, info.name, info.owner_username
-        # Resolution failed — return what we have
-        return project_id, _env_project_name(), _env_project_owner()
-
-    return (
-        _env_project_id(),
-        _env_project_name(),
-        _env_project_owner(),
-    )
+    if not project_id:
+        return None, None, None
+    info = resolve_project(project_id)
+    if info:
+        return info.id, info.name, info.owner_username
+    # Resolution failed — return the ID but no name/owner
+    return project_id, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -305,10 +299,9 @@ def list_branches() -> list[dict[str, Any]]:
 def list_hardware_tiers(project_id: Optional[str] = None) -> list[dict[str, Any]]:
     """Return available hardware tiers for a project.
 
-    When *project_id* is given, queries that project's tiers via the API.
-    Otherwise falls back to env-var project or the global tiers endpoint.
+    Requires *project_id* — does not fall back to the app project.
     """
-    pid = project_id or _env_project_id()
+    pid = project_id
     if not pid:
         logger.warning("No project ID available to list hardware tiers")
         return []
@@ -447,11 +440,10 @@ def get_job_status(run_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def stop_job(run_id: str, project_id: Optional[str] = None) -> None:
-    """Stop a running Domino job."""
-    pid = project_id or _env_project_id()
-    payload: dict[str, Any] = {"jobId": run_id, "commitResults": True}
-    if pid:
-        payload["projectId"] = pid
+    """Stop a running Domino job. Requires project_id."""
+    if not project_id:
+        raise ValueError("project_id is required to stop a job")
+    payload: dict[str, Any] = {"jobId": run_id, "commitResults": True, "projectId": project_id}
     try:
         logger.info("Stopping job %s (project=%s)", run_id, pid)
         _domino_request("POST", "/v4/jobs/stop", json=payload)
