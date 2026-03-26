@@ -278,7 +278,11 @@ def _render_job_history_table(username: str) -> FT:
     """Render the job history table for a user."""
     if not _DOMINO_AVAILABLE:
         return Div()
-    jobs = domino_job_store.get_user_jobs(username, limit=50)
+    try:
+        jobs = domino_job_store.get_user_jobs(username, limit=50)
+    except RuntimeError:
+        # Project not yet resolved (pre-bootstrap page load)
+        return Div()
     if not jobs:
         return Div(
             P("No jobs submitted yet.", cls="history-empty"),

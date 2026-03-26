@@ -161,6 +161,9 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
         else:
             spec_path = req.spec_path
 
+    if not spec_path:
+        raise ValueError("A spec file is required. Please select or upload a spec before generating documentation.")
+
     # Build command and create the DB row (status=queued)
     command_str = _build_job_command_str(req, spec_path)
 

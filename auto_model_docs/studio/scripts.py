@@ -500,6 +500,36 @@ MAIN_DOM_JS = r"""
             sync();
         })();
 
+        // Block form submission when no spec is selected
+        document.body.addEventListener('htmx:confirm', function(e) {
+            var form = e.detail.elt;
+            if (form.id !== 'main-form') return;
+            var specPath = document.getElementById('field-spec_path');
+            var specUpload = document.getElementById('spec-machine-upload');
+            var hasSpec = (specPath && specPath.value.trim()) ||
+                          (specUpload && specUpload.files && specUpload.files.length > 0);
+            if (!hasSpec) {
+                e.preventDefault();
+                var msg = 'Please select or upload a spec file before generating documentation.';
+                var existing = document.getElementById('spec-validation-msg');
+                if (!existing) {
+                    var indicator = document.getElementById('spec-selected-indicator');
+                    if (indicator) {
+                        var el = document.createElement('div');
+                        el.id = 'spec-validation-msg';
+                        el.style.cssText = 'color:#C20A29;font-size:13px;margin-top:6px;';
+                        el.textContent = msg;
+                        indicator.parentNode.insertBefore(el, indicator.nextSibling);
+                    } else {
+                        alert(msg);
+                    }
+                }
+            } else {
+                var existing = document.getElementById('spec-validation-msg');
+                if (existing) existing.remove();
+            }
+        });
+
         // Poll job history — pause while an HTMX request targets the history panel
         var _htmxBusy = false;
         document.body.addEventListener('htmx:beforeRequest', function(e) {
