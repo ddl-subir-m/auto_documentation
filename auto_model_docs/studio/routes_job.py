@@ -54,14 +54,6 @@ def register_job_routes(rt):
 
     rt("/job-history")(job_history)
 
-    def clear_job_history():
-        username = _get_username()
-        if _DOMINO_AVAILABLE:
-            domino_job_store.clear_terminal_jobs(username)
-        return _render_job_history_table(username)
-
-    rt("/clear-job-history")(clear_job_history)
-
     def cancel_queued_jobs():
         """Cancel all queued (not yet submitted) jobs for the current user."""
         username = _get_username()

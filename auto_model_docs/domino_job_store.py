@@ -186,18 +186,6 @@ def get_oldest_queued_job(username: str) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
-def clear_terminal_jobs(username: str) -> None:
-    """Delete completed/failed/cancelled rows for a user (soft-clear history)."""
-    with _conn() as con:
-        con.execute(
-            """
-            DELETE FROM domino_jobs
-            WHERE username = ? AND status IN ('succeeded', 'failed', 'cancelled')
-            """,
-            (username,),
-        )
-
-
 def cancel_queued_jobs(username: str) -> None:
     """Cancel all queued (not yet submitted) jobs for a user."""
     with _conn() as con:

@@ -1094,6 +1094,28 @@ button.primary:active {
 .history-status-succeeded { background: rgba(40,164,100,0.1); color: var(--success); }
 .history-status-failed { background: rgba(186,26,26,0.1); color: var(--error); }
 .history-status-cancelled { background: rgba(144,68,0,0.1); color: var(--warning); }
+.history-toggle {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--primary);
+    cursor: pointer;
+    padding: 0.375rem 0;
+    margin-top: 0.25rem;
+    list-style: none;
+    user-select: none;
+}
+.history-toggle::-webkit-details-marker { display: none; }
+.history-toggle::before {
+    content: "\25b6";
+    display: inline-block;
+    font-size: 0.5rem;
+    margin-right: 0.375rem;
+    transition: transform 0.15s ease;
+    vertical-align: middle;
+}
+details[open] > .history-toggle::before {
+    transform: rotate(90deg);
+}
 .history-actions {
     display: flex;
     justify-content: flex-end;

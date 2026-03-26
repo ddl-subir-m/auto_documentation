@@ -288,8 +288,9 @@ def _render_job_history_table(username: str) -> FT:
             P("No jobs submitted yet.", cls="history-empty"),
         )
 
-    rows = []
-    for j in jobs:
+    _ACTIVE_STATUSES = {"queued", "submitted", "pending", "running"}
+
+    def _job_row(j):
         status = j.get("status", "queued")
         status_cls = f"history-status history-status-{status}"
         job_url = j.get("job_url")
@@ -298,9 +299,8 @@ def _render_job_history_table(username: str) -> FT:
         )
         branch_val = j.get("branch") or "\u2014"
         tier_val = j.get("hardware_tier") or "\u2014"
-        # Stop button for active jobs
         action_cell = Td()
-        if status in ("submitted", "pending", "running", "queued"):
+        if status in _ACTIVE_STATUSES:
             action_cell = Td(
                 A(
                     "Stop",
@@ -312,16 +312,21 @@ def _render_job_history_table(username: str) -> FT:
                     title="Stop this job",
                 ),
             )
-        rows.append(
-            Tr(
-                Td(branch_val, title=branch_val),
-                Td(tier_val, title=tier_val),
-                Td(Span(status.upper(), cls=status_cls)),
-                Td((j.get("submitted_at") or "\u2014")[:16].replace("T", " ")),
-                link_cell,
-                action_cell,
-            )
+        return Tr(
+            Td(branch_val, title=branch_val),
+            Td(tier_val, title=tier_val),
+            Td(Span(status.upper(), cls=status_cls)),
+            Td((j.get("submitted_at") or "\u2014")[:16].replace("T", " ")),
+            link_cell,
+            action_cell,
         )
+
+    active_jobs = [j for j in jobs if j.get("status", "queued") in _ACTIVE_STATUSES]
+    completed_jobs = [j for j in jobs if j.get("status", "queued") not in _ACTIVE_STATUSES]
+
+    header = Thead(Tr(
+        Th("Branch"), Th("Tier"), Th("Status"), Th("Submitted"), Th("Link"), Th(""),
+    ))
 
     # Queue-full warning when any job is queued
     queue_banner = None
@@ -340,33 +345,34 @@ def _render_job_history_table(username: str) -> FT:
             role="alert",
         )
 
-    return Div(
-        queue_banner,
-        Div(
-            Table(
-                Thead(
-                    Tr(
-                        Th("Branch"),
-                        Th("Tier"),
-                        Th("Status"),
-                        Th("Submitted"),
-                        Th("Link"),
-                        Th(""),
-                    )
-                ),
-                Tbody(*rows),
-                cls="history-table",
-            ),
+    sections = [queue_banner]
+
+    # Active jobs — always visible
+    if active_jobs:
+        sections.append(Div(
+            Table(header, Tbody(*[_job_row(j) for j in active_jobs]), cls="history-table"),
             cls="history-table-wrap",
-        ),
-        Div(
-            A(
-                "Clear history",
-                hx_post="clear-job-history",
-                hx_target="#job-history-content",
-                hx_swap="innerHTML",
-                cls="terminal-action",
-            ),
+        ))
+
+    # Completed jobs — collapsible
+    if completed_jobs:
+        n = len(completed_jobs)
+        label = f"Show {n} completed job{'s' if n != 1 else ''}"
+        sections.append(
+            Details(
+                Summary(label, cls="history-toggle"),
+                Div(
+                    Table(header, Tbody(*[_job_row(j) for j in completed_jobs]), cls="history-table"),
+                    cls="history-table-wrap",
+                ),
+                # Auto-open when there are no active jobs
+                open=not active_jobs,
+            )
+        )
+
+    # Actions row — only cancel-queued when relevant
+    if has_queued:
+        sections.append(Div(
             A(
                 "Cancel queued",
                 hx_post="cancel-queued-jobs",
@@ -374,7 +380,8 @@ def _render_job_history_table(username: str) -> FT:
                 hx_swap="innerHTML",
                 cls="terminal-action",
                 title="Cancel all queued jobs that haven't been submitted yet",
-            ) if has_queued else None,
+            ),
             cls="history-actions",
-        ),
-    )
+        ))
+
+    return Div(*sections)
