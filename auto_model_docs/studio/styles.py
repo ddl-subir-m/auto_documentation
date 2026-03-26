@@ -153,16 +153,6 @@ a:hover { color: var(--primary-container); }
     line-height: 1.5;
 }
 
-/* Cross-project banner */
-.cross-project-banner {
-    margin-top: 0.5rem;
-    padding: 0.625rem 1rem;
-    background: var(--primary-fixed);
-    border-left: 3px solid var(--primary);
-    border-radius: 2px;
-    color: var(--on-surface);
-    font-size: 0.8125rem;
-}
 #project-id-resolved {
     font-size: 0.78rem;
     color: var(--outline);
@@ -700,13 +690,6 @@ a:hover { color: var(--primary-container); }
     color: var(--on-surface);
     margin-top: 0.5rem;
     display: none;
-}
-
-/* ── Domino fields visibility ─────────────────────────────────────── */
-.domino-fields {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
 }
 
 /* ── Domino job link ──────────────────────────────────────────────── */

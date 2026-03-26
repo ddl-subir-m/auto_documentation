@@ -237,9 +237,7 @@ async def _poll_domino_jobs() -> None:
         if not _DOMINO_AVAILABLE:
             continue
         try:
-            domino_job_store.init_db()
             # Update active jobs
-            import sqlite3
             with domino_job_store._conn() as con:
                 rows = con.execute(
                     "SELECT * FROM domino_jobs WHERE status IN ('submitted', 'running')"
@@ -253,38 +251,48 @@ async def _poll_domino_jobs() -> None:
                     status_info = domino_client.get_job_status(run_id)
                     domino_status = status_info.get("status", "")
                     mapped = _map_domino_status(domino_status)
-                    updates: dict[str, Any] = {"domino_status": domino_status}
+                    updates: dict[str, Any] = {}
+                    if domino_status != row.get("domino_status"):
+                        updates["domino_status"] = domino_status
                     if mapped != row.get("status"):
                         updates["status"] = mapped
                     if mapped in ("succeeded", "failed", "cancelled"):
                         updates["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
-                    domino_job_store.update_job(row["id"], **updates)
+                    if updates:
+                        domino_job_store.update_job(row["id"], **updates)
                 except Exception as exc:
                     logger.warning("Poll error for run %s: %s", run_id, exc)
 
-            # Promote queued jobs when a slot opens
-            username = _get_username()
-            active = domino_job_store.count_active_jobs(username)
-            if active <= _max_jobs():
-                oldest = domino_job_store.get_oldest_queued_job(username)
-                if oldest and not oldest.get("domino_run_id"):
-                    try:
-                        cmd = oldest.get("command", "")
-                        run_id = domino_client.submit_job(
-                            cmd,
-                            branch=oldest.get("branch"),
-                            tier_id=oldest.get("hardware_tier"),
-                            project_id=oldest.get("project_id"),
-                        )
-                        job_url = domino_client.build_job_url(run_id, project_id=oldest.get("project_id"))
-                        domino_job_store.update_job(
-                            oldest["id"],
-                            status="submitted",
-                            domino_run_id=run_id,
-                            job_url=job_url,
-                        )
-                    except Exception as exc:
-                        logger.warning("Failed to promote queued job %s: %s", oldest["id"], exc)
+            # Promote queued jobs for all users when slots open
+            with domino_job_store._conn() as con:
+                queued_users = con.execute(
+                    "SELECT DISTINCT username FROM domino_jobs WHERE status = 'queued'"
+                ).fetchall()
+            for user_row in queued_users:
+                uname = user_row["username"]
+                active = domino_job_store.count_active_jobs(uname)
+                if active > _max_jobs():
+                    continue
+                oldest = domino_job_store.get_oldest_queued_job(uname)
+                if not oldest or oldest.get("domino_run_id"):
+                    continue
+                try:
+                    cmd = oldest.get("command", "")
+                    run_id = domino_client.submit_job(
+                        cmd,
+                        branch=oldest.get("branch"),
+                        tier_id=oldest.get("hardware_tier"),
+                        project_id=oldest.get("project_id"),
+                    )
+                    job_url = domino_client.build_job_url(run_id, project_id=oldest.get("project_id"))
+                    domino_job_store.update_job(
+                        oldest["id"],
+                        status="submitted",
+                        domino_run_id=run_id,
+                        job_url=job_url,
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to promote queued job %s: %s", oldest["id"], exc)
         except Exception as exc:
             logger.warning("Domino poll loop error: %s", exc, exc_info=True)
 

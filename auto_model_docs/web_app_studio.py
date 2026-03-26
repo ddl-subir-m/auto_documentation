@@ -129,7 +129,9 @@ def index(req: Request):
                     }
 
                     // 4. Listen for postMessage from Domino parent frame
+                    var allowedOrigin = window.location.origin;
                     window.addEventListener('message', function(e) {
+                        if (e.origin !== allowedOrigin) return;
                         if (e.data && typeof e.data === 'object' && e.data.projectId) {
                             var url = new URL(window.location.href);
                             url.searchParams.set('projectId', e.data.projectId);
@@ -190,8 +192,8 @@ def index(req: Request):
 
     # Resolve display name from the (now-cached) target project.
     project_display_name: Optional[str] = None
-    if _DOMINO_AVAILABLE:
-        info = domino_client.resolve_project(project_id)
+    if _DOMINO_AVAILABLE and project_id:
+        info = domino_client.resolve_project(project_id)  # hits _project_cache
         if info:
             project_display_name = f"{info.owner_username}/{info.name}"
 

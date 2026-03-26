@@ -16,164 +16,9 @@ def get_output_defaults_script() -> str:
 
 
 SMART_POLLING_JS = r"""
-    // Minimal stub — app-mode smart polling removed; Domino uses HTMX.
     window._activateStatusPolling = function() {};
-    window.showOutputTab = function(tab) {
-        document.querySelectorAll('.tab-btn').forEach(function(btn) {
-            btn.classList.toggle('active', btn.dataset.tab === tab);
-        });
-        document.querySelectorAll('.tab-content').forEach(function(content) {
-            content.classList.toggle('hidden', content.id !== 'tab-' + tab);
-        });
-    };
 """
 
-# App-mode smart polling JS was removed — Domino uses HTMX polling.
-# The following block is kept only as a historical reference.
-_UNUSED = r"""
-    window.addEventListener('DOMContentLoaded', function() {
-        var htmxWorking = false;
-        if (typeof htmx !== 'undefined' && typeof htmx.ajax === 'function') {
-            htmxWorking = true;
-            console.log('htmx loaded and functional');
-        } else {
-            console.log('htmx not functional, using vanilla JS');
-        }
-
-        // Track last-known version so we only swap when something changed
-        var _lastLogVersion = -1;
-        var _pollActive = true;
-        var TERMINAL_STATES = ['idle', 'completed', 'failed', 'cancelled', 'succeeded'];
-
-        function getCurrentVersion() {
-            var card = document.querySelector('#status-panel [data-log-version]');
-            return card ? parseInt(card.dataset.logVersion, 10) : -1;
-        }
-
-        // Full fetch — replaces status panel HTML
-        function fetchFullStatus() {
-            var panel = document.getElementById('status-panel');
-            if (!panel) return Promise.resolve();
-            return fetch('status')
-                .then(function(r) { return r.text(); })
-                .then(function(html) {
-                    panel.innerHTML = html;
-                    _lastLogVersion = getCurrentVersion();
-                    // Fire the same event htmx would so styling hooks run
-                    document.body.dispatchEvent(new CustomEvent('statusUpdated'));
-                })
-                .catch(function(e) { console.log('Status fetch error:', e); });
-        }
-
-        // Lightweight check — only fetches full HTML when version changed
-        function smartPoll() {
-            if (!_pollActive) return;
-            fetch('status-check')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    var serverVersion = data.logVersion || 0;
-                    if (serverVersion !== _lastLogVersion) {
-                        fetchFullStatus();
-                    }
-                    // Stop polling when job reaches a terminal state
-                    if (TERMINAL_STATES.indexOf(data.status) !== -1 && serverVersion === _lastLogVersion) {
-                        _pollActive = false;
-                    }
-                })
-                .catch(function(e) { console.log('Status check error:', e); });
-        }
-
-        // Initialise version from DOM
-        _lastLogVersion = getCurrentVersion();
-
-        // Start smart polling for app mode
-        var formEl = document.getElementById('main-form');
-        var inferredMode = formEl ? formEl.getAttribute('data-execution-mode') : 'app';
-        if (inferredMode !== 'domino') {
-            setInterval(smartPoll, 2000);
-        }
-
-        // Re-activate polling when a new job starts (after form submit)
-        window._activateStatusPolling = function() {
-            _pollActive = true;
-            _lastLogVersion = -1; // Force an immediate update
-            _tabInitialized = false; // Reset so next swap shows Output tab
-            showOutputTab('live'); // Immediately show Output tab on new job
-        };
-
-        // Direct click handler on Generate button
-        var generateBtn = document.getElementById('generate-btn');
-        if (generateBtn) {
-            generateBtn.addEventListener('click', function(e) {
-                if (htmxWorking) return;
-                e.preventDefault();
-                e.stopPropagation();
-                // Block submission if spec validation failed
-                if (window._specValid === false) {
-                    var resultEl = document.getElementById('spec-validation-result');
-                    if (resultEl) resultEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    return;
-                }
-                var form = document.querySelector('form');
-                if (!form) return;
-                var formData = new FormData(form);
-                generateBtn.disabled = true;
-                generateBtn.textContent = 'Starting...';
-                fetch('run', { method: 'POST', body: formData })
-                .then(function(r) { return r.text(); })
-                .then(function(html) {
-                    var panel = document.getElementById('status-panel');
-                    if (panel) panel.innerHTML = html;
-                    generateBtn.disabled = false;
-                    generateBtn.textContent = 'Generate Documentation';
-                    window._activateStatusPolling();
-                })
-                .catch(function(e) {
-                    console.log('Form submit error:', e);
-                    generateBtn.disabled = false;
-                    generateBtn.textContent = 'Generate Documentation';
-                });
-            });
-        }
-
-        // Form submit backup
-        var form = document.querySelector('form');
-        if (form && !htmxWorking) {
-            form.addEventListener('submit', function(e) {
-                e.preventDefault();
-                var btn = document.getElementById('generate-btn');
-                if (btn) btn.click();
-            });
-        }
-
-        // Stop and Clear button delegation
-        document.addEventListener('click', function(e) {
-            var target = e.target;
-            if (target.textContent === 'Stop' && !target.classList.contains('terminal-action-disabled')) {
-                if (htmxWorking) return;
-                e.preventDefault();
-                fetch('stop', { method: 'POST' })
-                    .then(function(r) { return r.text(); })
-                    .then(function(html) {
-                        var panel = document.getElementById('status-panel');
-                        if (panel) panel.innerHTML = html;
-                        _lastLogVersion = getCurrentVersion();
-                    });
-            }
-            if (target.textContent === 'Clear' && !target.classList.contains('terminal-action-disabled')) {
-                if (htmxWorking) return;
-                e.preventDefault();
-                fetch('clear-terminal', { method: 'POST' })
-                    .then(function(r) { return r.text(); })
-                    .then(function(html) {
-                        var panel = document.getElementById('status-panel');
-                        if (panel) panel.innerHTML = html;
-                        _lastLogVersion = getCurrentVersion();
-                    });
-            }
-        });
-    });
-"""
 
 
 MAIN_DOM_JS = r"""
@@ -283,22 +128,13 @@ MAIN_DOM_JS = r"""
 
         detectLanguageFromCodeRoot();
 
-        // ── All DOM references declared up-front to avoid TDZ errors ──────
-        // Mode toggle removed — mode is auto-inferred server-side
-        const uploadBtnLabel    = document.querySelector('label.upload-btn');
-        // specSavedName removed — replaced by dataset browser UI
-        const appModeNote       = document.getElementById('app-mode-note');
-        const appNoteHint       = document.getElementById('app-mode-notebook-hint');
+        // ── DOM references ──────────────────────────────────────────────
         const apiKeyPassField   = document.getElementById('api-key-pass-field');
         const apiKeyCallout     = document.getElementById('api-key-callout');
         const apiKeySourceRadios = document.querySelectorAll('input[name="api_key_source"]');
         const providerSelect    = document.getElementById('field-provider');
         const baseUrlField      = document.getElementById('base-url-field');
         const modelNameField    = document.getElementById('model-name-field');
-
-        // ── Mode is server-rendered (no toggle) ─────────────────────────
-        // Domino fields are conditionally rendered server-side.
-        // Nothing to toggle at runtime.
 
         // ── API key source radio ───────────────────────────────────────────
         function applyApiKeySource(src) {
@@ -633,14 +469,8 @@ MAIN_DOM_JS = r"""
             toggleOpenAIFields();
         }
 
-        // Handle file upload and update spec path display (app mode)
-        var specUploadApp = document.querySelector('input[name="spec_upload"]');
-        var specPathDisplay = document.getElementById('field-spec_path_display');
-        var specPathHiddenApp = document.getElementById('field-spec_path');
-        var uploadFilenameEl = document.getElementById('upload-filename');
-
         // ── Spec validation helper ────────────────────────────────────
-        window._specValid = true; // tracks latest validation state
+        window._specValid = true;
         function validateSpecContent(file) {
             var fd = new FormData();
             fd.append('spec_upload', file);
@@ -650,32 +480,12 @@ MAIN_DOM_JS = r"""
                 .then(function(r) { return r.text(); })
                 .then(function(html) {
                     if (resultEl) resultEl.outerHTML = html;
-                    // Check if validation passed
                     window._specValid = html.indexOf('validation failed') === -1;
                 })
                 .catch(function() {
                     if (resultEl) resultEl.innerHTML = '';
-                    window._specValid = true; // don't block on network errors
-                });
-        }
-
-        if (specUploadApp && specPathDisplay) {
-            specUploadApp.addEventListener('change', function(e) {
-                var file = e.target.files[0];
-                if (file) {
-                    specPathDisplay.value = '[Uploaded] ' + file.name;
-                    specPathDisplay.disabled = true;
-                    if (specPathHiddenApp) specPathHiddenApp.value = '[Uploaded] ' + file.name;
-                    if (uploadFilenameEl) uploadFilenameEl.textContent = 'Using uploaded file: ' + file.name;
-                    validateSpecContent(file);
-                } else {
-                    specPathDisplay.disabled = false;
-                    if (uploadFilenameEl) uploadFilenameEl.textContent = '';
-                    var resultEl = document.getElementById('spec-validation-result');
-                    if (resultEl) resultEl.innerHTML = '';
                     window._specValid = true;
-                }
-            });
+                });
         }
 
         // Highlight active terminal lines with spinner

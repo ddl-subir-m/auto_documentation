@@ -590,21 +590,19 @@ class Orchestrator:
                 model_run_id=plan.model_run_id,
             )
 
-            errors = []
-
             async def _gen_block(block):
                 async with self.semaphore:
                     try:
-                        return await self.generator.generate(block, context)
+                        return ("ok", await self.generator.generate(block, context))
                     except Exception as e:
-                        errors.append(f"{block.type.value}: {str(e)}")
                         logger.error(f"Content generation failed for {block.type.value}: {e}")
-                        return None
+                        return ("err", f"{block.type.value}: {str(e)}")
 
             results_raw = await asyncio.gather(
                 *[_gen_block(b) for b in plan.content_blocks]
             )
-            contents = [c for c in results_raw if c is not None]
+            contents = [v for tag, v in results_raw if tag == "ok" and v is not None]
+            errors = [v for tag, v in results_raw if tag == "err"]
 
             return SectionResult(
                 plan=plan,

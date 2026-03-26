@@ -48,35 +48,15 @@ _project_cache: dict[str, ProjectInfo] = {}
 
 
 # ---------------------------------------------------------------------------
-# API host / auth resolution
+# API host / auth resolution (delegated to domino_auth)
 # ---------------------------------------------------------------------------
 
-def _resolve_api_host() -> str:
-    """Return the Domino API host (DOMINO_API_HOST).
-
-    Always uses the nucleus host directly — extended identity propagation
-    provides the viewer's JWT for auth, so the sidecar proxy is not needed.
-    """
-    host = os.environ.get("DOMINO_API_HOST") or ""
-    return host.rstrip("/")
+from domino_auth import resolve_api_host as _resolve_api_host
+from domino_auth import get_auth_headers as _raw_get_auth_headers
 
 
 def _get_auth_headers() -> dict[str, str]:
-    """Build Domino auth headers using the forwarded viewer JWT.
-
-    Extended identity propagation is always on; falls back to API key
-    for local development.
-    """
-    from auth_context import get_request_auth_header
-    forwarded = get_request_auth_header()
-    if forwarded:
-        return {"Authorization": forwarded}
-
-    api_key = os.environ.get("DOMINO_USER_API_KEY") or os.environ.get("DOMINO_API_KEY") or ""
-    if api_key:
-        return {"X-Domino-Api-Key": api_key}
-
-    return {}
+    return _raw_get_auth_headers(required=False)
 
 
 # ---------------------------------------------------------------------------
