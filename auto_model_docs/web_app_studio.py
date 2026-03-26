@@ -576,8 +576,19 @@ def index(req: Request):
             style="display: none;",
         )
     )
-    # Generation settings
+    # Gear button to open advanced settings modal
     more_settings_children.append(
+        Button(
+            NotStr('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'),
+            Span("Advanced settings"),
+            type="button",
+            id="gear-settings-btn",
+            onclick="document.getElementById('gear-popover').style.display='flex'",
+        )
+    )
+
+    # Gear modal with advanced fields (still inside the form)
+    gear_popover_fields = [
         Div(
             Div("Generation settings", cls="filter-section-title"),
             Div(
@@ -615,10 +626,7 @@ def index(req: Request):
                 ),
                 cls="advanced-grid",
             ),
-        )
-    )
-    # Provider & model
-    more_settings_children.append(
+        ),
         Div(
             Label("Provider", for_="field-provider"),
             Select(
@@ -628,9 +636,7 @@ def index(req: Request):
                 id="field-provider",
             ),
             cls="field",
-        )
-    )
-    more_settings_children.append(
+        ),
         Div(
             Div(
                 Label("Model", for_="field-model"),
@@ -641,9 +647,7 @@ def index(req: Request):
             cls="field",
             id="model-name-field",
             style="display: none;",
-        )
-    )
-    more_settings_children.append(
+        ),
         Div(
             Div(
                 Label("Base URL", for_="field-base_url"),
@@ -660,15 +664,35 @@ def index(req: Request):
             cls="field",
             id="base-url-field",
             style="display: none;",
-        )
-    )
-    more_settings_children.append(
+        ),
         Label(
             Input(type="checkbox", name="notebook", id="field-notebook", checked=True),
             Span("Generate notebook"),
             Span("\u24d8", cls="info-tooltip", data_tooltip="Saved alongside your document in the output directory.", id="app-mode-notebook-hint"),
             cls="checkbox-field",
             id="app-mode-note",
+        ),
+    ]
+
+    more_settings_children.append(
+        Div(
+            Div(
+                Div(
+                    Span("Advanced settings", cls="gear-popover-title"),
+                    Button(
+                        "\u2715",
+                        type="button",
+                        cls="gear-popover-close",
+                        onclick="document.getElementById('gear-popover').style.display='none'",
+                    ),
+                    id="gear-popover-header",
+                ),
+                Div(*gear_popover_fields, id="gear-popover-content"),
+                id="gear-popover-inner",
+            ),
+            id="gear-popover",
+            style="display: none;",
+            onclick="if(event.target===this)this.style.display='none'",
         )
     )
 

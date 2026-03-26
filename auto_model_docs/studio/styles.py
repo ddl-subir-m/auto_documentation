@@ -1303,6 +1303,83 @@ button.primary:active {
     margin: 0;
 }
 
+/* ── Gear settings button & modal ─────────────────────────────────── */
+#gear-settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 16px;
+    margin-top: 12px;
+    background: var(--surface-container);
+    color: var(--on-surface-variant);
+    border: 1px solid var(--outline-variant);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+#gear-settings-btn:hover {
+    background: var(--surface-container-high);
+}
+#gear-settings-btn svg {
+    flex-shrink: 0;
+}
+
+#gear-popover {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+}
+#gear-popover-inner {
+    background: #fff;
+    width: 420px;
+    max-height: 80vh;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#gear-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--outline-variant);
+}
+.gear-popover-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--on-surface);
+}
+.gear-popover-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: var(--on-surface-variant);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+}
+.gear-popover-close:hover {
+    background: var(--surface-container);
+}
+#gear-popover-content {
+    padding: 16px 20px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
 /* ── Responsive ───────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
     .action-bar {
