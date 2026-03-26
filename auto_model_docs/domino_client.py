@@ -213,11 +213,13 @@ def get_project_context(
 
 
 # ---------------------------------------------------------------------------
-# Branches (read from local git — unchanged)
+# Branches
 # ---------------------------------------------------------------------------
 
+
+
 def list_branches() -> list[dict[str, Any]]:
-    """Return git branches from the local repo."""
+    """Return git branches from the local repo (fallback)."""
     import subprocess
 
     try:

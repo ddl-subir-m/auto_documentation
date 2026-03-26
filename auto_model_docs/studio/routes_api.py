@@ -26,15 +26,9 @@ logger = logging.getLogger(__name__)
 def register_api_routes(rt):
     """Register all /api/* routes on the given rt decorator."""
 
-    def api_branches():
-        """Return an HTML <select> fragment with available git branches."""
-        if not _DOMINO_AVAILABLE:
-            return Select(Option("(Domino not available)", value=""), name="branch", id="field-branch")
-        branches = domino_client.list_branches()
-        options = [Option(b.get("name", ""), value=b.get("name", "")) for b in branches]
-        if not options:
-            options = [Option("main", value="main"), Option("master", value="master")]
-        return Select(*options, name="branch", id="field-branch")
+    def api_branches(req: Request):
+        """Return an HTML text input for branch selection."""
+        return Input(name="branch", id="field-branch", type="text", value="", placeholder="Default branch")
 
     rt("/api/branches")(api_branches)
 
