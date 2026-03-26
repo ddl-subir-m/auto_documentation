@@ -21,7 +21,6 @@ from studio.state import (
     _POLL_TASK,
     _STARTUP_WARNINGS,
     _set_target_project,
-    _get_target_project_id,
     _get_default_code_root,
     _get_default_output_dir,
     _get_default_spec_path,
@@ -182,8 +181,8 @@ def index(req: Request):
             ),
         )
 
-    # Capture the target project for all downstream operations.
-    _set_target_project(project_id)
+    if _set_target_project(project_id) and _DOMINO_AVAILABLE:
+        _reconcile_stale_jobs()
 
     # Resolve display name from the (now-cached) target project.
     project_display_name: Optional[str] = None
@@ -813,8 +812,9 @@ async def _on_startup():
     for w in _state._STARTUP_WARNINGS:
         logger.warning(f"Startup: [{w.level}] {w.message} {w.action}")
     if _DOMINO_AVAILABLE:
-        domino_job_store.init_db()
-        _reconcile_stale_jobs()
+        # NOTE: init_db() and _reconcile_stale_jobs() are deferred to
+        # _set_target_project() — the DB path depends on the target project
+        # which is only known after the first page load provides ?projectId.
         _state._POLL_TASK = asyncio.create_task(_poll_domino_jobs())
 
 

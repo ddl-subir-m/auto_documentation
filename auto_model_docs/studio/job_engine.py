@@ -22,6 +22,7 @@ from .state import (
     spec_store,
     domino_datasets,
     _get_target_project_id,
+    _get_target_project_name,
     _resolve_target_project_name,
     logger,
 )
@@ -215,7 +216,7 @@ async def _poll_domino_jobs() -> None:
     """Background task: poll Domino for active job status updates."""
     while True:
         await asyncio.sleep(10)
-        if not _DOMINO_AVAILABLE:
+        if not _DOMINO_AVAILABLE or not _get_target_project_name():
             continue
         try:
             # Update active jobs

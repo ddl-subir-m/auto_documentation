@@ -12,27 +12,31 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 _PROJECT_NAME_OVERRIDE: Optional[str] = None
-_warned_no_project: bool = False
 
 
 def set_project_name(name: Optional[str]) -> None:
     """Set the target project name used for the DB path.
 
-    Called once at startup after the ?projectId query param is resolved
-    so that job history is scoped to the target project.
+    Called once after the ?projectId query param is resolved so that
+    job history is scoped to the target project.
     """
     global _PROJECT_NAME_OVERRIDE
     _PROJECT_NAME_OVERRIDE = name
 
 
 def _db_path() -> Path:
+    """Return the path to the SQLite DB file.
+
+    Must only be called after ``set_project_name()`` has been invoked
+    (i.e. during request handling, not at startup).
+    """
     if Path("/mnt/data").exists():
-        global _warned_no_project
-        if not _PROJECT_NAME_OVERRIDE and not _warned_no_project:
-            logger.warning("No target project name set for job store; defaulting to 'autodoc'")
-            _warned_no_project = True
-        project = _PROJECT_NAME_OVERRIDE or "autodoc"
-        base = Path(f"/mnt/data/{project}")
+        if not _PROJECT_NAME_OVERRIDE:
+            raise RuntimeError(
+                "Job store DB path requires a project name; "
+                "call set_project_name() first"
+            )
+        base = Path(f"/mnt/data/{_PROJECT_NAME_OVERRIDE}")
     else:
         base = Path(".")
     base.mkdir(parents=True, exist_ok=True)

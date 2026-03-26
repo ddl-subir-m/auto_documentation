@@ -13,7 +13,6 @@ from .state import (
     EnvironmentWarning,
     _DOMINO_AVAILABLE,
     _get_default_code_root,
-    _get_default_output_dir,
     _max_jobs,
     domino_job_store,
 )
@@ -94,15 +93,10 @@ def _validate_environment() -> list:
                 action="Job submission may fail. Set DOMINO_API_HOST.",
             ))
 
-    # Ensure output directory exists
-    try:
-        _get_default_output_dir()
-    except Exception as exc:
-        warnings.append(EnvironmentWarning(
-            level="error",
-            message=f"Could not create output directory: {exc}",
-            action="Check disk permissions.",
-        ))
+    # NOTE: output directory validation is skipped at startup — the target
+    # project (and therefore the output path) is only known after the first
+    # request provides ?projectId.  The directory is created on-demand by
+    # _get_default_output_dir() during request handling.
 
     # Ensure cache directory exists
     try:

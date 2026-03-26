@@ -9,22 +9,20 @@ from typing import Any, Optional
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
-_warned_no_project: bool = False
 
 
 def _specs_dir(project_name: Optional[str] = None) -> Path:
-    """Return the specs directory, optionally scoped to a target project.
+    """Return the specs directory scoped to a target project.
 
-    When *project_name* is given the specs land in that project's dataset
-    so the Domino job (which may run in a different project) can access them.
+    *project_name* is required when running in Domino (``/mnt/data`` exists)
+    so specs land in the correct project dataset.
     """
     if Path("/mnt/data").exists():
-        global _warned_no_project
-        if not project_name and not _warned_no_project:
-            logger.warning("No target project name for spec store; defaulting to 'autodoc'")
-            _warned_no_project = True
-        project = project_name or "autodoc"
-        base = Path(f"/mnt/data/{project}/autodoc_specs")
+        if not project_name:
+            raise RuntimeError(
+                "Spec store requires a project name when running in Domino"
+            )
+        base = Path(f"/mnt/data/{project_name}/autodoc_specs")
     else:
         base = Path("./autodoc_specs")
     base.mkdir(parents=True, exist_ok=True)

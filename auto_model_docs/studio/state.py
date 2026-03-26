@@ -149,25 +149,23 @@ _STARTUP_WARNINGS: list = []
 # and history are scoped to the target project, not the app's own project.
 _TARGET_PROJECT_ID: Optional[str] = None
 _TARGET_PROJECT_NAME: Optional[str] = None
-_warned_no_project_name: bool = False
 
 
 # ---------------------------------------------------------------------------
 # Target project helpers
 # ---------------------------------------------------------------------------
 
-def _set_target_project(project_id: str) -> None:
+def _set_target_project(project_id: str) -> bool:
     """Capture the target project from the ?projectId query param.
 
-    Called once on the first page load (after the guard confirms the
-    param is present).  All subsequent operations use
-    ``_get_target_project_id()`` / ``_get_target_project_name()`` so that
-    specs, jobs, output, and history are scoped to this project.
+    Called on every page load but only acts on the first call.
+    Returns ``True`` when the project was newly captured (first load),
+    ``False`` when it was already set.
     """
     import studio.state as _self  # avoid stale module-level refs
 
     if _self._TARGET_PROJECT_ID is not None:
-        return  # already captured
+        return False  # already captured
 
     _self._TARGET_PROJECT_ID = project_id
 
@@ -177,9 +175,11 @@ def _set_target_project(project_id: str) -> None:
             _self._TARGET_PROJECT_NAME = info.name
             if domino_job_store:
                 domino_job_store.set_project_name(info.name)
-            return
+                domino_job_store.init_db()
+            return True
 
     logger.warning("Could not resolve project name for %s", project_id)
+    return True
 
 
 def _get_target_project_id() -> Optional[str]:
@@ -197,14 +197,18 @@ def _get_target_project_name() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _get_default_output_dir() -> Path:
-    """Return the default output directory scoped to the target project."""
+    """Return the default output directory scoped to the target project.
+
+    Must only be called after ``_set_target_project()`` has resolved the
+    project name (i.e. during request handling, not at startup).
+    """
     if Path("/mnt/data").exists():
-        global _warned_no_project_name
-        if not _TARGET_PROJECT_NAME and not _warned_no_project_name:
-            logger.warning("No target project name set; defaulting output dir to 'output'")
-            _warned_no_project_name = True
-        project_name = _TARGET_PROJECT_NAME or "output"
-        output = Path(f"/mnt/data/{project_name}")
+        if not _TARGET_PROJECT_NAME:
+            raise RuntimeError(
+                "Output directory requires a resolved project name; "
+                "call _set_target_project() first"
+            )
+        output = Path(f"/mnt/data/{_TARGET_PROJECT_NAME}")
         output.mkdir(parents=True, exist_ok=True)
         return output
     output = Path("./output")
