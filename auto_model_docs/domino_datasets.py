@@ -260,12 +260,24 @@ def list_files(
     data = resp.json()
     rows = data.get("rows", [])
 
+    # The Domino API may return fileName as a full relative path from the
+    # dataset root (e.g. "subdir/file.yaml") even when browsing inside
+    # "subdir".  The JS caller builds full paths by prepending the current
+    # browse path, so we must strip the path prefix to avoid duplication
+    # (e.g. "subdir/subdir/file.yaml").
+    path_prefix = (path.rstrip("/") + "/") if path else ""
+
     files: list[dict[str, Any]] = []
     for row in rows:
         name_info = row.get("name", {})
         size_info = row.get("size", {})
         filename = name_info.get("fileName") or name_info.get("label", "")
         is_dir = name_info.get("isDirectory", False)
+
+        # Strip parent path prefix if the API returned the full relative path
+        if path_prefix and filename.startswith(path_prefix):
+            logger.info("Stripping path prefix '%s' from fileName '%s'", path_prefix, filename)
+            filename = filename[len(path_prefix):]
 
         if is_dir or filename.lower().endswith((".yaml", ".yml")):
             files.append({

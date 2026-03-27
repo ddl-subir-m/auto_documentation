@@ -152,18 +152,14 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     if req.spec_content and req.spec_filename:
         saved = spec_store.save_spec(req.spec_filename, req.spec_content, project_name=target_project_name)
         spec_path = str(saved)
-        logger.info("Spec path from upload: %s", spec_path)
     elif req.spec_path:
-        logger.info("Raw spec_path from form: %s", req.spec_path)
         # Resolve dataset:// references to actual mount paths
         if req.spec_path.startswith("dataset://"):
-            ds_ref = req.spec_path[len("dataset://"):]
-            ds_name, ds_file = ds_ref.split("/", 1)
-            logger.info("Dataset ref split: name=%s file=%s", ds_name, ds_file)
-            spec_path = domino_datasets.build_spec_mount_path(ds_name, ds_file)
+            spec_path = domino_datasets.build_spec_mount_path(
+                *req.spec_path[len("dataset://"):].split("/", 1)
+            )
         else:
             spec_path = req.spec_path
-        logger.info("Resolved spec_path: %s", spec_path)
 
     if not spec_path:
         raise ValueError("A spec file is required. Please select or upload a spec before generating documentation.")
