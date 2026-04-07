@@ -265,6 +265,18 @@ class DatasetStore:
         except Exception:
             return False
 
+    def file_exists_api(self, path: str) -> bool:
+        """Check if a file exists via the API only (bypasses cache).
+
+        Use this when you need to verify the file hasn't been deleted
+        externally (e.g., by a user in the Domino UI).
+        """
+        try:
+            self.read_file_meta(path)
+            return True
+        except Exception:
+            return False
+
 
 # ---------------------------------------------------------------------------
 # Singleton management

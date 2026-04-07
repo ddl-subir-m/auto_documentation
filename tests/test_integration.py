@@ -96,7 +96,18 @@ def _build_test_app(tmp_path: Path, monkeypatch):
         def file_exists(self, path):
             return path in _mem_files
 
+        def file_exists_api(self, path):
+            """API-only check (same as file_exists for in-memory store)."""
+            return path in _mem_files
+
+        def read_file_meta(self, path):
+            if path not in _mem_files:
+                raise FileNotFoundError(path)
+            return {"sizeInBytes": len(_mem_files[path])}
+
     mem_store = _MemStore()
+    # Pre-seed a spec file so dataset:// path verification passes
+    _mem_files["spec.yaml"] = b"title: Test\n"
     dataset_store._store = mem_store
     artifact_layout.init_layout()
 

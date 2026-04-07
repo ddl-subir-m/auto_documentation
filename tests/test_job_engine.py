@@ -307,15 +307,60 @@ class TestSubmitDominoJob:
             "domino_run_id": "run-xyz",
         }
 
-        req = JobRequest(
-            spec_path="dataset://my-dataset/spec.yaml",
-            provider="anthropic", project_id="proj-123",
-        )
-        await je._submit_domino_job(req, "test_user")
+        # Mock the dataset_store.get_store().file_exists_api() check
+        mock_ds_store = MagicMock()
+        mock_ds_store.file_exists_api.return_value = True
+        with patch.dict(sys.modules, {"dataset_store": MagicMock(get_store=lambda: mock_ds_store)}):
+            req = JobRequest(
+                spec_path="dataset://my-dataset/spec.yaml",
+                provider="anthropic", project_id="proj-123",
+            )
+            await je._submit_domino_job(req, "test_user")
         # Verify the spec path was resolved to an absolute mount path
         call_args = store.create_job.call_args
         spec_in_db = call_args[1].get("spec_path") or call_args[0][3]
         assert spec_in_db == "/mnt/data/my-dataset/spec.yaml"
+
+    @pytest.mark.asyncio
+    async def test_dataset_spec_deleted_externally_raises(self, _mock_studio):
+        """Spec file deleted in Domino UI between selection and submission."""
+        je = _import_job_engine()
+        _mock_studio.domino_datasets.get_dataset_mount_prefix.return_value = "/mnt/data"
+
+        mock_ds_store = MagicMock()
+        mock_ds_store.file_exists_api.return_value = False
+        with patch.dict(sys.modules, {"dataset_store": MagicMock(get_store=lambda: mock_ds_store)}):
+            req = JobRequest(
+                spec_path="dataset://autodoc/specs/doc_spec.yaml",
+                provider="anthropic", project_id="proj-123",
+            )
+            with pytest.raises(ValueError, match="no longer exists"):
+                await je._submit_domino_job(req, "test_user")
+        # Job should NOT have been created
+        _mock_studio.domino_job_store.create_job.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_dataset_spec_path_skips_verification(self, _mock_studio):
+        """Absolute paths (not dataset://) skip the API check."""
+        je = _import_job_engine()
+        store = _mock_studio.domino_job_store
+        client = _mock_studio.domino_client
+
+        store.create_job.return_value = "job-5"
+        store.count_active_jobs.return_value = 1
+        client.submit_job.return_value = "run-abc"
+        client.build_job_url.return_value = "https://domino/jobs/run-abc"
+        store.get_job.return_value = {
+            "id": "job-5", "username": "test_user", "status": "submitted",
+        }
+
+        req = JobRequest(
+            spec_path="/mnt/data/autodoc/specs/doc_spec.yaml",
+            provider="anthropic", project_id="proj-123",
+        )
+        # Should not call dataset_store at all for non-dataset:// paths
+        await je._submit_domino_job(req, "test_user")
+        client.submit_job.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

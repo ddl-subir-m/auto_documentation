@@ -164,6 +164,19 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     if not spec_path:
         raise ValueError("A spec file is required. Please select or upload a spec before generating documentation.")
 
+    # Verify the spec file still exists in the dataset (it may have been
+    # deleted externally via the Domino UI between selection and submission).
+    if req.spec_path and req.spec_path.startswith("dataset://"):
+        # Extract the dataset-relative path for API verification
+        ds_relative = req.spec_path[len("dataset://"):].split("/", 1)
+        if len(ds_relative) > 1:
+            from dataset_store import get_store
+            if not get_store().file_exists_api(ds_relative[1]):
+                raise ValueError(
+                    f"The selected spec file no longer exists in the dataset. "
+                    f"It may have been deleted. Please select or upload a spec file and try again."
+                )
+
     # Build command and create the DB row (status=queued)
     command_str = _build_job_command_str(req, spec_path)
 
