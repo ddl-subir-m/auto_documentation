@@ -23,6 +23,8 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 _INDEX_PATH = ".autodoc/jobs_index.json"
+_MAX_COMPLETED_JOBS = 50  # Keep at most this many completed jobs per user
+_COMPLETED_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
 # ---------------------------------------------------------------------------
@@ -44,8 +46,24 @@ def _read_index() -> list[dict[str, Any]]:
 
 
 def _write_index(jobs: list[dict[str, Any]]) -> None:
-    """Write the job index to the dataset."""
+    """Write the job index to the dataset, pruning old completed jobs."""
     from dataset_store import get_store
+
+    # Prune: keep all active jobs, cap completed jobs per user
+    active = [j for j in jobs if j.get("status") not in _COMPLETED_STATUSES]
+    completed = [j for j in jobs if j.get("status") in _COMPLETED_STATUSES]
+
+    # Group completed by user, keep newest N per user
+    by_user: dict[str, list[dict[str, Any]]] = {}
+    for j in completed:
+        by_user.setdefault(j.get("username", ""), []).append(j)
+    pruned_completed = []
+    for user_jobs in by_user.values():
+        user_jobs.sort(key=lambda j: j.get("submitted_at", ""), reverse=True)
+        pruned_completed.extend(user_jobs[:_MAX_COMPLETED_JOBS])
+
+    jobs = active + pruned_completed
+
     content = json.dumps(jobs, indent=2).encode("utf-8")
     get_store().write_file(_INDEX_PATH, content)
 
