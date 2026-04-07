@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any, Optional
 
 from starlette.requests import Request
@@ -12,7 +11,6 @@ from .state import (
     JobRequest,
     DominoJobRecord,
     _DOMINO_AVAILABLE,
-    _get_username,
     _max_jobs,
     domino_client,
     domino_job_store,
