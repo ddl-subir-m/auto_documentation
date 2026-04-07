@@ -256,22 +256,6 @@ def _max_jobs() -> int:
     return int(os.environ.get("AUTODOC_MAX_JOBS", "1"))
 
 
-def _resolve_target_project_name(project_id: Optional[str] = None) -> Optional[str]:
-    """Resolve a Domino project ID to its project name.
-
-    Prefers the captured target project when the given *project_id* matches
-    (avoids a redundant API call).  Falls back to a live lookup.
-    """
-    if not project_id:
-        return _TARGET_PROJECT_NAME
-    if project_id == _TARGET_PROJECT_ID and _TARGET_PROJECT_NAME:
-        return _TARGET_PROJECT_NAME
-    if not _DOMINO_AVAILABLE or not domino_client:
-        return None
-    info = domino_client.resolve_project(project_id)
-    return info.name if info else None
-
-
 def _resolve_request_project_id(req) -> Optional[str]:
     """Extract project ID from request query params or captured state."""
     for key in ("projectId", "project_id"):

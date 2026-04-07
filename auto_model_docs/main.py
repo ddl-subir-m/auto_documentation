@@ -39,12 +39,6 @@ console = Console()
     help="Path to YAML document specification",
 )
 @click.option(
-    "--output",
-    "-o",
-    type=click.Path(),
-    help="Output directory (default: /mnt/data/{DOMINO_PROJECT_NAME} or ./output)",
-)
-@click.option(
     "--code-root",
     "-c",
     type=click.Path(exists=True),
@@ -156,7 +150,6 @@ console = Console()
 )
 def main(
     spec: str,
-    output: str | None,
     code_root: str | None,
     provider: str,
     model: str | None,
@@ -458,17 +451,6 @@ def _init_cli_dataset_store() -> None:
         raise RuntimeError(
             f"Failed to initialize DatasetStore for CLI: {exc}"
         ) from exc
-
-
-def _get_default_project_root() -> Path:
-    """Get default project root for artifact layout."""
-    if os.path.isdir("/domino/datasets/local"):
-        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
-        return Path(f"/domino/datasets/local/{project_name}")
-    if Path("/mnt/data").exists():
-        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
-        return Path(f"/mnt/data/{project_name}")
-    return Path("./output")
 
 
 def _get_default_code_root() -> Path:

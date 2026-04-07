@@ -160,42 +160,6 @@ class TestGetDefaultSpecPath:
 
 
 # ---------------------------------------------------------------------------
-# _resolve_target_project_name
-# ---------------------------------------------------------------------------
-
-class TestResolveTargetProjectName:
-    def test_returns_cached_name_when_ids_match(self, state_module):
-        state_module._TARGET_PROJECT_ID = "proj-123"
-        state_module._TARGET_PROJECT_NAME = "my-project"
-        result = state_module._resolve_target_project_name("proj-123")
-        assert result == "my-project"
-
-    def test_returns_cached_name_when_no_id(self, state_module):
-        state_module._TARGET_PROJECT_NAME = "cached-project"
-        result = state_module._resolve_target_project_name(None)
-        assert result == "cached-project"
-
-    def test_looks_up_different_project(self, state_module):
-        state_module._TARGET_PROJECT_ID = "proj-123"
-        state_module._TARGET_PROJECT_NAME = "my-project"
-        state_module._DOMINO_AVAILABLE = True
-
-        mock_info = MagicMock()
-        mock_info.name = "other-project"
-        # Must patch the module-level reference that state.py resolved at import
-        with patch.object(state_module, "domino_client") as mock_client:
-            mock_client.resolve_project.return_value = mock_info
-            result = state_module._resolve_target_project_name("proj-999")
-        assert result == "other-project"
-
-    def test_returns_none_when_domino_unavailable(self, state_module):
-        state_module._TARGET_PROJECT_ID = "proj-123"
-        state_module._DOMINO_AVAILABLE = False
-        result = state_module._resolve_target_project_name("proj-999")
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
 # _resolve_request_project_id
 # ---------------------------------------------------------------------------
 

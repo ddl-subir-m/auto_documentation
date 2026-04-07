@@ -175,43 +175,6 @@ class TestSanitizeOptionalFloat:
 
 
 # ---------------------------------------------------------------------------
-# _parse_comma_list
-# ---------------------------------------------------------------------------
-
-class TestParseCommaList:
-    def test_none_returns_none(self):
-        ui = _import_ui()
-        assert ui._parse_comma_list(None) is None
-
-    def test_empty_returns_none(self):
-        ui = _import_ui()
-        assert ui._parse_comma_list("") is None
-
-    def test_single_item(self):
-        ui = _import_ui()
-        assert ui._parse_comma_list("experiment1") == ["experiment1"]
-
-    def test_multiple_items(self):
-        ui = _import_ui()
-        result = ui._parse_comma_list("exp1, exp2, exp3")
-        assert result == ["exp1", "exp2", "exp3"]
-
-    def test_trims_whitespace(self):
-        ui = _import_ui()
-        result = ui._parse_comma_list("  a , b ,  c  ")
-        assert result == ["a", "b", "c"]
-
-    def test_filters_empty_items(self):
-        ui = _import_ui()
-        result = ui._parse_comma_list("a,,b,,")
-        assert result == ["a", "b"]
-
-    def test_only_commas_returns_none(self):
-        ui = _import_ui()
-        assert ui._parse_comma_list(",,,") is None
-
-
-# ---------------------------------------------------------------------------
 # _db_record_to_dataclass
 # ---------------------------------------------------------------------------
 

@@ -40,14 +40,6 @@ def _sanitize_optional_float(value: Optional[str]) -> Optional[float]:
         return None
 
 
-def _parse_comma_list(value: Optional[str]) -> Optional[list[str]]:
-    """Parse a comma-separated string into a list of trimmed strings."""
-    if not value:
-        return None
-    items = [item.strip() for item in value.split(",") if item.strip()]
-    return items if items else None
-
-
 def _db_record_to_dataclass(row: dict) -> DominoJobRecord:
     return DominoJobRecord(
         id=row["id"],
