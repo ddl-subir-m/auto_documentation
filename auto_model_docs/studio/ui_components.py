@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -191,7 +192,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
         stop_btn = A(
             "Stop",
             hx_post="stop-job-history",
-            hx_vals=f'{{"job_id": "{record.id}"}}',
+            hx_vals=json.dumps({"job_id": record.id}),
             hx_target="#job-history-content",
             hx_swap="innerHTML",
             cls="terminal-action",
@@ -294,7 +295,7 @@ def _render_job_history_table(username: str) -> FT:
                 A(
                     "Stop",
                     hx_post="stop-job-history",
-                    hx_vals=f'{{"job_id": "{j.get("id")}"}}',
+                    hx_vals=json.dumps({"job_id": j.get("id", "")}),
                     hx_target="#job-history-content",
                     hx_swap="innerHTML",
                     cls="terminal-action",

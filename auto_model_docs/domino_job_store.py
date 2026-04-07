@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 _INDEX_PATH = ".autodoc/jobs_index.json"
 _MAX_COMPLETED_JOBS = 50  # Keep at most this many completed jobs per user
 _COMPLETED_STATUSES = {"succeeded", "failed", "cancelled"}
+_INDEX_LOCK = threading.Lock()  # Serialize read-modify-write on the JSON index
 
 
 # ---------------------------------------------------------------------------
@@ -92,23 +94,24 @@ def create_job(
 ) -> str:
     """Record a new job submission in the index."""
     jid = job_id or str(uuid4())
-    jobs = _read_index()
-    jobs.append({
-        "id": jid,
-        "username": username,
-        "domino_run_id": None,
-        "branch": branch,
-        "hardware_tier": tier,
-        "status": "queued",
-        "domino_status": None,
-        "job_url": None,
-        "spec_path": spec_path,
-        "command": command,
-        "submitted_at": _now_iso(),
-        "completed_at": None,
-        "project_id": project_id,
-    })
-    _write_index(jobs)
+    with _INDEX_LOCK:
+        jobs = _read_index()
+        jobs.append({
+            "id": jid,
+            "username": username,
+            "domino_run_id": None,
+            "branch": branch,
+            "hardware_tier": tier,
+            "status": "queued",
+            "domino_status": None,
+            "job_url": None,
+            "spec_path": spec_path,
+            "command": command,
+            "submitted_at": _now_iso(),
+            "completed_at": None,
+            "project_id": project_id,
+        })
+        _write_index(jobs)
     return jid
 
 
@@ -116,12 +119,13 @@ def update_job(job_id: str, **fields: Any) -> None:
     """Update fields on a job record in the index."""
     if not fields:
         return
-    jobs = _read_index()
-    for job in jobs:
-        if job["id"] == job_id:
-            job.update(fields)
-            break
-    _write_index(jobs)
+    with _INDEX_LOCK:
+        jobs = _read_index()
+        for job in jobs:
+            if job["id"] == job_id:
+                job.update(fields)
+                break
+        _write_index(jobs)
 
 
 def get_job(job_id: str) -> Optional[dict[str, Any]]:
@@ -182,31 +186,33 @@ def get_queued_usernames() -> list[str]:
 
 def reconcile_stale_jobs() -> None:
     """Mark submitted/running jobs with no run ID as failed (app restarted)."""
-    jobs = _read_index()
-    changed = False
-    for job in jobs:
-        if (
-            job.get("status") in ("submitted", "pending", "running")
-            and not job.get("domino_run_id")
-        ):
-            job["status"] = "failed"
-            job["domino_status"] = "App restarted"
-            changed = True
-    if changed:
-        _write_index(jobs)
+    with _INDEX_LOCK:
+        jobs = _read_index()
+        changed = False
+        for job in jobs:
+            if (
+                job.get("status") in ("submitted", "pending", "running")
+                and not job.get("domino_run_id")
+            ):
+                job["status"] = "failed"
+                job["domino_status"] = "App restarted"
+                changed = True
+        if changed:
+            _write_index(jobs)
 
 
 def cancel_queued_jobs(username: str) -> None:
     """Cancel all queued (not yet submitted) jobs for a user."""
-    jobs = _read_index()
-    changed = False
-    for job in jobs:
-        if (
-            job.get("username") == username
-            and job.get("status") == "queued"
-            and not job.get("domino_run_id")
-        ):
-            job["status"] = "cancelled"
-            changed = True
-    if changed:
-        _write_index(jobs)
+    with _INDEX_LOCK:
+        jobs = _read_index()
+        changed = False
+        for job in jobs:
+            if (
+                job.get("username") == username
+                and job.get("status") == "queued"
+                and not job.get("domino_run_id")
+            ):
+                job["status"] = "cancelled"
+                changed = True
+        if changed:
+            _write_index(jobs)
