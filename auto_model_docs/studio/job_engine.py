@@ -23,7 +23,6 @@ from .state import (
     domino_datasets,
     _get_target_project_id,
     _get_target_project_name,
-    _resolve_target_project_name,
     logger,
 )
 from .ui_components import (
@@ -123,9 +122,13 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
 
 
 def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
-    """Build the full shell command for a Domino job."""
+    """Build the full shell command for a Domino job.
+
+    Quotes arguments that contain spaces to prevent shell splitting.
+    """
+    import shlex
     parts = _build_job_command(req, spec_path)
-    return " ".join(parts)
+    return " ".join(shlex.quote(p) for p in parts)
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +136,7 @@ def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
 # ---------------------------------------------------------------------------
 
 async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
-    """Submit or queue a Domino job and persist it to SQLite."""
+    """Submit or queue a Domino job and persist it to the job index."""
     logger.info(
         "Submitting Domino job: project_id=%s, branch=%s, tier=%s",
         req.project_id, req.branch, req.hardware_tier,
@@ -144,20 +147,23 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     # Ensure DB is initialised
     domino_job_store.init_db()
 
-    # Resolve target project name so specs land in the right dataset
-    target_project_name = _resolve_target_project_name(req.project_id)
-
-    # Resolve spec path
+    # Resolve spec path — must be an absolute mount path so the Domino
+    # job container can read it from the mounted "autodoc" dataset.
     spec_path: Optional[str] = None
     if req.spec_content and req.spec_filename:
-        saved = spec_store.save_spec(req.spec_filename, req.spec_content, project_name=target_project_name)
-        spec_path = str(saved)
+        saved = spec_store.save_spec(req.spec_filename, req.spec_content)
+        # Convert dataset-relative path to absolute mount path
+        from dataset_store import AUTODOC_DATASET_NAME
+        mount_prefix = domino_datasets.get_dataset_mount_prefix()
+        spec_path = f"{mount_prefix}/{AUTODOC_DATASET_NAME}/{saved}"
     elif req.spec_path:
         # Resolve dataset:// references to actual mount paths
         if req.spec_path.startswith("dataset://"):
-            spec_path = domino_datasets.build_spec_mount_path(
-                *req.spec_path[len("dataset://"):].split("/", 1)
-            )
+            parts = req.spec_path[len("dataset://"):].split("/", 1)
+            dataset_name = parts[0]
+            file_path = parts[1] if len(parts) > 1 else ""
+            mount_prefix = domino_datasets.get_dataset_mount_prefix()
+            spec_path = f"{mount_prefix}/{dataset_name}/{file_path}"
         else:
             spec_path = req.spec_path
 
@@ -222,13 +228,10 @@ async def _poll_domino_jobs() -> None:
         if not _DOMINO_AVAILABLE or not _get_target_project_name():
             continue
         try:
-            # Update active jobs
-            with domino_job_store._conn() as con:
-                rows = con.execute(
-                    "SELECT * FROM domino_jobs WHERE status IN ('submitted', 'pending', 'running')"
-                ).fetchall()
-            for row in rows:
-                row = dict(row)
+            # Update active jobs (status from Domino Jobs API)
+            from datetime import datetime, timezone
+            active_jobs = domino_job_store.get_active_jobs()
+            for row in active_jobs:
                 run_id = row.get("domino_run_id")
                 if not run_id:
                     continue
@@ -242,19 +245,14 @@ async def _poll_domino_jobs() -> None:
                     if mapped != row.get("status"):
                         updates["status"] = mapped
                     if mapped in ("succeeded", "failed", "cancelled"):
-                        updates["completed_at"] = domino_job_store._now_iso()
+                        updates["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
                     if updates:
                         domino_job_store.update_job(row["id"], **updates)
                 except Exception as exc:
                     logger.warning("Poll error for run %s: %s", run_id, exc)
 
             # Promote queued jobs for all users when slots open
-            with domino_job_store._conn() as con:
-                queued_users = con.execute(
-                    "SELECT DISTINCT username FROM domino_jobs WHERE status = 'queued'"
-                ).fetchall()
-            for user_row in queued_users:
-                uname = user_row["username"]
+            for uname in domino_job_store.get_queued_usernames():
                 active = domino_job_store.count_active_jobs(uname)
                 if active > _max_jobs():
                     continue
@@ -285,14 +283,6 @@ async def _poll_domino_jobs() -> None:
 def _reconcile_stale_jobs() -> None:
     """On startup, mark any submitted/running jobs as failed (app restarted)."""
     try:
-        with domino_job_store._conn() as con:
-            con.execute(
-                """
-                UPDATE domino_jobs
-                SET status = 'failed', domino_status = 'App restarted'
-                WHERE status IN ('submitted', 'pending', 'running')
-                  AND domino_run_id IS NULL
-                """
-            )
+        domino_job_store.reconcile_stale_jobs()
     except Exception as exc:
         logger.warning("Reconcile stale jobs failed: %s", exc)

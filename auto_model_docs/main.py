@@ -219,8 +219,6 @@ def main(
             settings.llm_max_backoff = max_backoff
         if backoff_jitter is not None:
             settings.llm_backoff_jitter = backoff_jitter
-        if output:
-            settings.output_dir = Path(output)
         if code_root:
             settings.code_root = Path(code_root)
         if max_files:
@@ -230,8 +228,12 @@ def main(
         if planning_workers:
             settings.planning_workers = planning_workers
 
-        # Use settings for paths with defaults
-        output_dir = settings.output_dir if settings.output_dir.exists() else _get_default_output_dir()
+        # Initialize artifact layout and dataset store
+        from artifact_layout import init_layout, get_layout
+        from dataset_store import init_store, AUTODOC_DATASET_NAME
+        init_layout()
+        _init_cli_dataset_store()
+        output_dir = get_layout().docs_dir
         code_dir = settings.code_root if settings.code_root.exists() else _get_default_code_root()
 
         # Handle --notebook-from-cache mode (regenerate from cache)
@@ -382,8 +384,10 @@ def _regenerate_notebook_from_cache(
 
     console.print("\n[bold blue]Regenerating notebook from cache...[/]\n")
 
-    cache_path = output_dir / ".autodoc_cache.json"
-    if not cache_path.exists():
+    from artifact_layout import get_layout
+    from dataset_store import get_store
+    cache_path = get_layout().generation_cache
+    if not get_store().file_exists(cache_path):
         console.print(
             f"[bold red]Error:[/] No cached results found at {cache_path}",
             style="red",
@@ -425,18 +429,46 @@ def _regenerate_notebook_from_cache(
     console.print()
 
 
-def _get_default_output_dir() -> Path:
-    """Get default output directory."""
-    # In Domino, use /mnt/data/{project_name} (persisted via Datasets)
+def _init_cli_dataset_store() -> None:
+    """Initialize the DatasetStore for CLI mode (Domino job container).
+
+    In a Domino job container, we have access to the Domino API and
+    need to find or create the autodoc dataset in the current project.
+    """
+    from dataset_store import init_store, AUTODOC_DATASET_NAME
+    project_id = os.environ.get("DOMINO_PROJECT_ID", "")
+    if not project_id:
+        raise RuntimeError(
+            "DOMINO_PROJECT_ID not set. "
+            "The CLI requires Domino environment variables."
+        )
+    # Import here to avoid circular imports at module level
+    try:
+        from domino_datasets import ensure_dataset, get_rw_snapshot_id
+        ds = ensure_dataset(
+            project_id=project_id,
+            name=AUTODOC_DATASET_NAME,
+            description="Auto Model Docs artifacts",
+        )
+        snap_id = ds.get("rwSnapshotId") or ""
+        if not snap_id:
+            snap_id = get_rw_snapshot_id(ds["id"], project_id) or ""
+        init_store(ds["id"], snap_id, project_id)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to initialize DatasetStore for CLI: {exc}"
+        ) from exc
+
+
+def _get_default_project_root() -> Path:
+    """Get default project root for artifact layout."""
+    if os.path.isdir("/domino/datasets/local"):
+        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
+        return Path(f"/domino/datasets/local/{project_name}")
     if Path("/mnt/data").exists():
         project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
-        output = Path(f"/mnt/data/{project_name}")
-        output.mkdir(parents=True, exist_ok=True)
-        return output
-    # Fall back to local output directory
-    output = Path("./output")
-    output.mkdir(exist_ok=True)
-    return output
+        return Path(f"/mnt/data/{project_name}")
+    return Path("./output")
 
 
 def _get_default_code_root() -> Path:

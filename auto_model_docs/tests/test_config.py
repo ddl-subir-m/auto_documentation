@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from autodoc.core.config import Settings, _get_default_output_path
+from autodoc.core.config import Settings
 
 
 # ---------------------------------------------------------------------------
@@ -91,13 +91,7 @@ class TestDefaultValues:
         assert s.mlflow_tracking_uri is None
         assert s.mlflow_experiment_name is None
 
-    def test_cache_enabled_default(self):
-        s = _make_settings()
-        assert s.cache_enabled is True
-
-    def test_cache_dir_default(self):
-        s = _make_settings()
-        assert s.cache_dir == Path(".autodoc_cache")
+    # cache_enabled and cache_dir removed — LLMCache was dead code
 
 
 # ===========================================================================
@@ -345,58 +339,8 @@ class TestFieldValidation:
 # Default output path selection
 # ===========================================================================
 
-class TestDefaultOutputPath:
-    """_get_default_output_path depends on /mnt/data existence."""
-
-    def test_mnt_data_exists_uses_domino_project(self, tmp_path):
-        mnt_data = tmp_path / "mnt" / "data"
-        mnt_data.mkdir(parents=True)
-        with patch("autodoc.core.config.Path") as mock_path_cls:
-            # Make Path("/mnt/data").exists() return True
-            mock_instance = mock_path_cls.return_value
-            mock_instance.exists.return_value = True
-
-            # We need a real Path for the return value
-            with patch.dict(os.environ, {"DOMINO_PROJECT_NAME": "my_proj"}, clear=False):
-                mock_path_cls.side_effect = lambda x: Path(x)
-                result = _get_default_output_path()
-        # When /mnt/data exists on the real system we get the domino path;
-        # otherwise we get ./output. We test the logic without relying on
-        # filesystem state by checking the function's two branches directly.
-
-    def test_fallback_output_path(self):
-        """When /mnt/data does not exist, output defaults to ./output."""
-        with patch("autodoc.core.config.Path") as mock_path_cls:
-            real_path = Path("./output")
-            call_results = {}
-
-            def path_factory(arg):
-                p = Path(arg)
-                if arg == "/mnt/data":
-                    mock_p = type("MockPath", (), {"exists": lambda self: False})()
-                    return mock_p
-                return p
-
-            mock_path_cls.side_effect = path_factory
-            result = _get_default_output_path()
-            assert result == Path("./output")
-
-    def test_domino_project_name_in_path(self):
-        """When on Domino (/mnt/data exists), the project name is embedded."""
-        if not Path("/mnt/data").exists():
-            pytest.skip("/mnt/data not present on this system")
-        with patch.dict(os.environ, {"DOMINO_PROJECT_NAME": "test_proj"}):
-            result = _get_default_output_path()
-            assert "test_proj" in str(result)
-
-    def test_missing_domino_project_name_uses_output(self):
-        """When DOMINO_PROJECT_NAME is unset, falls back to 'output' as dir name."""
-        if not Path("/mnt/data").exists():
-            pytest.skip("/mnt/data not present on this system")
-        env = {k: v for k, v in os.environ.items() if k != "DOMINO_PROJECT_NAME"}
-        with patch.dict(os.environ, env, clear=True):
-            result = _get_default_output_path()
-            assert str(result).endswith("/output")
+# TestDefaultOutputPath removed — output path logic moved to ArtifactLayout.
+# See tests/test_artifact_layout.py for path resolution tests.
 
 
 # ===========================================================================
@@ -422,6 +366,4 @@ class TestEnvVarAliases:
         s = _make_settings(AUTODOC_MAX_FILES="75")
         assert s.max_files == 75
 
-    def test_bare_cache_enabled(self):
-        s = _make_settings(CACHE_ENABLED="false")
-        assert s.cache_enabled is False
+    # test_bare_cache_enabled removed — cache_enabled field deleted

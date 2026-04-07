@@ -35,11 +35,12 @@ class DocumentBuilder:
     title page, table of contents, and content sections.
     """
 
-    def __init__(self, output_dir: Path = Path("./output")):
+    def __init__(self, output_dir: str = "docs"):
         """Initialize the document builder.
 
         Args:
-            output_dir: Directory to save generated documents.
+            output_dir: Logical output directory (dataset-relative path).
+                Actual I/O goes through DatasetStore.
         """
         self.output_dir = output_dir
 
@@ -47,7 +48,7 @@ class DocumentBuilder:
         self,
         spec: DocumentSpec,
         results: List[SectionResult],
-    ) -> Path:
+    ) -> str:
         """Build the Word document from generated content.
 
         Args:
@@ -878,17 +879,20 @@ class DocumentBuilder:
                 else:
                     doc.add_paragraph(cid, style="List Bullet")
 
-    def _save_document(self, doc: Document) -> Path:
-        """Save the document to the output directory."""
-        # Ensure output directory exists
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+    def _save_document(self, doc: Document) -> str:
+        """Save the document to the dataset via DatasetStore."""
+        import io
+        from artifact_layout import get_layout
+        from dataset_store import get_store
 
         # Generate filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"model_docs_{timestamp}.docx"
-        output_path = self.output_dir / filename
+        dataset_path = f"{get_layout().docs_dir}/{filename}"
 
-        # Save
-        doc.save(output_path)
+        # Save to in-memory buffer, then upload
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        get_store().write_file(dataset_path, buffer.getvalue())
 
-        return output_path
+        return dataset_path

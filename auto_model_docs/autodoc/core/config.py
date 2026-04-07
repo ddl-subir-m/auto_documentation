@@ -8,14 +8,6 @@ from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _get_default_output_path() -> Path:
-    """Get default output directory based on environment."""
-    if Path("/mnt/data").exists():
-        project_name = os.environ.get("DOMINO_PROJECT_NAME", "output")
-        return Path(f"/mnt/data/{project_name}")
-    return Path("./output")
-
-
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables.
 
@@ -85,11 +77,6 @@ class Settings(BaseSettings):
         default=Path("/mnt/code"),
         description="Root directory of codebase to analyze",
         validation_alias=AliasChoices("AUTODOC_CODE_ROOT", "CODE_ROOT"),
-    )
-    output_dir: Path = Field(
-        default_factory=_get_default_output_path,
-        description="Output directory for generated documents",
-        validation_alias=AliasChoices("AUTODOC_OUTPUT_DIR", "OUTPUT_DIR"),
     )
 
     # Scanning Configuration
@@ -178,18 +165,6 @@ class Settings(BaseSettings):
         default=None,
         description="MLflow experiment name to query",
         validation_alias=AliasChoices("AUTODOC_MLFLOW_EXPERIMENT_NAME", "MLFLOW_EXPERIMENT_NAME"),
-    )
-
-    # Cache Configuration
-    cache_enabled: bool = Field(
-        default=True,
-        description="Enable LLM response caching",
-        validation_alias=AliasChoices("AUTODOC_CACHE_ENABLED", "CACHE_ENABLED"),
-    )
-    cache_dir: Path = Field(
-        default=Path(".autodoc_cache"),
-        description="Directory for cache files",
-        validation_alias=AliasChoices("AUTODOC_CACHE_DIR", "CACHE_DIR"),
     )
 
     _repo_root = Path(__file__).resolve().parents[3]

@@ -159,10 +159,13 @@ def _set_target_project(project_id: str) -> bool:
     """Capture the target project from the ?projectId query param.
 
     Called on every page load but only acts on the first call.
+    Initializes ArtifactLayout and DatasetStore for the target project.
     Returns ``True`` when the project was newly captured (first load),
     ``False`` when it was already set.
     """
     import studio.state as _self  # avoid stale module-level refs
+    from artifact_layout import init_layout
+    from dataset_store import init_store, AUTODOC_DATASET_NAME
 
     if _self._TARGET_PROJECT_ID is not None:
         return False  # already captured
@@ -173,8 +176,34 @@ def _set_target_project(project_id: str) -> bool:
         info = domino_client.resolve_project(project_id)
         if info:
             _self._TARGET_PROJECT_NAME = info.name
+
+            # Initialize artifact layout (logical paths)
+            init_layout()
+
+            # Ensure the autodoc dataset exists and initialize the store
+            if domino_datasets:
+                try:
+                    ds = domino_datasets.ensure_dataset(
+                        project_id=project_id,
+                        name=AUTODOC_DATASET_NAME,
+                        description="Auto Model Docs artifacts",
+                    )
+                    snap_id = ds.get("rwSnapshotId") or ""
+                    if not snap_id:
+                        snap_id = domino_datasets.get_rw_snapshot_id(ds["id"], project_id) or ""
+                    init_store(ds["id"], snap_id, project_id)
+                except Exception as exc:
+                    logger.error(
+                        "Failed to initialize DatasetStore for project %s: %s",
+                        project_id, exc, exc_info=True,
+                    )
+                    raise RuntimeError(
+                        f"Cannot initialize artifact storage for project {project_id}. "
+                        f"Check dataset permissions and Domino API availability. "
+                        f"Error: {exc}"
+                    ) from exc
+
             if domino_job_store:
-                domino_job_store.set_project_name(info.name)
                 domino_job_store.init_db()
             return True
 
@@ -196,24 +225,10 @@ def _get_target_project_name() -> Optional[str]:
 # Path helpers
 # ---------------------------------------------------------------------------
 
-def _get_default_output_dir() -> Path:
-    """Return the default output directory scoped to the target project.
-
-    Must only be called after ``_set_target_project()`` has resolved the
-    project name (i.e. during request handling, not at startup).
-    """
-    if Path("/mnt/data").exists():
-        if not _TARGET_PROJECT_NAME:
-            raise RuntimeError(
-                "Output directory requires a resolved project name; "
-                "call _set_target_project() first"
-            )
-        output = Path(f"/mnt/data/{_TARGET_PROJECT_NAME}")
-        output.mkdir(parents=True, exist_ok=True)
-        return output
-    output = Path("./output")
-    output.mkdir(exist_ok=True)
-    return output
+def _get_default_output_dir() -> str:
+    """Return the default docs output path (relative to dataset root)."""
+    from artifact_layout import get_layout
+    return get_layout().docs_dir
 
 
 def _get_default_code_root() -> Path:

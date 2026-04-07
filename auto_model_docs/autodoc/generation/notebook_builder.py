@@ -65,14 +65,15 @@ class NotebookBuilder:
 
     def __init__(
         self,
-        output_dir: Path = Path("./output"),
+        output_dir: str = "docs",
         dependencies: List[str] | None = None,
-        notebook_path: Path | None = None,
+        notebook_path: str | None = None,
     ):
         """Initialize the notebook builder.
 
         Args:
-            output_dir: Directory to save generated notebooks.
+            output_dir: Logical output directory (dataset-relative path).
+                Actual I/O goes through DatasetStore.
             dependencies: List of package names to check/install. Defaults to
                 DEFAULT_DEPENDENCIES if not provided.
             notebook_path: Custom path for the generated notebook. If not provided,
@@ -144,7 +145,7 @@ class NotebookBuilder:
         self,
         spec: DocumentSpec,
         results: List[SectionResult],
-    ) -> Path:
+    ) -> str:
         """Build a Jupyter notebook from generated content.
 
         Args:
@@ -941,19 +942,23 @@ output_path = exporter.export_to_word(
 print(f"Exported to: {{output_path}}")'''
         return new_code_cell(source=code)
 
-    def _save_notebook(self, nb: nbformat.NotebookNode) -> Path:
-        """Save the notebook to the output directory or custom path."""
+    def _save_notebook(self, nb: nbformat.NotebookNode) -> str:
+        """Save the notebook to the dataset via DatasetStore."""
+        import io
+        from artifact_layout import get_layout
+        from dataset_store import get_store
+
         if self.notebook_path:
-            output_path = self.notebook_path
-            # Ensure parent directory exists
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            # Custom path: use the filename but place it in docs dir
+            filename = str(self.notebook_path).rsplit("/", 1)[-1]
         else:
-            # Ensure output directory exists
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = self.output_dir / "model_docs_notebook.ipynb"
+            filename = "model_docs_notebook.ipynb"
 
-        # Write notebook
-        with open(output_path, "w", encoding="utf-8") as f:
-            nbformat.write(nb, f)
+        dataset_path = f"{get_layout().docs_dir}/{filename}"
 
-        return output_path
+        # Write notebook to in-memory buffer, then upload
+        buffer = io.StringIO()
+        nbformat.write(nb, buffer)
+        get_store().write_file(dataset_path, buffer.getvalue().encode("utf-8"))
+
+        return dataset_path

@@ -1,4 +1,4 @@
-"""Spec-related routes: validate, save, list, delete, cleanup."""
+"""Spec-related routes: validate, save, list."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ from autodoc.core.models import DocumentSpec
 
 from .state import (
     _DOMINO_AVAILABLE,
-    _resolve_request_project_id,
-    _resolve_target_project_name,
     spec_store,
 )
 
@@ -59,11 +57,10 @@ def register_spec_routes(rt):
         """Auto-save an uploaded spec file and return the saved path."""
         if not _DOMINO_AVAILABLE:
             return Response("Domino not available", status_code=400)
-        project_name = _resolve_target_project_name(_resolve_request_project_id(req))
         form = await req.form()
         filename = form.get("spec_filename", "spec.yaml")
         content = form.get("spec_content", "")
-        saved = spec_store.save_spec(filename, content, project_name=project_name)
+        saved = spec_store.save_spec(filename, content)
         return Response(str(saved), media_type="text/plain")
 
     rt("/save-spec")(save_spec_route)
@@ -72,8 +69,7 @@ def register_spec_routes(rt):
         """Return HTML list of saved spec files."""
         if not _DOMINO_AVAILABLE:
             return Div(P("Domino not available.", cls="history-empty"))
-        project_name = _resolve_target_project_name(_resolve_request_project_id(req))
-        specs = spec_store.list_specs(project_name=project_name)
+        specs = spec_store.list_specs()
         if not specs:
             return Div(P("No saved spec files.", cls="history-empty"), id="spec-list-content")
         items = []
@@ -82,35 +78,9 @@ def register_spec_routes(rt):
                 Div(
                     Span(s["name"], style="font-family: monospace;"),
                     Span(f"{s['size_kb']} KB", style="color: var(--outline); margin: 0 0.75rem;"),
-                    A(
-                        "Delete",
-                        hx_post="delete-spec",
-                        hx_vals=f'{{"filename": "{s["name"]}"}}',
-                        hx_target="#spec-list-content",
-                        hx_swap="innerHTML",
-                        style="color: var(--error); font-size: 0.75rem; cursor: pointer;",
-                    ),
                     cls="spec-list-item",
                 )
             )
         return Div(*items, id="spec-list-content", cls="spec-list-modal")
 
     rt("/spec-list")(spec_list)
-
-    async def delete_spec_route(req: Request):
-        project_name = _resolve_target_project_name(_resolve_request_project_id(req))
-        form = await req.form()
-        filename = form.get("filename", "")
-        if filename and _DOMINO_AVAILABLE:
-            spec_store.delete_spec(filename, project_name=project_name)
-        return spec_list(req)
-
-    rt("/delete-spec")(delete_spec_route)
-
-    def cleanup_specs(req: Request):
-        if _DOMINO_AVAILABLE:
-            project_name = _resolve_target_project_name(_resolve_request_project_id(req))
-            spec_store.delete_all_specs(project_name=project_name)
-        return Response("OK", media_type="text/plain")
-
-    rt("/cleanup-specs")(cleanup_specs)

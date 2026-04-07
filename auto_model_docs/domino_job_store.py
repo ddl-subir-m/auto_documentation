@@ -1,99 +1,66 @@
-"""SQLite-backed store for Domino job history."""
+"""Job submission index backed by a JSON file in the Datasets API.
+
+Tracks which jobs were submitted by this app, with metadata needed for
+display (user, branch, spec, tier). Actual job status comes live from
+the Domino Jobs API — we don't duplicate it.
+
+The index file lives at ``.autodoc/jobs_index.json`` in the autodoc
+dataset, read/written via DatasetStore.
+
+Local queue: jobs waiting for a slot are tracked in the index with
+``domino_run_id: null``. Once submitted, the run ID is filled in and
+status comes from Domino.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
-import sqlite3
-from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Optional
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_NAME_OVERRIDE: Optional[str] = None
+_INDEX_PATH = ".autodoc/jobs_index.json"
 
 
-def set_project_name(name: Optional[str]) -> None:
-    """Set the target project name used for the DB path.
+# ---------------------------------------------------------------------------
+# Index I/O
+# ---------------------------------------------------------------------------
 
-    Called once after the ?projectId query param is resolved so that
-    job history is scoped to the target project.
-    """
-    global _PROJECT_NAME_OVERRIDE
-    _PROJECT_NAME_OVERRIDE = name
-
-
-def _db_path() -> Path:
-    """Return the path to the SQLite DB file.
-
-    Must only be called after ``set_project_name()`` has been invoked
-    (i.e. during request handling, not at startup).
-    """
-    if Path("/mnt/data").exists():
-        if not _PROJECT_NAME_OVERRIDE:
-            raise RuntimeError(
-                "Job store DB path requires a project name; "
-                "call set_project_name() first"
-            )
-        base = Path(f"/mnt/data/{_PROJECT_NAME_OVERRIDE}")
-    else:
-        base = Path(".")
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "autodoc_jobs.db"
-
-
-def _migrate_project_id(con: sqlite3.Connection) -> None:
-    """Add project_id column if it does not exist yet."""
+def _read_index() -> list[dict[str, Any]]:
+    """Load the job index from the dataset."""
+    from dataset_store import get_store
+    store = get_store()
     try:
-        con.execute("ALTER TABLE domino_jobs ADD COLUMN project_id TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists
+        if not store.file_exists(_INDEX_PATH):
+            return []
+        content = store.read_file(_INDEX_PATH)
+        return json.loads(content)
+    except Exception as exc:
+        logger.warning("Failed to read job index: %s", exc)
+        return []
 
 
-@contextmanager
-def _conn():
-    path = _db_path()
-    con = sqlite3.connect(str(path), check_same_thread=False, timeout=5.0)
-    con.row_factory = sqlite3.Row
-    try:
-        yield con
-        con.commit()
-    finally:
-        con.close()
-
-
-def init_db() -> None:
-    """Create the domino_jobs table if it does not exist."""
-    with _conn() as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS domino_jobs (
-                id              TEXT PRIMARY KEY,
-                username        TEXT NOT NULL,
-                domino_run_id   TEXT,
-                branch          TEXT,
-                hardware_tier   TEXT,
-                status          TEXT NOT NULL DEFAULT 'queued',
-                domino_status   TEXT,
-                job_url         TEXT,
-                spec_path       TEXT,
-                command         TEXT,
-                submitted_at    TEXT,
-                completed_at    TEXT
-            )
-            """
-        )
-        # Migrations: add columns to existing tables
-        try:
-            con.execute("ALTER TABLE domino_jobs ADD COLUMN command TEXT")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-        _migrate_project_id(con)
+def _write_index(jobs: list[dict[str, Any]]) -> None:
+    """Write the job index to the dataset."""
+    from dataset_store import get_store
+    content = json.dumps(jobs, indent=2).encode("utf-8")
+    get_store().write_file(_INDEX_PATH, content)
 
 
 def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Public API (same interface as before, minus init_db)
+# ---------------------------------------------------------------------------
+
+def init_db() -> None:
+    """No-op for backwards compatibility. Index is created on first write."""
+    pass
 
 
 def create_job(
@@ -105,95 +72,123 @@ def create_job(
     job_id: Optional[str] = None,
     project_id: Optional[str] = None,
 ) -> str:
-    """Insert a new job row and return its id."""
-    import uuid
-
-    jid = job_id or str(uuid.uuid4())
-    with _conn() as con:
-        con.execute(
-            """
-            INSERT INTO domino_jobs
-                (id, username, branch, hardware_tier, status, spec_path, command, project_id, submitted_at)
-            VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)
-            """,
-            (jid, username, branch, tier, spec_path, command, project_id, _now_iso()),
-        )
+    """Record a new job submission in the index."""
+    jid = job_id or str(uuid4())
+    jobs = _read_index()
+    jobs.append({
+        "id": jid,
+        "username": username,
+        "domino_run_id": None,
+        "branch": branch,
+        "hardware_tier": tier,
+        "status": "queued",
+        "domino_status": None,
+        "job_url": None,
+        "spec_path": spec_path,
+        "command": command,
+        "submitted_at": _now_iso(),
+        "completed_at": None,
+        "project_id": project_id,
+    })
+    _write_index(jobs)
     return jid
 
 
 def update_job(job_id: str, **fields: Any) -> None:
-    """Update arbitrary columns on a job row."""
+    """Update fields on a job record in the index."""
     if not fields:
         return
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [job_id]
-    with _conn() as con:
-        con.execute(
-            f"UPDATE domino_jobs SET {set_clause} WHERE id = ?",
-            values,
-        )
+    jobs = _read_index()
+    for job in jobs:
+        if job["id"] == job_id:
+            job.update(fields)
+            break
+    _write_index(jobs)
 
 
 def get_job(job_id: str) -> Optional[dict[str, Any]]:
-    """Return a single job row as a dict, or None."""
-    with _conn() as con:
-        row = con.execute(
-            "SELECT * FROM domino_jobs WHERE id = ?", (job_id,)
-        ).fetchone()
-    return dict(row) if row else None
+    """Return a single job record, or None."""
+    jobs = _read_index()
+    for job in jobs:
+        if job["id"] == job_id:
+            return job
+    return None
 
 
 def get_user_jobs(username: str, limit: int = 50) -> list[dict[str, Any]]:
     """Return the most recent jobs for a user, newest first."""
-    with _conn() as con:
-        rows = con.execute(
-            """
-            SELECT * FROM domino_jobs
-            WHERE username = ?
-            ORDER BY submitted_at DESC
-            LIMIT ?
-            """,
-            (username, limit),
-        ).fetchall()
-    return [dict(r) for r in rows]
+    jobs = _read_index()
+    user_jobs = [j for j in jobs if j.get("username") == username]
+    user_jobs.sort(key=lambda j: j.get("submitted_at", ""), reverse=True)
+    return user_jobs[:limit]
 
 
 def count_active_jobs(username: str) -> int:
     """Count queued + submitted + pending + running jobs for a user."""
-    with _conn() as con:
-        row = con.execute(
-            """
-            SELECT COUNT(*) as cnt FROM domino_jobs
-            WHERE username = ? AND status IN ('queued', 'submitted', 'pending', 'running')
-            """,
-            (username,),
-        ).fetchone()
-    return row["cnt"] if row else 0
+    active_statuses = {"queued", "submitted", "pending", "running"}
+    jobs = _read_index()
+    return sum(
+        1 for j in jobs
+        if j.get("username") == username and j.get("status") in active_statuses
+    )
 
 
 def get_oldest_queued_job(username: str) -> Optional[dict[str, Any]]:
     """Return the oldest queued job for a user, or None."""
-    with _conn() as con:
-        row = con.execute(
-            """
-            SELECT * FROM domino_jobs
-            WHERE username = ? AND status = 'queued'
-            ORDER BY submitted_at ASC
-            LIMIT 1
-            """,
-            (username,),
-        ).fetchone()
-    return dict(row) if row else None
+    jobs = _read_index()
+    queued = [
+        j for j in jobs
+        if j.get("username") == username and j.get("status") == "queued"
+    ]
+    if not queued:
+        return None
+    queued.sort(key=lambda j: j.get("submitted_at", ""))
+    return queued[0]
+
+
+def get_active_jobs() -> list[dict[str, Any]]:
+    """Return all jobs with status submitted, pending, or running."""
+    active_statuses = {"submitted", "pending", "running"}
+    jobs = _read_index()
+    return [j for j in jobs if j.get("status") in active_statuses]
+
+
+def get_queued_usernames() -> list[str]:
+    """Return distinct usernames that have queued jobs."""
+    jobs = _read_index()
+    return list({
+        j["username"] for j in jobs
+        if j.get("status") == "queued"
+    })
+
+
+def reconcile_stale_jobs() -> None:
+    """Mark submitted/running jobs with no run ID as failed (app restarted)."""
+    jobs = _read_index()
+    changed = False
+    for job in jobs:
+        if (
+            job.get("status") in ("submitted", "pending", "running")
+            and not job.get("domino_run_id")
+        ):
+            job["status"] = "failed"
+            job["domino_status"] = "App restarted"
+            changed = True
+    if changed:
+        _write_index(jobs)
 
 
 def cancel_queued_jobs(username: str) -> None:
     """Cancel all queued (not yet submitted) jobs for a user."""
-    with _conn() as con:
-        con.execute(
-            """
-            UPDATE domino_jobs
-            SET status = 'cancelled'
-            WHERE username = ? AND status = 'queued' AND domino_run_id IS NULL
-            """,
-            (username,),
-        )
+    jobs = _read_index()
+    changed = False
+    for job in jobs:
+        if (
+            job.get("username") == username
+            and job.get("status") == "queued"
+            and not job.get("domino_run_id")
+        ):
+            job["status"] = "cancelled"
+            changed = True
+    if changed:
+        _write_index(jobs)

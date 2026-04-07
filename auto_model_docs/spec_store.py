@@ -1,74 +1,52 @@
-"""Manages uploaded spec files saved to disk for Domino job mode."""
+"""Manages uploaded spec files via the Domino Datasets API.
+
+All I/O goes through DatasetStore (dataset_store.py). No direct filesystem access.
+"""
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
+
+from artifact_layout import get_layout
+from dataset_store import get_store
 
 logger = logging.getLogger(__name__)
 
 
-def _specs_dir(project_name: Optional[str] = None) -> Path:
-    """Return the specs directory scoped to a target project.
+def save_spec(original_filename: str, content: str) -> str:
+    """Write spec content to the dataset with a UUID prefix.
 
-    *project_name* is required when running in Domino (``/mnt/data`` exists)
-    so specs land in the correct project dataset.
+    Returns the dataset-relative path of the saved file.
     """
-    if Path("/mnt/data").exists():
-        if not project_name:
-            raise RuntimeError(
-                "Spec store requires a project name when running in Domino"
-            )
-        base = Path(f"/mnt/data/{project_name}/autodoc_specs")
-    else:
-        base = Path("./autodoc_specs")
-    base.mkdir(parents=True, exist_ok=True)
-    return base
+    store = get_store()
+    layout = get_layout()
+    # Strip any path components from filename for safety
+    safe_name = original_filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    relative_path = f"{layout.specs_dir}/{uuid4()}_{safe_name}"
+    store.write_file(relative_path, content.encode("utf-8"))
+    return relative_path
 
 
-def save_spec(original_filename: str, content: str, project_name: Optional[str] = None) -> Path:
-    """Write spec content to disk with a UUID prefix.
-
-    Returns the Path of the saved file.
-    """
-    safe_name = Path(original_filename).name  # strip any path components
-    dest = _specs_dir(project_name) / f"{uuid4()}_{safe_name}"
-    dest.write_text(content, encoding="utf-8")
-    return dest
-
-
-def list_specs(project_name: Optional[str] = None) -> list[dict[str, Any]]:
-    """Return metadata for all saved spec files, newest first."""
-    specs_dir = _specs_dir(project_name)
+def list_specs() -> list[dict[str, Any]]:
+    """Return metadata for all saved spec files."""
+    store = get_store()
+    layout = get_layout()
+    try:
+        files = store.list_files(layout.specs_dir)
+    except Exception:
+        return []
     results: list[dict[str, Any]] = []
-    for p in sorted(specs_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if p.is_file():
-            stat = p.stat()
-            results.append(
-                {
-                    "name": p.name,
-                    "path": str(p),
-                    "size_kb": round(stat.st_size / 1024, 1),
-                    "created_at": datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
-                    ).isoformat(),
-                }
-            )
+    for f in files:
+        if f.get("isDirectory"):
+            continue
+        results.append({
+            "name": f["fileName"],
+            "path": f"{layout.specs_dir}/{f['fileName']}",
+            "size_kb": round((f.get("sizeInBytes") or 0) / 1024, 1),
+            "created_at": f.get("lastModified", ""),
+        })
     return results
 
 
-def delete_spec(filename: str, project_name: Optional[str] = None) -> None:
-    """Delete a spec file by its filename (basename only)."""
-    target = _specs_dir(project_name) / Path(filename).name
-    if target.exists():
-        target.unlink()
-
-
-def delete_all_specs(project_name: Optional[str] = None) -> None:
-    """Delete all spec files in the specs directory."""
-    for p in _specs_dir(project_name).iterdir():
-        if p.is_file():
-            p.unlink()

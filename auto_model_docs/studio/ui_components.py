@@ -98,11 +98,7 @@ def _validate_environment() -> list:
     # request provides ?projectId.  The directory is created on-demand by
     # _get_default_output_dir() during request handling.
 
-    # Ensure cache directory exists
-    try:
-        Path(".autodoc_cache").mkdir(exist_ok=True)
-    except Exception:
-        pass  # Non-critical
+    # NOTE: cache is managed via DatasetStore — no local directories needed.
 
     return warnings
 

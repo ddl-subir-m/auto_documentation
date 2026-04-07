@@ -238,9 +238,9 @@ MAIN_DOM_JS = r"""
                     }
                     specDatasetSelect.innerHTML = html;
 
-                    // Auto-select autodoc-specs if it exists
+                    // Auto-select autodoc if it exists
                     for (var j = 0; j < datasets.length; j++) {
-                        if (datasets[j].name === 'autodoc-specs') {
+                        if (datasets[j].name === 'autodoc') {
                             specDatasetSelect.value = datasets[j].id;
                             _specAutoDocSpecsId = datasets[j].id;
                             onDatasetChange();
@@ -380,7 +380,7 @@ MAIN_DOM_JS = r"""
         // Global for breadcrumb onclick
         window._specBrowse = function(path) { browseFiles(path); };
 
-        // Upload from machine → autodoc-specs dataset
+        // Upload from machine → autodoc dataset
         if (specMachineUpload) {
             specMachineUpload.addEventListener('change', function(e) {
                 var file = e.target.files[0];
@@ -390,17 +390,17 @@ MAIN_DOM_JS = r"""
                 // Validate spec content before uploading
                 if (typeof validateSpecContent === 'function') validateSpecContent(file);
 
-                // Ensure autodoc-specs dataset exists, then upload
+                // Ensure autodoc dataset exists, then upload
                 var qs = '?' + getProjectIdParam().replace(/^&/, '');
-                fetch('api/ensure-autodoc-specs' + qs, { method: 'POST' })
+                fetch('api/ensure-autodoc' + qs, { method: 'POST' })
                     .then(function(r) { return r.json(); })
                     .then(function(ds) {
                         if (ds.error) throw new Error(ds.error);
-                        console.log('[spec-browser] autodoc-specs dataset ensured: id=' + ds.id);
+                        console.log('[spec-browser] autodoc dataset ensured: id=' + ds.id);
                         _specAutoDocSpecsId = ds.id;
                         var fd = new FormData();
                         fd.append('datasetId', ds.id);
-                        fd.append('datasetName', ds.name || 'autodoc-specs');
+                        fd.append('datasetName', ds.name || 'autodoc');
                         fd.append('file', file);
                         return fetch('api/upload-spec-to-dataset' + qs, { method: 'POST', body: fd });
                     })
@@ -410,8 +410,8 @@ MAIN_DOM_JS = r"""
                         console.log('[spec-browser] Upload success:', result.fileName, '→', result.mountPath);
                         if (specUploadStatus) { specUploadStatus.textContent = 'Uploaded: ' + result.fileName; specUploadStatus.style.color = '#2e7d32'; }
                         // Select the uploaded file
-                        selectSpecFile('autodoc-specs', result.fileName);
-                        // Refresh datasets if autodoc-specs was just created
+                        selectSpecFile('autodoc', result.fileName);
+                        // Refresh datasets if autodoc was just created
                         loadDatasets();
                     })
                     .catch(function(err) {
