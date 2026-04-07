@@ -53,6 +53,10 @@ class DatasetStore:
         self._dataset_id = dataset_id
         self._snapshot_id = snapshot_id
         self._project_id = project_id
+        # Write-through cache: the Domino snapshot API is eventually consistent
+        # so reads immediately after writes may return stale/empty content.
+        # We cache written content locally so reads always see the latest data.
+        self._cache: dict[str, bytes] = {}
 
     @property
     def dataset_id(self) -> str:
@@ -136,6 +140,8 @@ class DatasetStore:
                 )
                 resp.raise_for_status()
 
+            # Cache locally so subsequent reads don't hit stale snapshot
+            self._cache[path] = content
             logger.info("DatasetStore.write_file('%s') complete", path)
 
         except Exception:
@@ -158,9 +164,15 @@ class DatasetStore:
     def read_file(self, path: str) -> bytes:
         """Download file content from the dataset.
 
-        Uses the snapshot file preview endpoint which returns raw content.
-        Endpoint: GET /v4/datasetrw/snapshot/{snapshotId}/file/preview?path=
+        Returns cached content if the file was recently written (avoids
+        stale reads from the eventually-consistent snapshot API).
+        Falls back to the snapshot file preview endpoint.
         """
+        # Return cached content if available (write-through cache)
+        if path in self._cache:
+            logger.info("DatasetStore.read_file('%s') [cache hit]", path)
+            return self._cache[path]
+
         base_url = _resolve_api_host().rstrip("/")
         snap_id = self._snapshot_id
         logger.info("DatasetStore.read_file('%s')", path)
@@ -244,7 +256,9 @@ class DatasetStore:
     # ------------------------------------------------------------------
 
     def file_exists(self, path: str) -> bool:
-        """Check if a file exists using the metadata endpoint."""
+        """Check if a file exists (cache or metadata endpoint)."""
+        if path in self._cache:
+            return True
         try:
             self.read_file_meta(path)
             return True
