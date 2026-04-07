@@ -392,7 +392,7 @@ MAIN_DOM_JS = r"""
 
                 // Ensure autodoc dataset exists, then upload
                 var qs = '?' + getProjectIdParam().replace(/^&/, '');
-                fetch('api/ensure-autodoc' + qs, { method: 'POST' })
+                fetch('api/ensure-autodoc-specs' + qs, { method: 'POST' })
                     .then(function(r) { return r.json(); })
                     .then(function(ds) {
                         if (ds.error) throw new Error(ds.error);
