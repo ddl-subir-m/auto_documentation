@@ -188,10 +188,21 @@ def _set_target_project(project_id: str) -> bool:
                         name=AUTODOC_DATASET_NAME,
                         description="Auto Model Docs artifacts",
                     )
+                    ds_id = ds.get("id") or ""
+                    if not ds_id:
+                        raise RuntimeError(
+                            f"Dataset '{AUTODOC_DATASET_NAME}' created/found but has no ID. "
+                            f"Raw response: {ds}"
+                        )
                     snap_id = ds.get("rwSnapshotId") or ""
                     if not snap_id:
-                        snap_id = domino_datasets.get_rw_snapshot_id(ds["id"], project_id) or ""
-                    init_store(ds["id"], snap_id, project_id)
+                        snap_id = domino_datasets.get_rw_snapshot_id(ds_id, project_id) or ""
+                    if not snap_id:
+                        raise RuntimeError(
+                            f"Could not resolve snapshot ID for dataset '{ds_id}'. "
+                            f"The dataset may still be initializing."
+                        )
+                    init_store(ds_id, snap_id, project_id)
                 except Exception as exc:
                     logger.error(
                         "Failed to initialize DatasetStore for project %s: %s",

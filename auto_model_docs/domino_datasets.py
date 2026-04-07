@@ -166,10 +166,13 @@ def _create_dataset(
             )
             data = resp.json()
             logger.info("Create dataset response: %s", data)
+            # API may wrap the dataset object: {"dataset": {...}, "metadata": {...}}
+            ds = data.get("dataset", data) if isinstance(data, dict) else data
+            snapshot_ids = ds.get("snapshotIds") or []
             return {
-                "id": data.get("datasetId") or data.get("id", ""),
-                "name": data.get("datasetName") or data.get("name", name),
-                "rwSnapshotId": data.get("readWriteSnapshotId"),
+                "id": ds.get("datasetId") or ds.get("id", ""),
+                "name": ds.get("datasetName") or ds.get("name", name),
+                "rwSnapshotId": ds.get("readWriteSnapshotId") or (snapshot_ids[0] if snapshot_ids else None),
             }
         except httpx.HTTPStatusError as exc:
             last_error = exc.response.text if exc.response else str(exc)
