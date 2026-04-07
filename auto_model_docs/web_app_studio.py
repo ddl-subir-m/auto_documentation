@@ -22,7 +22,6 @@ from studio.state import (
     _STARTUP_WARNINGS,
     _set_target_project,
     _get_default_code_root,
-    _get_default_output_dir,
     _get_default_spec_path,
     _get_username,
     domino_client,
@@ -504,19 +503,18 @@ def index(req: Request):
     more_settings_children.append(
         Div(
             Div(
-                Label("Output directory", for_="field-output_dir"),
+                Label("Output location"),
                 Span(
                     "\u24d8",
                     cls="info-tooltip",
-                    data_tooltip="Output files are written to this path in the project's dataset.",
+                    data_tooltip="Generated documents are saved to the docs/ folder in the autodoc dataset.",
                 ),
                 cls="label-row",
             ),
-            Input(
-                name="output_dir",
+            Span(
+                "autodoc dataset \u2192 docs/",
                 id="field-output_dir",
-                type="text",
-                value=str(_get_default_output_dir()),
+                style="font-family: monospace; font-size: 0.8125rem; color: var(--outline); padding: 0.375rem 0;",
             ),
             cls="field",
         )

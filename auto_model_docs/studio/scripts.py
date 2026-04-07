@@ -2,17 +2,10 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-from .state import _get_default_output_dir
-
 
 def get_output_defaults_script() -> str:
-    """Return the small inline script that sets output-dir JS constant."""
-    return f"""
-        const DOMINO_OUTPUT_DEFAULT = {json.dumps(str(_get_default_output_dir()))};
-    """
+    """Return an empty inline script (output dir is fixed, no JS constant needed)."""
+    return ""
 
 
 MAIN_DOM_JS = r"""
@@ -164,13 +157,8 @@ MAIN_DOM_JS = r"""
                         .then(function(html) {
                             var el = document.getElementById('project-id-resolved');
                             if (el) el.outerHTML = html;
-                            // Update output dir from resolved name
-                            var newEl = document.getElementById('project-id-resolved');
-                            var name = newEl ? newEl.getAttribute('data-project-name') : null;
-                            var outputDir = document.getElementById('field-output_dir');
-                            if (outputDir) {
-                                outputDir.value = name ? '/mnt/data/' + name : DOMINO_OUTPUT_DEFAULT;
-                            }
+                            // Output location is fixed (autodoc dataset → docs/)
+                            // No need to update the display field.
                         })
                         .catch(function() {});
                     // Refresh hardware tiers
