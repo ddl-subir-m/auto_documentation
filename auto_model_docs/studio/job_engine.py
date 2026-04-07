@@ -98,8 +98,8 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
         command += ["--model", req.model]
     if req.code_root:
         command += ["--code-root", req.code_root]
-    if req.output_dir:
-        command += ["--output", req.output_dir]
+    # --output is not passed: the CLI ignores it after the DatasetStore
+    # refactor. Output goes to docs/ in the autodoc dataset via DatasetStore.
     if req.max_files:
         command += ["--max-files", str(req.max_files)]
     if req.workers:

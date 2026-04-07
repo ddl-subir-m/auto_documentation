@@ -190,7 +190,8 @@ class TestBuildJobCommand:
         cmd = je._build_job_command(req, "/spec.yaml")
         assert "--model" in cmd and "gpt-4" in cmd
         assert "--code-root" in cmd
-        assert "--output" in cmd
+        # --output is no longer passed (CLI ignores it; output goes via DatasetStore)
+        assert "--output" not in cmd
         assert "--max-files" in cmd and "10" in cmd
         assert "--generation-workers" in cmd
         assert "--planning-workers" in cmd
