@@ -914,16 +914,20 @@ After making your edits above, run the cell below to export this notebook to a W
         return new_markdown_cell(source=content)
 
     def _create_export_cell(self) -> nbformat.NotebookNode:
-        """Create the export code cell with embedded paths."""
+        """Create the export code cell with embedded paths.
+
+        Paths are dataset-relative strings (e.g. "docs"). The export cell
+        embeds them so the notebook can find its outputs when run interactively.
+        """
         # Get absolute path to auto_model_docs directory (where autodoc package lives)
         auto_model_docs_dir = Path(__file__).parent.parent.parent.resolve()
-        output_dir = self.output_dir.resolve()
+        output_dir = self.output_dir  # dataset-relative string
 
         # Determine the notebook path
         if self.notebook_path:
-            notebook_path_str = str(self.notebook_path.resolve())
+            notebook_path_str = str(self.notebook_path)
         else:
-            notebook_path_str = str(output_dir / "model_docs_notebook.ipynb")
+            notebook_path_str = f"{output_dir}/model_docs_notebook.ipynb"
 
         code = f'''# Export to Word Document
 import sys

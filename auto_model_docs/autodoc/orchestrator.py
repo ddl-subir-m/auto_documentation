@@ -276,7 +276,9 @@ class Orchestrator:
         if self.generate_notebook:
             # Sync notebook filename with docx when no custom path was provided
             if not self.notebook_builder.notebook_path:
-                self.notebook_builder.notebook_path = output_path.with_suffix(".ipynb")
+                # output_path is a dataset-relative string (e.g. "docs/model_docs_*.docx")
+                base = output_path.rsplit(".", 1)[0] if "." in output_path else output_path
+                self.notebook_builder.notebook_path = f"{base}.ipynb"
             await self.notebook_builder.build(spec, results)
 
         # Save results to cache for --notebook-from-cache rebuilds
