@@ -8,6 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import artifact_layout
+import dataset_store
+
 from autodoc.core.models import (
     ArtifactContext,
     CodeContext,
@@ -26,6 +29,44 @@ from autodoc.core.models import (
     SectionSpec,
 )
 from autodoc.orchestrator import Orchestrator
+
+
+# ---------------------------------------------------------------------------
+# In-memory DatasetStore for cache tests
+# ---------------------------------------------------------------------------
+
+class _MemStore:
+    """Minimal in-memory DatasetStore for testing cache round-trips."""
+    dataset_id = "ds-test"
+    snapshot_id = "snap-test"
+
+    def __init__(self):
+        self._files: dict[str, bytes] = {}
+
+    def write_file(self, path, content):
+        self._files[path] = content
+
+    def read_file(self, path):
+        if path not in self._files:
+            raise FileNotFoundError(path)
+        return self._files[path]
+
+    def file_exists(self, path):
+        return path in self._files
+
+    def list_files(self, path=""):
+        return []
+
+
+@pytest.fixture(autouse=True)
+def _init_layout_and_store():
+    """Ensure ArtifactLayout and DatasetStore are available for all tests."""
+    artifact_layout.init_layout()
+    mem = _MemStore()
+    dataset_store._store = mem
+    yield
+    artifact_layout.reset_layout()
+    dataset_store.reset_store()
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +245,7 @@ class TestSanitizerCreation:
 class TestProgressCallbacks:
     """The generate() pipeline fires callbacks in Scanning -> Planning -> Generating -> Building order."""
 
+    @patch("autodoc.orchestrator.Orchestrator._save_results_cache")
     @patch("autodoc.orchestrator.ArtifactScanner")
     @patch("autodoc.orchestrator.CodeScanner")
     @patch("autodoc.orchestrator.DocumentBuilder")
@@ -211,7 +253,8 @@ class TestProgressCallbacks:
     @patch("autodoc.orchestrator.ContentGenerator")
     @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 3))
     def test_progress_phases_in_order(
-        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as,
+        mock_save_cache,
     ):
         llm = _make_mock_llm()
         orch = Orchestrator(
@@ -254,6 +297,7 @@ class TestProgressCallbacks:
 
         assert phases_seen == ["Scanning", "Planning", "Generating", "Building"]
 
+    @patch("autodoc.orchestrator.Orchestrator._save_results_cache")
     @patch("autodoc.orchestrator.ArtifactScanner")
     @patch("autodoc.orchestrator.CodeScanner")
     @patch("autodoc.orchestrator.DocumentBuilder")
@@ -261,7 +305,8 @@ class TestProgressCallbacks:
     @patch("autodoc.orchestrator.ContentGenerator")
     @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 3))
     def test_scanning_starts_at_zero(
-        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as,
+        mock_save_cache,
     ):
         llm = _make_mock_llm()
         orch = Orchestrator(llm=llm, sanitizer=_make_mock_sanitizer(), code_root=Path("/tmp"))

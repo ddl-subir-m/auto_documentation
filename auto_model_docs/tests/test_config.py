@@ -80,11 +80,11 @@ class TestDefaultValues:
 
     def test_parallel_workers_default(self):
         s = _make_settings()
-        assert s.parallel_workers == 1
+        assert s.parallel_workers == 4
 
     def test_planning_workers_default(self):
         s = _make_settings()
-        assert s.planning_workers == 1
+        assert s.planning_workers == 3
 
     def test_mlflow_defaults_none(self):
         s = _make_settings()

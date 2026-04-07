@@ -110,8 +110,24 @@ def _mock_studio_modules():
     # ui_components module
     mock_ui = ModuleType("studio.ui_components")
     mock_ui._render_job_history_table = MagicMock(return_value=MagicMock())
-    mock_ui._sanitize_optional_int = lambda v: int(v) if v not in (None, "") else None
-    mock_ui._sanitize_optional_float = lambda v: float(v) if v not in (None, "") else None
+    def _safe_int(v):
+        if v in (None, ""):
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
+
+    def _safe_float(v):
+        if v in (None, ""):
+            return None
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return None
+
+    mock_ui._sanitize_optional_int = _safe_int
+    mock_ui._sanitize_optional_float = _safe_float
     mock_ui._db_record_to_dataclass = lambda row: _MockDominoJobRecord(
         id=row["id"], username=row["username"],
     )

@@ -2,8 +2,7 @@
 
 Tests the full request -> route handler -> response path with:
 - Real HTTP via httpx AsyncClient + Starlette app
-- Real SQLite database for job_store
-- Real file system for spec_store
+- Mocked DatasetStore for job_store and spec_store I/O
 - Real auth_context ContextVar propagation through middleware
 - Mocked Domino API client (no live API calls)
 
@@ -58,23 +57,48 @@ def _load_module(name: str, filename: str) -> ModuleType:
 def _build_test_app(tmp_path: Path, monkeypatch):
     """Construct a Starlette app wired with real route handlers.
 
-    Uses real SQLite (in tmp_path), real spec_store (in tmp_path),
+    Uses in-memory DatasetStore mock for job_store and spec_store,
     mocked domino_client, and real auth_context propagation.
     """
     import domino_job_store as store
     import spec_store
     import auth_context
+    import dataset_store
+    import artifact_layout
 
-    # Point job_store at tmp_path
-    store._PROJECT_NAME_OVERRIDE = None
-    original_db_path_fn = store._db_path
-    store._db_path = lambda: tmp_path / "autodoc_jobs.db"
-    store.init_db()
+    # Set up in-memory file store for DatasetStore
+    _mem_files: dict[str, bytes] = {}
 
-    # Point spec_store at tmp_path
-    original_specs_dir_fn = spec_store._specs_dir
-    spec_store._specs_dir = lambda project_name=None: tmp_path / "specs"
-    (tmp_path / "specs").mkdir(exist_ok=True)
+    class _MemStore:
+        dataset_id = "ds-integration"
+        snapshot_id = "snap-integration"
+
+        def write_file(self, path, content):
+            _mem_files[path] = content
+
+        def read_file(self, path):
+            if path not in _mem_files:
+                raise FileNotFoundError(path)
+            return _mem_files[path]
+
+        def list_files(self, path=""):
+            prefix = (path.rstrip("/") + "/") if path else ""
+            results = []
+            for k in _mem_files:
+                if prefix and not k.startswith(prefix):
+                    continue
+                name = k[len(prefix):] if prefix else k
+                if "/" in name:
+                    continue  # skip nested
+                results.append({"fileName": name, "isDirectory": False, "sizeInBytes": len(_mem_files[k])})
+            return results
+
+        def file_exists(self, path):
+            return path in _mem_files
+
+    mem_store = _MemStore()
+    dataset_store._store = mem_store
+    artifact_layout.init_layout()
 
     # Mock domino_client
     mock_client = MagicMock()
@@ -319,7 +343,7 @@ def _build_test_app(tmp_path: Path, monkeypatch):
         "domino_datasets": mock_datasets,
         "auth_context": auth_context,
         "doc_spec": mock_doc_spec,
-        "_restore": (original_db_path_fn, original_specs_dir_fn),
+        "_restore": None,
     }
 
 
@@ -346,12 +370,10 @@ def integration_env(tmp_path, monkeypatch):
     yield env
 
     # Restore
-    import domino_job_store as store
-    import spec_store
-    orig_db, orig_specs = env["_restore"]
-    store._db_path = orig_db
-    store._PROJECT_NAME_OVERRIDE = None
-    spec_store._specs_dir = orig_specs
+    import dataset_store
+    import artifact_layout
+    dataset_store.reset_store()
+    artifact_layout.reset_layout()
 
     for key, val in saved_modules.items():
         if val is None:
@@ -464,13 +486,16 @@ class TestSpecRoutesIntegration:
         assert resp.status_code == 200
         assert "No saved spec" in resp.text
 
-    def test_cleanup_specs(self, client):
-        resp = client.post("/cleanup-specs?projectId=proj-integration")
+    def test_save_spec(self, client):
+        resp = client.post("/save-spec", data={
+            "spec_filename": "test.yaml",
+            "spec_content": "title: Test\n",
+        })
         assert resp.status_code == 200
 
 
 # ===========================================================================
-# Job route integration tests (real SQLite)
+# Job route integration tests
 # ===========================================================================
 
 class TestJobRoutesIntegration:
@@ -479,8 +504,8 @@ class TestJobRoutesIntegration:
         resp = client.get("/job-history")
         assert resp.status_code == 200
 
-    def test_submit_job_creates_db_record(self, client, integration_env):
-        """Submit via HTTP, verify record appears in real SQLite."""
+    def test_submit_job_creates_record(self, client, integration_env):
+        """Submit via HTTP, verify record appears in job index."""
         store = integration_env["store"]
 
         resp = client.post("/run", data={
@@ -495,7 +520,7 @@ class TestJobRoutesIntegration:
         assert jobs[0]["username"] == "integration_user"
 
     def test_cancel_queued_jobs(self, client, integration_env):
-        """Cancel via HTTP, verify status change in SQLite."""
+        """Cancel via HTTP, verify status change in job index."""
         store = integration_env["store"]
         job_id = store.create_job(
             "integration_user", "main", "small", "/spec.yaml",
@@ -509,7 +534,7 @@ class TestJobRoutesIntegration:
         assert job["status"] == "cancelled"
 
     def test_stop_job_calls_domino_api(self, client, integration_env):
-        """Stop via HTTP, verify Domino API call and SQLite update."""
+        """Stop via HTTP, verify Domino API call and job index update."""
         store = integration_env["store"]
         job_id = store.create_job(
             "integration_user", "main", "small", "/spec.yaml",

@@ -143,10 +143,9 @@ class TestSanitizeOptionalInt:
         ui = _import_ui()
         assert ui._sanitize_optional_int("0") == 0
 
-    def test_invalid_raises(self):
+    def test_invalid_returns_none(self):
         ui = _import_ui()
-        with pytest.raises(ValueError):
-            ui._sanitize_optional_int("not-a-number")
+        assert ui._sanitize_optional_int("not-a-number") is None
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +169,9 @@ class TestSanitizeOptionalFloat:
         ui = _import_ui()
         assert ui._sanitize_optional_float("10") == 10.0
 
-    def test_invalid_raises(self):
+    def test_invalid_returns_none(self):
         ui = _import_ui()
-        with pytest.raises(ValueError):
-            ui._sanitize_optional_float("abc")
+        assert ui._sanitize_optional_float("abc") is None
 
 
 # ---------------------------------------------------------------------------

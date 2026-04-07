@@ -1,5 +1,6 @@
 """Content generators for different block types."""
 
+from __future__ import annotations
 
 import io
 import logging
