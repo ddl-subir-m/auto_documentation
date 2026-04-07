@@ -197,7 +197,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
     if status in ("queued", "submitted", "running"):
         stop_btn = A(
             "Stop",
-            hx_post="stop-domino",
+            hx_post="stop-job-history",
             hx_vals=f'{{"job_id": "{record.id}"}}',
             hx_target="#status-panel",
             hx_swap="innerHTML",

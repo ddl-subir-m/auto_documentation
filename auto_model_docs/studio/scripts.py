@@ -407,7 +407,7 @@ MAIN_DOM_JS = r"""
                     .then(function(r) { return r.json(); })
                     .then(function(result) {
                         if (result.error) throw new Error(result.error);
-                        console.log('[spec-browser] Upload success:', result.fileName, '→', result.mountPath);
+                        console.log('[spec-browser] Upload success:', result.fileName, '→', result.path);
                         if (specUploadStatus) { specUploadStatus.textContent = 'Uploaded: ' + result.fileName; specUploadStatus.style.color = '#2e7d32'; }
                         // Select the uploaded file
                         selectSpecFile('autodoc', result.fileName);
