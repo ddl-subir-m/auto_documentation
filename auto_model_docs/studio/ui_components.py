@@ -99,12 +99,7 @@ def _validate_environment() -> list:
                 action="Job submission may fail. Set DOMINO_API_HOST.",
             ))
 
-    # NOTE: output directory validation is skipped at startup — the target
-    # project (and therefore the output path) is only known after the first
-    # request provides ?projectId.  The directory is created on-demand by
-    # _get_default_output_dir() during request handling.
-
-    # NOTE: cache is managed via DatasetStore — no local directories needed.
+    # Output and cache are managed via DatasetStore — no local directories needed.
 
     return warnings
 

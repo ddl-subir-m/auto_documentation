@@ -64,7 +64,6 @@ async def _parse_request(req: Request) -> JobRequest:
         api_key=form.get("api_key") or None,
         base_url=form.get("base_url") or None,
         code_root=form.get("code_root") or None,
-        output_dir=form.get("output_dir") or None,
         max_files=_sanitize_optional_int(form.get("max_files")),
         workers=_sanitize_optional_int(form.get("workers")),
         planning_workers=_sanitize_optional_int(form.get("planning_workers")),

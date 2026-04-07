@@ -293,7 +293,6 @@ def _make_job_request(**overrides) -> Any:
         api_key=None,
         base_url=None,
         code_root=None,
-        output_dir=None,
         max_files=None,
         workers=None,
         planning_workers=None,
@@ -317,17 +316,6 @@ def _make_job_request(**overrides) -> Any:
 class TestBuildJobCommandStr:
     """Tests for _build_job_command_str (in studio/job_engine.py)."""
 
-    def test_paths_with_spaces_are_quoted(self):
-        """Output dir containing spaces should be properly handled."""
-        req = _make_job_request(output_dir="/mnt/data/my project with spaces")
-        cmd = _bld_cmd(req, spec_path=None)
-
-        # The output dir should appear in the command — verify the copy step
-        # includes the path (even if not shell-quoted, the test documents
-        # current behavior so the parallel branch can fix quoting)
-        assert "/mnt/data/my project with spaces" in cmd
-        assert "/mnt/artifacts/auto_ml" in cmd
-
     def test_includes_notebook_flag(self):
         """Domino jobs should always include --notebook."""
         req = _make_job_request()
@@ -343,7 +331,7 @@ class TestBuildJobCommandStr:
 
     def test_no_artifacts_copy(self):
         """Command should not include any cp or artifacts step."""
-        req = _make_job_request(output_dir=None)
+        req = _make_job_request()
         cmd = _bld_cmd(req, spec_path=None)
         assert "cp" not in cmd
         assert "artifacts" not in cmd

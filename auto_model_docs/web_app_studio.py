@@ -29,7 +29,7 @@ from studio.state import (
     logger,
 )
 from studio.styles import STUDIO_CSS
-from studio.scripts import MAIN_DOM_JS, get_output_defaults_script
+from studio.scripts import MAIN_DOM_JS
 from studio.ui_components import (
     _render_warnings_banner,
     _render_job_history_table,
@@ -502,25 +502,6 @@ def index(req: Request):
     more_settings_children = []
     more_settings_children.append(
         Div(
-            Div(
-                Label("Output location"),
-                Span(
-                    "\u24d8",
-                    cls="info-tooltip",
-                    data_tooltip="Generated documents are saved to the docs/ folder in the autodoc dataset.",
-                ),
-                cls="label-row",
-            ),
-            Span(
-                "autodoc dataset \u2192 docs/",
-                id="field-output_dir",
-                style="font-family: monospace; font-size: 0.8125rem; color: var(--outline); padding: 0.375rem 0;",
-            ),
-            cls="field",
-        )
-    )
-    more_settings_children.append(
-        Div(
             Label("API key"),
             Div(
                 Label(
@@ -715,8 +696,6 @@ def index(req: Request):
 
     return (
         Title("Auto Model Docs Studio"),
-        # Output defaults — injected per-request so it uses the resolved target project
-        Script(get_output_defaults_script()),
         # Header
         Div(
             Div(

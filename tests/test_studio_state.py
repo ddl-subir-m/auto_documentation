@@ -77,7 +77,7 @@ class TestJobRequest:
         field_names = {f.name for f in fields(jr)}
         expected = {
             "spec_path", "spec_content", "provider", "model", "api_key",
-            "base_url", "code_root", "output_dir", "max_files", "workers",
+            "base_url", "code_root", "max_files", "workers",
             "planning_workers", "timeout", "notebook", "notebook_path",
             "experiment_names", "model_names", "latest_only", "verbose",
             "branch", "hardware_tier", "api_key_source", "spec_filename",
@@ -250,24 +250,3 @@ class TestSetTargetProject:
             result = state_module._set_target_project("proj-abc")
         assert result is False
 
-
-# ---------------------------------------------------------------------------
-# _get_default_output_dir
-# ---------------------------------------------------------------------------
-
-class TestGetDefaultOutputDir:
-    def test_raises_without_layout_init(self, state_module):
-        """_get_default_output_dir delegates to get_layout().docs_dir.
-        Raises if ArtifactLayout hasn't been initialized."""
-        import artifact_layout
-        artifact_layout.reset_layout()
-        with pytest.raises(RuntimeError, match="not initialized"):
-            state_module._get_default_output_dir()
-
-    def test_returns_docs_dir_from_layout(self, state_module):
-        import artifact_layout
-        artifact_layout.reset_layout()
-        artifact_layout.init_layout()
-        result = state_module._get_default_output_dir()
-        assert result == "docs"
-        artifact_layout.reset_layout()

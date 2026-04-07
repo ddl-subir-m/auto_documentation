@@ -7,8 +7,7 @@ import importlib.util as _imputil
 import logging
 import os
 import ctypes as _ctypes
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -94,7 +93,6 @@ class JobRequest:
     api_key: Optional[str]
     base_url: Optional[str]
     code_root: Optional[str]
-    output_dir: Optional[str]
     max_files: Optional[int]
     workers: Optional[int]
     planning_workers: Optional[int]
@@ -235,12 +233,6 @@ def _get_target_project_name() -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
-
-def _get_default_output_dir() -> str:
-    """Return the default docs output path (relative to dataset root)."""
-    from artifact_layout import get_layout
-    return get_layout().docs_dir
-
 
 def _get_default_code_root() -> Path:
     """Return the default code root: /mnt/code for git projects,

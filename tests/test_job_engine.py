@@ -34,7 +34,6 @@ class JobRequest:
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     code_root: Optional[str] = None
-    output_dir: Optional[str] = None
     max_files: Optional[int] = None
     workers: Optional[int] = None
     planning_workers: Optional[int] = None
@@ -183,7 +182,7 @@ class TestBuildJobCommand:
         je = _import_job_engine()
         req = JobRequest(
             provider="openai", model="gpt-4", code_root="/code",
-            output_dir="/out", max_files=10, workers=4, planning_workers=2,
+            max_files=10, workers=4, planning_workers=2,
             timeout=30.0, experiment_names="exp1,exp2", model_names="model1",
             latest_only=True, verbose=True,
         )

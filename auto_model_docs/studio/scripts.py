@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 
-def get_output_defaults_script() -> str:
-    """Return an empty inline script (output dir is fixed, no JS constant needed)."""
-    return ""
-
-
 MAIN_DOM_JS = r"""
     // ── Shared fetch helper: check response status before parsing ──
     function _checkResp(r) {

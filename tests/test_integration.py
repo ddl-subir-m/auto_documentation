@@ -166,7 +166,6 @@ def _build_test_app(tmp_path: Path, monkeypatch):
         api_key: Optional[str] = None
         base_url: Optional[str] = None
         code_root: Optional[str] = None
-        output_dir: Optional[str] = None
         max_files: Optional[int] = None
         workers: Optional[int] = None
         planning_workers: Optional[int] = None
