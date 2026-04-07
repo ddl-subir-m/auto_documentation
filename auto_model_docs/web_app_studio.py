@@ -22,7 +22,6 @@ from studio.state import (
     _STARTUP_WARNINGS,
     _set_target_project,
     _get_default_code_root,
-    _get_default_output_dir,
     _get_default_spec_path,
     _get_username,
     domino_client,
@@ -30,7 +29,7 @@ from studio.state import (
     logger,
 )
 from studio.styles import STUDIO_CSS
-from studio.scripts import MAIN_DOM_JS, get_output_defaults_script
+from studio.scripts import MAIN_DOM_JS
 from studio.ui_components import (
     _render_warnings_banner,
     _render_job_history_table,
@@ -503,26 +502,6 @@ def index(req: Request):
     more_settings_children = []
     more_settings_children.append(
         Div(
-            Div(
-                Label("Output directory", for_="field-output_dir"),
-                Span(
-                    "\u24d8",
-                    cls="info-tooltip",
-                    data_tooltip="Output files are written to this path in the project's dataset.",
-                ),
-                cls="label-row",
-            ),
-            Input(
-                name="output_dir",
-                id="field-output_dir",
-                type="text",
-                value=str(_get_default_output_dir()),
-            ),
-            cls="field",
-        )
-    )
-    more_settings_children.append(
-        Div(
             Label("API key"),
             Div(
                 Label(
@@ -717,8 +696,6 @@ def index(req: Request):
 
     return (
         Title("Auto Model Docs Studio"),
-        # Output defaults — injected per-request so it uses the resolved target project
-        Script(get_output_defaults_script()),
         # Header
         Div(
             Div(

@@ -2,20 +2,14 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-from .state import _get_default_output_dir
-
-
-def get_output_defaults_script() -> str:
-    """Return the small inline script that sets output-dir JS constant."""
-    return f"""
-        const DOMINO_OUTPUT_DEFAULT = {json.dumps(str(_get_default_output_dir()))};
-    """
-
 
 MAIN_DOM_JS = r"""
+    // ── Shared fetch helper: check response status before parsing ──
+    function _checkResp(r) {
+        if (!r.ok) throw new Error('Server error (' + r.status + ')');
+        return r;
+    }
+
     // ── Hardware tier card selection ──
     function selectHwTier(card, tierId) {
         var grid = card.closest('.hw-tier-grid');
@@ -83,7 +77,7 @@ MAIN_DOM_JS = r"""
             var url = 'api/detect-language';
             if (codeRoot) url += '?code_root=' + encodeURIComponent(codeRoot);
             fetch(url)
-                .then(function(r) { return r.json(); })
+                .then(_checkResp).then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (langRow) langRow.style.display = '';
                     if (data.language) {
@@ -154,17 +148,12 @@ MAIN_DOM_JS = r"""
                     var qs = pid ? '?projectId=' + encodeURIComponent(pid) : '';
                     // Resolve project name
                     fetch('api/resolve-project' + qs)
-                        .then(function(r) { return r.text(); })
+                        .then(_checkResp).then(function(r) { return r.text(); })
                         .then(function(html) {
                             var el = document.getElementById('project-id-resolved');
                             if (el) el.outerHTML = html;
-                            // Update output dir from resolved name
-                            var newEl = document.getElementById('project-id-resolved');
-                            var name = newEl ? newEl.getAttribute('data-project-name') : null;
-                            var outputDir = document.getElementById('field-output_dir');
-                            if (outputDir) {
-                                outputDir.value = name ? '/mnt/data/' + name : DOMINO_OUTPUT_DEFAULT;
-                            }
+                            // Output location is fixed (autodoc dataset → docs/)
+                            // No need to update the display field.
                         })
                         .catch(function() {});
                     // Refresh hardware tiers
@@ -217,7 +206,7 @@ MAIN_DOM_JS = r"""
             console.log('[spec-browser] Loading writable datasets...');
             var qs = '?' + getProjectIdParam().replace(/^&/, '');
             fetch('api/datasets' + qs)
-                .then(function(r) { return r.json(); })
+                .then(_checkResp).then(function(r) { return r.json(); })
                 .then(function(datasets) {
                     if (datasets.error) {
                         console.error('[spec-browser] Error loading datasets:', datasets.error);
@@ -238,9 +227,9 @@ MAIN_DOM_JS = r"""
                     }
                     specDatasetSelect.innerHTML = html;
 
-                    // Auto-select autodoc-specs if it exists
+                    // Auto-select autodoc if it exists
                     for (var j = 0; j < datasets.length; j++) {
-                        if (datasets[j].name === 'autodoc-specs') {
+                        if (datasets[j].name === 'autodoc') {
                             specDatasetSelect.value = datasets[j].id;
                             _specAutoDocSpecsId = datasets[j].id;
                             onDatasetChange();
@@ -283,7 +272,7 @@ MAIN_DOM_JS = r"""
             qs += getProjectIdParam();
 
             fetch('api/dataset-files' + qs)
-                .then(function(r) { return r.json(); })
+                .then(_checkResp).then(function(r) { return r.json(); })
                 .then(function(files) {
                     if (files.error) {
                         console.error('[spec-browser] File listing error:', files.error);
@@ -380,7 +369,7 @@ MAIN_DOM_JS = r"""
         // Global for breadcrumb onclick
         window._specBrowse = function(path) { browseFiles(path); };
 
-        // Upload from machine → autodoc-specs dataset
+        // Upload from machine → autodoc dataset
         if (specMachineUpload) {
             specMachineUpload.addEventListener('change', function(e) {
                 var file = e.target.files[0];
@@ -390,28 +379,28 @@ MAIN_DOM_JS = r"""
                 // Validate spec content before uploading
                 if (typeof validateSpecContent === 'function') validateSpecContent(file);
 
-                // Ensure autodoc-specs dataset exists, then upload
+                // Ensure autodoc dataset exists, then upload
                 var qs = '?' + getProjectIdParam().replace(/^&/, '');
                 fetch('api/ensure-autodoc-specs' + qs, { method: 'POST' })
-                    .then(function(r) { return r.json(); })
+                    .then(_checkResp).then(function(r) { return r.json(); })
                     .then(function(ds) {
                         if (ds.error) throw new Error(ds.error);
-                        console.log('[spec-browser] autodoc-specs dataset ensured: id=' + ds.id);
+                        console.log('[spec-browser] autodoc dataset ensured: id=' + ds.id);
                         _specAutoDocSpecsId = ds.id;
                         var fd = new FormData();
                         fd.append('datasetId', ds.id);
-                        fd.append('datasetName', ds.name || 'autodoc-specs');
+                        fd.append('datasetName', ds.name || 'autodoc');
                         fd.append('file', file);
                         return fetch('api/upload-spec-to-dataset' + qs, { method: 'POST', body: fd });
                     })
-                    .then(function(r) { return r.json(); })
+                    .then(_checkResp).then(function(r) { return r.json(); })
                     .then(function(result) {
                         if (result.error) throw new Error(result.error);
-                        console.log('[spec-browser] Upload success:', result.fileName, '→', result.mountPath);
+                        console.log('[spec-browser] Upload success:', result.fileName, '→', result.path);
                         if (specUploadStatus) { specUploadStatus.textContent = 'Uploaded: ' + result.fileName; specUploadStatus.style.color = '#2e7d32'; }
                         // Select the uploaded file
-                        selectSpecFile('autodoc-specs', result.fileName);
-                        // Refresh datasets if autodoc-specs was just created
+                        selectSpecFile('autodoc', result.path);
+                        // Refresh datasets if autodoc was just created
                         loadDatasets();
                     })
                     .catch(function(err) {
@@ -467,7 +456,7 @@ MAIN_DOM_JS = r"""
             var resultEl = document.getElementById('spec-validation-result');
             if (resultEl) resultEl.innerHTML = '<span style="color:var(--outline);font-size:0.8125rem;">Validating spec...</span>';
             fetch('validate-spec', { method: 'POST', body: fd })
-                .then(function(r) { return r.text(); })
+                .then(_checkResp).then(function(r) { return r.text(); })
                 .then(function(html) {
                     if (resultEl) resultEl.outerHTML = html;
                     window._specValid = html.indexOf('validation failed') === -1;
@@ -553,7 +542,7 @@ MAIN_DOM_JS = r"""
                 prevCount = details.querySelectorAll('tbody tr').length;
             }
             fetch('job-history')
-                .then(function(r) { return r.text(); })
+                .then(_checkResp).then(function(r) { return r.text(); })
                 .then(function(html) {
                     if (!_htmxBusy) {
                         el.innerHTML = html;

@@ -1,17 +1,15 @@
 """Tests for domino_client.py — current REST-based API (no SDK dependency).
 
-Covers functions not tested in the legacy test_domino_client.py:
-list_branches, list_hardware_tiers, get_project_default_tier,
-get_job_status, stop_job, set_ui_host, build_job_url.
-Also covers _domino_request, resolve_project, submit_job with current signatures.
+Covers: list_hardware_tiers, get_project_default_tier,
+get_job_status, stop_job, set_ui_host, build_job_url,
+resolve_project, submit_job with current signatures.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-import subprocess
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,7 +25,6 @@ import domino_client as dc
 @pytest.fixture(autouse=True)
 def _setup_env(monkeypatch):
     monkeypatch.setenv("DOMINO_API_HOST", "https://domino.example.com")
-    monkeypatch.setenv("DOMINO_API_PROXY", "http://localhost:8899")
     monkeypatch.setenv("DOMINO_USER_API_KEY", "test-api-key")
     monkeypatch.setenv("DOMINO_PROJECT_ID", "proj-123")
     monkeypatch.setenv("DOMINO_PROJECT_OWNER", "test_owner")
@@ -39,19 +36,16 @@ def _setup_env(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Host resolution
+# Host resolution — _resolve_api_host is re-exported from domino_auth
 # ---------------------------------------------------------------------------
 
 class TestHostResolution:
-    def test_api_host_prefers_proxy(self):
-        assert dc._resolve_api_host() == "http://localhost:8899"
-
-    def test_api_host_fallback(self, monkeypatch):
-        monkeypatch.delenv("DOMINO_API_PROXY", raising=False)
+    def test_api_host(self):
         assert dc._resolve_api_host() == "https://domino.example.com"
 
-    def test_nucleus_host(self):
-        assert dc._resolve_nucleus_host() == "https://domino.example.com"
+    def test_api_host_strips_trailing_slash(self, monkeypatch):
+        monkeypatch.setenv("DOMINO_API_HOST", "https://domino.example.com/")
+        assert dc._resolve_api_host() == "https://domino.example.com"
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +59,7 @@ class TestListHardwareTiers:
             {"hardwareTier": {"id": "small", "name": "Small", "hwtFlags": {"isDefault": True}}},
             {"hardwareTier": {"id": "large", "name": "Large GPU", "hwtFlags": {"isDefault": False}}},
         ]
-        tiers = dc.list_hardware_tiers()
+        tiers = dc.list_hardware_tiers(project_id="proj-123")
         assert len(tiers) == 2
         assert tiers[0] == {"id": "small", "name": "Small", "isDefault": True}
         assert tiers[1] == {"id": "large", "name": "Large GPU", "isDefault": False}
@@ -75,24 +69,25 @@ class TestListHardwareTiers:
         mock_req.return_value = {"hardwareTiers": [
             {"id": "medium", "name": "Medium"},
         ]}
-        tiers = dc.list_hardware_tiers()
+        tiers = dc.list_hardware_tiers(project_id="proj-123")
         assert len(tiers) == 1
         assert tiers[0]["id"] == "medium"
 
     @patch.object(dc, "_domino_request")
     def test_api_error_returns_empty(self, mock_req):
         mock_req.side_effect = RuntimeError("API down")
-        assert dc.list_hardware_tiers() == []
+        assert dc.list_hardware_tiers(project_id="proj-123") == []
 
-    def test_no_project_id_returns_empty(self, monkeypatch):
-        monkeypatch.delenv("DOMINO_PROJECT_ID", raising=False)
-        assert dc.list_hardware_tiers() == []
+    def test_no_project_id_returns_empty(self):
+        assert dc.list_hardware_tiers(project_id=None) == []
 
     @patch.object(dc, "_domino_request")
     def test_cross_project(self, mock_req):
         mock_req.return_value = []
         dc.list_hardware_tiers(project_id="other-proj")
-        assert mock_req.call_args.kwargs["cross_project"] is True
+        # Verify it called with the project ID in the path
+        call_path = mock_req.call_args.args[1]
+        assert "other-proj" in call_path
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +144,8 @@ class TestGetJobStatus:
     def test_pending(self, mock_req):
         mock_req.return_value = {"statuses": {"executionStatus": "Queued"}}
         result = dc.get_job_status("run-1")
-        assert result["local_status"] == "submitted"
+        # "queued" maps to _PENDING_STATUSES → "pending"
+        assert result["local_status"] == "pending"
 
     @patch.object(dc, "_domino_request")
     def test_api_error_returns_running(self, mock_req):
@@ -172,16 +168,20 @@ class TestGetJobStatus:
 class TestStopJob:
     @patch.object(dc, "_domino_request")
     def test_calls_api(self, mock_req):
-        dc.stop_job("run-1")
+        dc.stop_job("run-1", project_id="proj-123")
         mock_req.assert_called_once_with(
             "POST", "/v4/jobs/stop",
-            json={"jobId": "run-1", "commitResults": True},
+            json={"jobId": "run-1", "commitResults": True, "projectId": "proj-123"},
         )
+
+    def test_raises_without_project_id(self):
+        with pytest.raises(ValueError, match="project_id is required"):
+            dc.stop_job("run-1")
 
     @patch.object(dc, "_domino_request")
     def test_api_error_is_swallowed(self, mock_req):
         mock_req.side_effect = RuntimeError("already stopped")
-        dc.stop_job("run-1")  # should not raise
+        dc.stop_job("run-1", project_id="proj-123")  # should not raise
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +214,9 @@ class TestSetUiHost:
 class TestBuildJobUrl:
     def test_builds_url(self):
         dc.set_ui_host("domino.example.com")
-        url = dc.build_job_url("run-123")
+        # build_job_url uses get_project_context which needs resolve_project
+        with patch.object(dc, "get_project_context", return_value=("proj-123", "test_project", "test_owner")):
+            url = dc.build_job_url("run-123", project_id="proj-123")
         assert url == "https://domino.example.com/jobs/test_owner/test_project/run-123/logs?status=all"
 
     def test_none_without_ui_host(self):
@@ -268,49 +270,57 @@ class TestResolveProject:
 # ---------------------------------------------------------------------------
 
 class TestSubmitJob:
+    @patch.object(dc, "get_project_context", return_value=("proj-123", "test_project", "test_owner"))
     @patch.object(dc, "_domino_request")
-    def test_returns_run_id(self, mock_req):
+    def test_returns_run_id(self, mock_req, _mock_ctx):
         mock_req.return_value = {"id": "run-abc"}
-        run_id = dc.submit_job("python main.py", "main")
+        run_id = dc.submit_job("python main.py", "main", project_id="proj-123")
         assert run_id == "run-abc"
 
+    @patch.object(dc, "get_project_context", return_value=("proj-123", "test_project", "test_owner"))
     @patch.object(dc, "_domino_request")
-    def test_includes_branch(self, mock_req):
+    def test_includes_branch(self, mock_req, _mock_ctx):
         mock_req.return_value = {"id": "run-1"}
-        dc.submit_job("python main.py", "feature/x")
+        dc.submit_job("python main.py", "feature/x", project_id="proj-123")
         payload = mock_req.call_args.kwargs["json"]
         assert payload["mainRepoGitRef"] == {"type": "branches", "value": "feature/x"}
 
+    @patch.object(dc, "get_project_context", return_value=("proj-123", "test_project", "test_owner"))
     @patch.object(dc, "_domino_request")
-    def test_no_branch(self, mock_req):
+    def test_no_branch(self, mock_req, _mock_ctx):
         mock_req.return_value = {"id": "run-1"}
-        dc.submit_job("python main.py", None)
+        dc.submit_job("python main.py", None, project_id="proj-123")
         payload = mock_req.call_args.kwargs["json"]
         assert "mainRepoGitRef" not in payload
 
+    @patch.object(dc, "get_project_context", return_value=("proj-123", "test_project", "test_owner"))
     @patch.object(dc, "_domino_request")
-    def test_includes_tier(self, mock_req):
+    def test_includes_tier(self, mock_req, _mock_ctx):
         mock_req.return_value = {"id": "run-1"}
-        dc.submit_job("python main.py", None, tier_id="gpu-large")
+        dc.submit_job("python main.py", None, tier_id="gpu-large", project_id="proj-123")
         payload = mock_req.call_args.kwargs["json"]
         assert payload["overrideHardwareTierId"] == "gpu-large"
 
+    @patch.object(dc, "get_project_context", return_value=("proj-123", "test_project", "test_owner"))
     @patch.object(dc, "_domino_request")
-    def test_raises_on_missing_run_id(self, mock_req):
+    def test_raises_on_missing_run_id(self, mock_req, _mock_ctx):
         mock_req.return_value = {"unexpected": "response"}
         with pytest.raises(ValueError, match="unexpected response"):
-            dc.submit_job("python main.py", None)
+            dc.submit_job("python main.py", None, project_id="proj-123")
 
-    def test_raises_on_no_project(self, monkeypatch):
-        monkeypatch.delenv("DOMINO_PROJECT_ID", raising=False)
-        monkeypatch.delenv("DOMINO_PROJECT_NAME", raising=False)
-        monkeypatch.delenv("DOMINO_PROJECT_OWNER", raising=False)
+    def test_raises_on_no_project(self):
         with pytest.raises(RuntimeError, match="No project ID"):
-            dc.submit_job("python main.py", None)
+            dc.submit_job("python main.py", None, project_id=None)
 
+    @patch.object(dc, "get_project_context", return_value=("proj-123", "test_project", "test_owner"))
     @patch.object(dc, "_domino_request")
-    def test_retry_without_git_ref(self, mock_req):
-        """If branch-pinned start fails, retries without mainRepoGitRef."""
+    def test_retry_without_git_ref(self, mock_req, _mock_ctx):
+        """If branch-pinned start fails, retries without mainRepoGitRef.
+
+        Note: the payload dict is mutated in-place (pop) before the retry,
+        so both call_args entries share the same dict reference.  We verify
+        the retry happened (2 calls) and the final payload lacks the key.
+        """
         call_count = 0
         def side_effect(*args, **kwargs):
             nonlocal call_count
@@ -320,8 +330,9 @@ class TestSubmitJob:
             return {"id": "run-retry"}
 
         mock_req.side_effect = side_effect
-        run_id = dc.submit_job("python main.py", "bad-branch")
+        run_id = dc.submit_job("python main.py", "bad-branch", project_id="proj-123")
         assert run_id == "run-retry"
-        # Second call should not have mainRepoGitRef
-        second_payload = mock_req.call_args_list[1].kwargs["json"]
-        assert "mainRepoGitRef" not in second_payload
+        assert mock_req.call_count == 2
+        # Final payload (shared reference) should not have mainRepoGitRef
+        final_payload = mock_req.call_args.kwargs["json"]
+        assert "mainRepoGitRef" not in final_payload

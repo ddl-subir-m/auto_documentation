@@ -60,9 +60,11 @@ class NotebookExporter:
             BuilderError: If export fails.
         """
         try:
-            # Load the notebook
-            with open(notebook_path, "r", encoding="utf-8") as f:
-                nb = nbformat.read(f, as_version=4)
+            # Load the notebook from the dataset
+            import io
+            from dataset_store import get_store
+            content = get_store().read_file(str(notebook_path))
+            nb = nbformat.read(io.StringIO(content.decode("utf-8")), as_version=4)
 
             # Extract document metadata and content
             spec, results = self._parse_notebook(nb, title, authors)

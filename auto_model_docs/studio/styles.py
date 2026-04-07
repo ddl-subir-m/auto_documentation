@@ -1123,39 +1123,6 @@ details[open] > .history-toggle::before {
     margin-top: 0.75rem;
 }
 
-/* Spec manage */
-.spec-manage-link {
-    font-size: 0.75rem;
-    color: var(--primary);
-    cursor: pointer;
-    display: none;
-}
-.spec-list-modal {
-    background: var(--surface-container-lowest);
-    border: 1px solid var(--ghost-border);
-    border-radius: 4px;
-    padding: 1rem;
-    margin-top: 0.5rem;
-    display: none;
-}
-.spec-list-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.4rem 0;
-    font-size: 0.8rem;
-}
-.spec-list-item + .spec-list-item {
-    border-top: 1px solid var(--ghost-border);
-}
-
-/* Spec saved name */
-.spec-saved-name {
-    font-size: 0.75rem;
-    color: var(--primary);
-    margin-top: 0.25rem;
-}
-
 /* ── Card Footer (Generate button) ────────────────────────────────── */
 .card-footer {
     display: flex;

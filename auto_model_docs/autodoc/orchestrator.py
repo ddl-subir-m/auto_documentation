@@ -276,7 +276,9 @@ class Orchestrator:
         if self.generate_notebook:
             # Sync notebook filename with docx when no custom path was provided
             if not self.notebook_builder.notebook_path:
-                self.notebook_builder.notebook_path = output_path.with_suffix(".ipynb")
+                # output_path is a dataset-relative string (e.g. "docs/model_docs_*.docx")
+                base = output_path.rsplit(".", 1)[0] if "." in output_path else output_path
+                self.notebook_builder.notebook_path = f"{base}.ipynb"
             await self.notebook_builder.build(spec, results)
 
         # Save results to cache for --notebook-from-cache rebuilds
@@ -328,14 +330,16 @@ class Orchestrator:
 
         return notebook_path
 
-    def _get_cache_path(self) -> Path:
-        """Get path to the results cache file."""
-        return self.output_dir / ".autodoc_cache.json"
+    def _get_cache_path(self) -> str:
+        """Get the dataset-relative path to the results cache file."""
+        from artifact_layout import get_layout
+        return get_layout().generation_cache
 
     def _save_results_cache(
         self, spec: DocumentSpec, results: List[SectionResult]
     ) -> None:
-        """Save generation results to cache for later notebook regeneration."""
+        """Save generation results to cache via DatasetStore."""
+        from dataset_store import get_store
         cache_data = {
             "spec": {
                 "title": spec.title,
@@ -352,11 +356,11 @@ class Orchestrator:
         }
 
         cache_path = self._get_cache_path()
-        with open(cache_path, "w", encoding="utf-8") as f:
-            json.dump(cache_data, f, indent=2)
+        content = json.dumps(cache_data, indent=2).encode("utf-8")
+        get_store().write_file(cache_path, content)
 
     def _load_results_cache(self) -> tuple[DocumentSpec, List[SectionResult]]:
-        """Load generation results from cache.
+        """Load generation results from cache via DatasetStore.
 
         Returns:
             Tuple of (DocumentSpec, List[SectionResult]).
@@ -364,15 +368,17 @@ class Orchestrator:
         Raises:
             FileNotFoundError: If cache file doesn't exist.
         """
+        from dataset_store import get_store
         cache_path = self._get_cache_path()
-        if not cache_path.exists():
+        store = get_store()
+        if not store.file_exists(cache_path):
             raise FileNotFoundError(
                 f"No cached results found at {cache_path}. "
                 "Run full generation first with --notebook flag."
             )
 
-        with open(cache_path, "r", encoding="utf-8") as f:
-            cache_data = json.load(f)
+        content = store.read_file(cache_path)
+        cache_data = json.loads(content)
 
         # Reconstruct DocumentSpec
         spec_data = cache_data["spec"]

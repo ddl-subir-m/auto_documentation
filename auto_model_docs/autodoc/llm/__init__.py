@@ -1,6 +1,5 @@
 """LLM client, prompts, and caching."""
 
-from autodoc.llm.cache import LLMCache
 from autodoc.llm.client import LLMClient, LLMResponse
 from autodoc.llm.prompts import (
     # System prompts
@@ -29,7 +28,6 @@ __all__ = [
     # Client
     "LLMClient",
     "LLMResponse",
-    "LLMCache",
     # System prompts
     "SYSTEM_CHART_GENERATOR",
     "SYSTEM_CODE_ANALYZER",

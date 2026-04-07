@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -25,21 +26,19 @@ from .state import (
 def _sanitize_optional_int(value: Optional[str]) -> Optional[int]:
     if value is None or value == "":
         return None
-    return int(value)
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _sanitize_optional_float(value: Optional[str]) -> Optional[float]:
     if value is None or value == "":
         return None
-    return float(value)
-
-
-def _parse_comma_list(value: Optional[str]) -> Optional[list[str]]:
-    """Parse a comma-separated string into a list of trimmed strings."""
-    if not value:
+    try:
+        return float(value)
+    except (ValueError, TypeError):
         return None
-    items = [item.strip() for item in value.split(",") if item.strip()]
-    return items if items else None
 
 
 def _db_record_to_dataclass(row: dict) -> DominoJobRecord:
@@ -93,16 +92,7 @@ def _validate_environment() -> list:
                 action="Job submission may fail. Set DOMINO_API_HOST.",
             ))
 
-    # NOTE: output directory validation is skipped at startup — the target
-    # project (and therefore the output path) is only known after the first
-    # request provides ?projectId.  The directory is created on-demand by
-    # _get_default_output_dir() during request handling.
-
-    # Ensure cache directory exists
-    try:
-        Path(".autodoc_cache").mkdir(exist_ok=True)
-    except Exception:
-        pass  # Non-critical
+    # Output and cache are managed via DatasetStore — no local directories needed.
 
     return warnings
 
@@ -201,9 +191,9 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
     if status in ("queued", "submitted", "running"):
         stop_btn = A(
             "Stop",
-            hx_post="stop-domino",
-            hx_vals=f'{{"job_id": "{record.id}"}}',
-            hx_target="#status-panel",
+            hx_post="stop-job-history",
+            hx_vals=json.dumps({"job_id": record.id}),
+            hx_target="#job-history-content",
             hx_swap="innerHTML",
             cls="terminal-action",
         )
@@ -305,7 +295,7 @@ def _render_job_history_table(username: str) -> FT:
                 A(
                     "Stop",
                     hx_post="stop-job-history",
-                    hx_vals=f'{{"job_id": "{j.get("id")}"}}',
+                    hx_vals=json.dumps({"job_id": j.get("id", "")}),
                     hx_target="#job-history-content",
                     hx_swap="innerHTML",
                     cls="terminal-action",

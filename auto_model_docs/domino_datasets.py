@@ -20,9 +20,9 @@ from domino_auth import resolve_project_id as _resolve_project_id
 
 logger = logging.getLogger(__name__)
 
-AUTODOC_SPECS_DATASET = "autodoc-specs"
+AUTODOC_SPECS_DATASET = "autodoc"  # Legacy alias — use dataset_store.AUTODOC_DATASET_NAME
 AUTODOC_SPECS_DESCRIPTION = (
-    "Auto Model Docs spec files — auto-created by Auto Model Docs Studio"
+    "Auto Model Docs artifacts — auto-created by Auto Model Docs Studio"
 )
 
 _RETRYABLE_STATUS_CODES = (408, 502, 503, 504)
@@ -166,10 +166,13 @@ def _create_dataset(
             )
             data = resp.json()
             logger.info("Create dataset response: %s", data)
+            # API may wrap the dataset object: {"dataset": {...}, "metadata": {...}}
+            ds = data.get("dataset", data) if isinstance(data, dict) else data
+            snapshot_ids = ds.get("snapshotIds") or []
             return {
-                "id": data.get("datasetId") or data.get("id", ""),
-                "name": data.get("datasetName") or data.get("name", name),
-                "rwSnapshotId": data.get("readWriteSnapshotId"),
+                "id": ds.get("datasetId") or ds.get("id", ""),
+                "name": ds.get("datasetName") or ds.get("name", name),
+                "rwSnapshotId": ds.get("readWriteSnapshotId") or (snapshot_ids[0] if snapshot_ids else None),
             }
         except httpx.HTTPStatusError as exc:
             last_error = exc.response.text if exc.response else str(exc)
@@ -276,7 +279,7 @@ def list_files(
 
         # Strip parent path prefix if the API returned the full relative path
         if path_prefix and filename.startswith(path_prefix):
-            logger.info("Stripping path prefix '%s' from fileName '%s'", path_prefix, filename)
+            logger.debug("Stripping path prefix '%s' from fileName '%s'", path_prefix, filename)
             filename = filename[len(path_prefix):]
 
         if is_dir or filename.lower().endswith((".yaml", ".yml")):
@@ -395,7 +398,11 @@ def get_dataset_mount_prefix() -> str:
     return "/mnt/data"
 
 
-def build_spec_mount_path(dataset_name: str, file_path: str) -> str:
-    """Build the full mount path for a spec file in a dataset."""
+def build_dataset_mount_path(dataset_name: str, relative_path: str) -> str:
+    """Build the full mount path for a file in a dataset.
+
+    Converts a dataset-relative path to an absolute filesystem path
+    that the Domino job container can read from the mounted dataset.
+    """
     prefix = get_dataset_mount_prefix()
-    return f"{prefix}/{dataset_name}/{file_path.lstrip('/')}"
+    return f"{prefix}/{dataset_name}/{relative_path.lstrip('/')}"
