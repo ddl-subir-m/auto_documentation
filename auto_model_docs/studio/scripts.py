@@ -416,7 +416,7 @@ MAIN_DOM_JS = r"""
                         console.log('[spec-browser] Upload success:', result.fileName, '→', result.path);
                         if (specUploadStatus) { specUploadStatus.textContent = 'Uploaded: ' + result.fileName; specUploadStatus.style.color = '#2e7d32'; }
                         // Select the uploaded file
-                        selectSpecFile('autodoc', result.fileName);
+                        selectSpecFile('autodoc', result.path);
                         // Refresh datasets if autodoc was just created
                         loadDatasets();
                     })
