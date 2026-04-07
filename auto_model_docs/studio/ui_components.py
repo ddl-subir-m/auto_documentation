@@ -25,13 +25,19 @@ from .state import (
 def _sanitize_optional_int(value: Optional[str]) -> Optional[int]:
     if value is None or value == "":
         return None
-    return int(value)
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _sanitize_optional_float(value: Optional[str]) -> Optional[float]:
     if value is None or value == "":
         return None
-    return float(value)
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _parse_comma_list(value: Optional[str]) -> Optional[list[str]]:
@@ -199,7 +205,7 @@ def _render_domino_status(record: Optional[DominoJobRecord]) -> FT:
             "Stop",
             hx_post="stop-job-history",
             hx_vals=f'{{"job_id": "{record.id}"}}',
-            hx_target="#status-panel",
+            hx_target="#job-history-content",
             hx_swap="innerHTML",
             cls="terminal-action",
         )

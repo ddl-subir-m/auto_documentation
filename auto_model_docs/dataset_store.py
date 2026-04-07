@@ -79,29 +79,30 @@ class DatasetStore:
         ds_id = self._dataset_id
         logger.info("DatasetStore.write_file('%s', %d bytes)", path, len(content))
 
-        # Step 1: start upload session
-        headers = _get_auth_headers()
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.post(
-                f"{base_url}/v4/datasetrw/datasets/{ds_id}/snapshot/file/start",
-                json={"filePaths": [path], "fileCollisionSetting": "Overwrite"},
-                headers=headers,
-            )
-            if resp.status_code >= 400:
-                logger.warning("Upload start failed: %s body=%s", resp.status_code, resp.text[:500])
-            resp.raise_for_status()
-
-        upload_key = resp.json()
-        if not isinstance(upload_key, str):
-            upload_key = (
-                upload_key.get("upload_key")
-                or upload_key.get("uploadKey")
-                or upload_key.get("key")
-            )
-        if not upload_key:
-            raise RuntimeError(f"Failed to start upload for {path}")
-
+        upload_key = None
         try:
+            # Step 1: start upload session
+            headers = _get_auth_headers()
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.post(
+                    f"{base_url}/v4/datasetrw/datasets/{ds_id}/snapshot/file/start",
+                    json={"filePaths": [path], "fileCollisionSetting": "Overwrite"},
+                    headers=headers,
+                )
+                if resp.status_code >= 400:
+                    logger.warning("Upload start failed: %s body=%s", resp.status_code, resp.text[:500])
+                resp.raise_for_status()
+
+            upload_key = resp.json()
+            if not isinstance(upload_key, str):
+                upload_key = (
+                    upload_key.get("upload_key")
+                    or upload_key.get("uploadKey")
+                    or upload_key.get("key")
+                )
+            if not upload_key:
+                raise RuntimeError(f"Failed to start upload for {path}")
+
             # Step 2: single chunk upload
             identifier = path.replace(".", "-").replace("/", "-")
             checksum = hashlib.md5(content).hexdigest()
@@ -138,15 +139,16 @@ class DatasetStore:
             logger.info("DatasetStore.write_file('%s') complete", path)
 
         except Exception:
-            # Cancel upload on failure
-            try:
-                with httpx.Client(timeout=10.0) as client:
-                    client.get(
-                        f"{base_url}/v4/datasetrw/datasets/{ds_id}/snapshot/file/cancel/{upload_key}",
-                        headers=_get_auth_headers(),
-                    )
-            except Exception:
-                pass
+            # Cancel upload on failure (only if we obtained an upload key)
+            if upload_key:
+                try:
+                    with httpx.Client(timeout=10.0) as client:
+                        client.get(
+                            f"{base_url}/v4/datasetrw/datasets/{ds_id}/snapshot/file/cancel/{upload_key}",
+                            headers=_get_auth_headers(),
+                        )
+                except Exception:
+                    pass
             raise
 
     # ------------------------------------------------------------------

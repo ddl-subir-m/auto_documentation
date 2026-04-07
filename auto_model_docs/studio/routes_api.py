@@ -214,7 +214,9 @@ def register_api_routes(rt):
                 media_type="application/json",
             )
 
-        filename = getattr(file_upload, "filename", "spec.yaml")
+        raw_filename = getattr(file_upload, "filename", "spec.yaml")
+        # Sanitize: strip path components to prevent directory traversal
+        filename = raw_filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "spec.yaml"
         content = await file_upload.read()
         logger.info("POST /api/upload-spec-to-dataset — file='%s' (%d bytes)", filename, len(content))
 

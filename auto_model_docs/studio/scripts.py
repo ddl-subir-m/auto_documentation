@@ -16,6 +16,12 @@ def get_output_defaults_script() -> str:
 
 
 MAIN_DOM_JS = r"""
+    // ── Shared fetch helper: check response status before parsing ──
+    function _checkResp(r) {
+        if (!r.ok) throw new Error('Server error (' + r.status + ')');
+        return r;
+    }
+
     // ── Hardware tier card selection ──
     function selectHwTier(card, tierId) {
         var grid = card.closest('.hw-tier-grid');
@@ -83,7 +89,7 @@ MAIN_DOM_JS = r"""
             var url = 'api/detect-language';
             if (codeRoot) url += '?code_root=' + encodeURIComponent(codeRoot);
             fetch(url)
-                .then(function(r) { return r.json(); })
+                .then(_checkResp).then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (langRow) langRow.style.display = '';
                     if (data.language) {
@@ -154,7 +160,7 @@ MAIN_DOM_JS = r"""
                     var qs = pid ? '?projectId=' + encodeURIComponent(pid) : '';
                     // Resolve project name
                     fetch('api/resolve-project' + qs)
-                        .then(function(r) { return r.text(); })
+                        .then(_checkResp).then(function(r) { return r.text(); })
                         .then(function(html) {
                             var el = document.getElementById('project-id-resolved');
                             if (el) el.outerHTML = html;
@@ -217,7 +223,7 @@ MAIN_DOM_JS = r"""
             console.log('[spec-browser] Loading writable datasets...');
             var qs = '?' + getProjectIdParam().replace(/^&/, '');
             fetch('api/datasets' + qs)
-                .then(function(r) { return r.json(); })
+                .then(_checkResp).then(function(r) { return r.json(); })
                 .then(function(datasets) {
                     if (datasets.error) {
                         console.error('[spec-browser] Error loading datasets:', datasets.error);
@@ -283,7 +289,7 @@ MAIN_DOM_JS = r"""
             qs += getProjectIdParam();
 
             fetch('api/dataset-files' + qs)
-                .then(function(r) { return r.json(); })
+                .then(_checkResp).then(function(r) { return r.json(); })
                 .then(function(files) {
                     if (files.error) {
                         console.error('[spec-browser] File listing error:', files.error);
@@ -393,7 +399,7 @@ MAIN_DOM_JS = r"""
                 // Ensure autodoc dataset exists, then upload
                 var qs = '?' + getProjectIdParam().replace(/^&/, '');
                 fetch('api/ensure-autodoc-specs' + qs, { method: 'POST' })
-                    .then(function(r) { return r.json(); })
+                    .then(_checkResp).then(function(r) { return r.json(); })
                     .then(function(ds) {
                         if (ds.error) throw new Error(ds.error);
                         console.log('[spec-browser] autodoc dataset ensured: id=' + ds.id);
@@ -404,7 +410,7 @@ MAIN_DOM_JS = r"""
                         fd.append('file', file);
                         return fetch('api/upload-spec-to-dataset' + qs, { method: 'POST', body: fd });
                     })
-                    .then(function(r) { return r.json(); })
+                    .then(_checkResp).then(function(r) { return r.json(); })
                     .then(function(result) {
                         if (result.error) throw new Error(result.error);
                         console.log('[spec-browser] Upload success:', result.fileName, '→', result.path);
@@ -467,7 +473,7 @@ MAIN_DOM_JS = r"""
             var resultEl = document.getElementById('spec-validation-result');
             if (resultEl) resultEl.innerHTML = '<span style="color:var(--outline);font-size:0.8125rem;">Validating spec...</span>';
             fetch('validate-spec', { method: 'POST', body: fd })
-                .then(function(r) { return r.text(); })
+                .then(_checkResp).then(function(r) { return r.text(); })
                 .then(function(html) {
                     if (resultEl) resultEl.outerHTML = html;
                     window._specValid = html.indexOf('validation failed') === -1;
@@ -553,7 +559,7 @@ MAIN_DOM_JS = r"""
                 prevCount = details.querySelectorAll('tbody tr').length;
             }
             fetch('job-history')
-                .then(function(r) { return r.text(); })
+                .then(_checkResp).then(function(r) { return r.text(); })
                 .then(function(html) {
                     if (!_htmxBusy) {
                         el.innerHTML = html;
