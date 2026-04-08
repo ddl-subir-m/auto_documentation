@@ -22,16 +22,23 @@ def get_auth_headers(*, required: bool = True) -> dict[str, str]:
     """Build Domino auth headers using the forwarded viewer JWT.
 
     Extended identity propagation is always on — the viewer's JWT
-    is forwarded by the Domino proxy on every request.
+    is forwarded by the Domino proxy on every request. Falls back to
+    API key for background tasks (poll loop) that run outside of a
+    request context.
     """
     forwarded = get_request_auth_header()
     if forwarded:
         return {"Authorization": forwarded}
 
+    # Fallback for background tasks (poll loop, reconcile) outside request context
+    api_key = os.environ.get("DOMINO_USER_API_KEY") or os.environ.get("DOMINO_API_KEY") or ""
+    if api_key:
+        return {"X-Domino-Api-Key": api_key}
+
     if required:
         raise RuntimeError(
             "No Domino auth credentials available. "
-            "The app requires extended identity propagation (forwarded JWT)."
+            "Need a forwarded JWT (request context) or DOMINO_USER_API_KEY (background tasks)."
         )
     return {}
 
