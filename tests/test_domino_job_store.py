@@ -1,4 +1,4 @@
-"""Tests for domino_job_store.py — JSON index backed by DatasetStore."""
+"""Tests for domino_job_store.py — JSON index backed by ArtifactStore."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ for p in (_repo_root, _pkg_dir):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-import dataset_store
+import domino_artifacts
 import domino_job_store as store
 
 
 class _FakeStore:
-    """In-memory fake of DatasetStore for testing."""
+    """In-memory fake of ArtifactStore for testing."""
 
     def __init__(self):
         self._files: dict[str, bytes] = {}
@@ -47,13 +47,13 @@ class _FakeStore:
 
 @pytest.fixture(autouse=True)
 def _mock_store():
-    """Replace DatasetStore singleton with an in-memory fake."""
+    """Replace ArtifactStore singleton with an in-memory fake."""
     fake = _FakeStore()
-    dataset_store.reset_store()
-    dataset_store._store = fake
+    domino_artifacts.reset_store()
+    domino_artifacts._store = fake
     store.init_db()
     yield fake
-    dataset_store.reset_store()
+    domino_artifacts.reset_store()
 
 
 class TestCreateAndGetJob:
@@ -197,7 +197,7 @@ class TestCancelQueuedJobs:
 
 
 class TestIndexPersistence:
-    def test_index_stored_in_dataset(self, _mock_store):
+    def test_index_stored_in_artifacts(self, _mock_store):
         store.create_job("alice", "main", "small", "/spec.yaml")
         assert _mock_store.file_exists(".autodoc/jobs_index.json")
         content = json.loads(_mock_store.read_file(".autodoc/jobs_index.json"))

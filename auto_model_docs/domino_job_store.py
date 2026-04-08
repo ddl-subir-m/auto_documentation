@@ -1,11 +1,11 @@
-"""Job submission index backed by a JSON file in the Datasets API.
+"""Job submission index backed by a JSON file in Domino Artifacts (DFS).
 
 Tracks which jobs were submitted by this app, with metadata needed for
 display (user, branch, spec, tier). Actual job status comes live from
 the Domino Jobs API — we don't duplicate it.
 
-The index file lives at ``.autodoc/jobs_index.json`` in the autodoc
-dataset, read/written via DatasetStore.
+The index file lives at ``.autodoc/jobs_index.json`` in the project
+artifacts, read/written via ArtifactStore.
 
 Local queue: jobs waiting for a slot are tracked in the index with
 ``domino_run_id: null``. Once submitted, the run ID is filled in and
@@ -34,22 +34,21 @@ _INDEX_LOCK = threading.Lock()  # Serialize read-modify-write on the JSON index
 # ---------------------------------------------------------------------------
 
 def _read_index() -> list[dict[str, Any]]:
-    """Load the job index from the dataset."""
-    from dataset_store import get_store
-    store = get_store()
+    """Load the job index from artifacts."""
+    from domino_artifacts import get_store
     try:
-        if not store.file_exists(_INDEX_PATH):
-            return []
-        content = store.read_file(_INDEX_PATH)
+        content = get_store().read_file(_INDEX_PATH)
         return json.loads(content)
+    except FileNotFoundError:
+        return []
     except Exception as exc:
         logger.warning("Failed to read job index: %s", exc)
         return []
 
 
 def _write_index(jobs: list[dict[str, Any]]) -> None:
-    """Write the job index to the dataset, pruning old completed jobs."""
-    from dataset_store import get_store
+    """Write the job index to artifacts, pruning old completed jobs."""
+    from domino_artifacts import get_store
 
     # Prune: keep all active jobs, cap completed jobs per user
     active = [j for j in jobs if j.get("status") not in _COMPLETED_STATUSES]

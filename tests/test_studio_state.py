@@ -33,14 +33,14 @@ def _get_state_module():
     mock_domino_job_store = MagicMock()
     mock_spec_store = MagicMock()
     mock_auth_context = MagicMock()
-    mock_domino_datasets = MagicMock()
+    mock_domino_artifacts = MagicMock()
 
     # Pre-register the sibling modules so _import_sibling succeeds
     sys.modules["domino_client"] = mock_domino_client
     sys.modules["domino_job_store"] = mock_domino_job_store
     sys.modules["spec_store"] = mock_spec_store
     sys.modules["auth_context"] = MagicMock()
-    sys.modules["domino_datasets"] = mock_domino_datasets
+    sys.modules["domino_artifacts"] = mock_domino_artifacts
 
     # Remove cached studio.state if present
     sys.modules.pop("studio.state", None)

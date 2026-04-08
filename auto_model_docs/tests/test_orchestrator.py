@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import artifact_layout
-import dataset_store
+import domino_artifacts
 
 from autodoc.core.models import (
     ArtifactContext,
@@ -32,13 +32,11 @@ from autodoc.orchestrator import Orchestrator
 
 
 # ---------------------------------------------------------------------------
-# In-memory DatasetStore for cache tests
+# In-memory ArtifactStore for cache tests
 # ---------------------------------------------------------------------------
 
 class _MemStore:
-    """Minimal in-memory DatasetStore for testing cache round-trips."""
-    dataset_id = "ds-test"
-    snapshot_id = "snap-test"
+    """Minimal in-memory ArtifactStore for testing cache round-trips."""
 
     def __init__(self):
         self._files: dict[str, bytes] = {}
@@ -57,16 +55,22 @@ class _MemStore:
     def list_files(self, path=""):
         return []
 
+    def get_head_commit(self):
+        return "fake-commit-id"
+
+    def invalidate_cache(self):
+        pass
+
 
 @pytest.fixture(autouse=True)
 def _init_layout_and_store():
-    """Ensure ArtifactLayout and DatasetStore are available for all tests."""
+    """Ensure ArtifactLayout and ArtifactStore are available for all tests."""
     artifact_layout.init_layout()
     mem = _MemStore()
-    dataset_store._store = mem
+    domino_artifacts._store = mem
     yield
     artifact_layout.reset_layout()
-    dataset_store.reset_store()
+    domino_artifacts.reset_store()
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +342,7 @@ class TestProgressCallbacks:
 class TestCacheSerialization:
     """_save_results_cache / _load_results_cache round-trip."""
 
+    @patch("domino_artifacts.ARTIFACTS_MOUNT")
     @patch("autodoc.orchestrator.ArtifactScanner")
     @patch("autodoc.orchestrator.CodeScanner")
     @patch("autodoc.orchestrator.DocumentBuilder")
@@ -345,8 +350,12 @@ class TestCacheSerialization:
     @patch("autodoc.orchestrator.ContentGenerator")
     @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
     def test_round_trip_text_content(
-        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, tmp_path
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, mock_mount, tmp_path
     ):
+        mock_mount.__str__ = lambda s: str(tmp_path)
+        import domino_artifacts as _da
+        _da.ARTIFACTS_MOUNT = str(tmp_path)
+
         orch = Orchestrator(
             llm=_make_mock_llm(),
             sanitizer=_make_mock_sanitizer(),
@@ -365,6 +374,9 @@ class TestCacheSerialization:
         assert loaded_results[0].plan.name == "Overview"
         assert loaded_results[0].contents[0].content == "Some generated text."
 
+        _da.ARTIFACTS_MOUNT = "/mnt/artifacts"
+
+    @patch("domino_artifacts.ARTIFACTS_MOUNT")
     @patch("autodoc.orchestrator.ArtifactScanner")
     @patch("autodoc.orchestrator.CodeScanner")
     @patch("autodoc.orchestrator.DocumentBuilder")
@@ -372,9 +384,12 @@ class TestCacheSerialization:
     @patch("autodoc.orchestrator.ContentGenerator")
     @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
     def test_round_trip_bytes_content(
-        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, tmp_path
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, mock_mount, tmp_path
     ):
         """Binary content (e.g. chart PNG) survives serialization via base64."""
+        import domino_artifacts as _da
+        _da.ARTIFACTS_MOUNT = str(tmp_path)
+
         orch = Orchestrator(
             llm=_make_mock_llm(),
             sanitizer=_make_mock_sanitizer(),
@@ -402,6 +417,9 @@ class TestCacheSerialization:
         assert loaded_results[0].contents[0].content == png_bytes
         assert loaded_results[0].contents[0].block_type == ContentType.CHART
 
+        _da.ARTIFACTS_MOUNT = "/mnt/artifacts"
+
+    @patch("domino_artifacts.ARTIFACTS_MOUNT")
     @patch("autodoc.orchestrator.ArtifactScanner")
     @patch("autodoc.orchestrator.CodeScanner")
     @patch("autodoc.orchestrator.DocumentBuilder")
@@ -409,8 +427,11 @@ class TestCacheSerialization:
     @patch("autodoc.orchestrator.ContentGenerator")
     @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
     def test_load_cache_missing_raises(
-        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, tmp_path
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, mock_mount, tmp_path
     ):
+        import domino_artifacts as _da
+        _da.ARTIFACTS_MOUNT = str(tmp_path)
+
         orch = Orchestrator(
             llm=_make_mock_llm(),
             sanitizer=_make_mock_sanitizer(),
@@ -420,6 +441,9 @@ class TestCacheSerialization:
         with pytest.raises(FileNotFoundError, match="No cached results"):
             orch._load_results_cache()
 
+        _da.ARTIFACTS_MOUNT = "/mnt/artifacts"
+
+    @patch("domino_artifacts.ARTIFACTS_MOUNT")
     @patch("autodoc.orchestrator.ArtifactScanner")
     @patch("autodoc.orchestrator.CodeScanner")
     @patch("autodoc.orchestrator.DocumentBuilder")
@@ -427,8 +451,11 @@ class TestCacheSerialization:
     @patch("autodoc.orchestrator.ContentGenerator")
     @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
     def test_cache_preserves_errors_list(
-        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, tmp_path
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, mock_mount, tmp_path
     ):
+        import domino_artifacts as _da
+        _da.ARTIFACTS_MOUNT = str(tmp_path)
+
         orch = Orchestrator(
             llm=_make_mock_llm(),
             sanitizer=_make_mock_sanitizer(),
@@ -440,6 +467,8 @@ class TestCacheSerialization:
         orch._save_results_cache(spec, results)
         _, loaded = orch._load_results_cache()
         assert loaded[0].errors == ["narrative: timeout"]
+
+        _da.ARTIFACTS_MOUNT = "/mnt/artifacts"
 
 
 # ---------------------------------------------------------------------------
@@ -725,6 +754,7 @@ class TestSemaphoreInit:
 class TestCacheSpecFields:
     """DocumentSpec fields survive the cache round-trip."""
 
+    @patch("domino_artifacts.ARTIFACTS_MOUNT")
     @patch("autodoc.orchestrator.ArtifactScanner")
     @patch("autodoc.orchestrator.CodeScanner")
     @patch("autodoc.orchestrator.DocumentBuilder")
@@ -732,8 +762,11 @@ class TestCacheSpecFields:
     @patch("autodoc.orchestrator.ContentGenerator")
     @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
     def test_spec_with_per_model_sections(
-        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, tmp_path
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as, mock_mount, tmp_path
     ):
+        import domino_artifacts as _da
+        _da.ARTIFACTS_MOUNT = str(tmp_path)
+
         orch = Orchestrator(
             llm=_make_mock_llm(),
             sanitizer=_make_mock_sanitizer(),
@@ -764,3 +797,5 @@ class TestCacheSpecFields:
         assert loaded_spec.hints == {"Overview": "Keep it brief"}
         assert loaded_spec.citation_style == "numeric"
         assert loaded_spec.formatting == {"font_size": 11}
+
+        _da.ARTIFACTS_MOUNT = "/mnt/artifacts"

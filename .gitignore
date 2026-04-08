@@ -126,3 +126,7 @@ tests/fixtures/llm_responses/*.json
 
 # Scratch files
 scratch/
+
+# Session keys and local databases
+.sesskey
+autodoc_jobs.db

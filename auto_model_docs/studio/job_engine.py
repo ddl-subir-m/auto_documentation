@@ -15,7 +15,6 @@ from .state import (
     domino_client,
     domino_job_store,
     spec_store,
-    domino_datasets,
     _get_target_project_id,
     _get_target_project_name,
     logger,
@@ -92,8 +91,8 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
         command += ["--model", req.model]
     if req.code_root:
         command += ["--code-root", req.code_root]
-    # --output is not passed: the CLI ignores it after the DatasetStore
-    # refactor. Output goes to docs/ in the autodoc dataset via DatasetStore.
+    # --output is not passed: the CLI writes output to /mnt/artifacts/docs/
+    # via direct filesystem I/O.
     if req.max_files:
         command += ["--max-files", str(req.max_files)]
     if req.workers:
@@ -142,40 +141,30 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     domino_job_store.init_db()
 
     # Resolve spec path — must be an absolute mount path so the Domino
-    # job container can read it from the mounted "autodoc" dataset.
+    # job container can read it from /mnt/artifacts/.
+    from domino_artifacts import ARTIFACTS_MOUNT
     spec_path: Optional[str] = None
     if req.spec_content and req.spec_filename:
         saved = spec_store.save_spec(req.spec_filename, req.spec_content)
-        # Convert dataset-relative path to absolute mount path
-        from dataset_store import AUTODOC_DATASET_NAME
-        mount_prefix = domino_datasets.get_dataset_mount_prefix()
-        spec_path = f"{mount_prefix}/{AUTODOC_DATASET_NAME}/{saved}"
+        spec_path = f"{ARTIFACTS_MOUNT}/{saved.lstrip('/')}"
     elif req.spec_path:
-        # Resolve dataset:// references to actual mount paths
-        if req.spec_path.startswith("dataset://"):
-            parts = req.spec_path[len("dataset://"):].split("/", 1)
-            dataset_name = parts[0]
-            file_path = parts[1] if len(parts) > 1 else ""
-            mount_prefix = domino_datasets.get_dataset_mount_prefix()
-            spec_path = f"{mount_prefix}/{dataset_name}/{file_path}"
-        else:
-            spec_path = req.spec_path
+        spec_path = f"{ARTIFACTS_MOUNT}/{req.spec_path.lstrip('/')}"
 
     if not spec_path:
         raise ValueError("A spec file is required. Please select or upload a spec before generating documentation.")
 
-    # Verify the spec file still exists in the dataset (it may have been
+    # Verify the spec file still exists in artifacts (it may have been
     # deleted externally via the Domino UI between selection and submission).
-    if req.spec_path and req.spec_path.startswith("dataset://"):
-        # Extract the dataset-relative path for API verification
-        ds_relative = req.spec_path[len("dataset://"):].split("/", 1)
-        if len(ds_relative) > 1:
-            from dataset_store import get_store
-            if not get_store().file_exists_api(ds_relative[1]):
+    if req.spec_path:
+        from domino_artifacts import get_store as _get_artifact_store
+        try:
+            if not _get_artifact_store().file_exists(req.spec_path):
                 raise ValueError(
-                    f"The selected spec file no longer exists in the dataset. "
-                    f"It may have been deleted. Please select or upload a spec file and try again."
+                    "The selected spec file no longer exists in artifacts. "
+                    "It may have been deleted. Please select or upload a spec file and try again."
                 )
+        except RuntimeError as exc:
+            logger.warning("Skipping spec existence check: %s", exc)
 
     # Build command and create the DB row (status=queued)
     command_str = _build_job_command_str(req, spec_path)

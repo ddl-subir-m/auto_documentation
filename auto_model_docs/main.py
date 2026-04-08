@@ -221,11 +221,11 @@ def main(
         if planning_workers:
             settings.planning_workers = planning_workers
 
-        # Initialize artifact layout and dataset store
+        # Initialize artifact layout (filesystem paths under /mnt/artifacts/)
         from artifact_layout import init_layout, get_layout
-        from dataset_store import init_store, AUTODOC_DATASET_NAME
+        from domino_artifacts import ARTIFACTS_MOUNT
         init_layout()
-        _init_cli_dataset_store()
+        _ensure_artifact_dirs()
         output_dir = get_layout().docs_dir
         code_dir = settings.code_root if settings.code_root.exists() else _get_default_code_root()
 
@@ -378,9 +378,9 @@ def _regenerate_notebook_from_cache(
     console.print("\n[bold blue]Regenerating notebook from cache...[/]\n")
 
     from artifact_layout import get_layout
-    from dataset_store import get_store
+    from domino_artifacts import artifact_exists
     cache_path = get_layout().generation_cache
-    if not get_store().file_exists(cache_path):
+    if not artifact_exists(cache_path):
         console.print(
             f"[bold red]Error:[/] No cached results found at {cache_path}",
             style="red",
@@ -422,35 +422,22 @@ def _regenerate_notebook_from_cache(
     console.print()
 
 
-def _init_cli_dataset_store() -> None:
-    """Initialize the DatasetStore for CLI mode (Domino job container).
+def _ensure_artifact_dirs() -> None:
+    """Ensure artifact output directories exist under /mnt/artifacts/.
 
-    In a Domino job container, we have access to the Domino API and
-    need to find or create the autodoc dataset in the current project.
+    In a Domino job container, /mnt/artifacts/ is directly accessible.
+    No API calls needed — just create the subdirectories.
     """
-    from dataset_store import init_store, AUTODOC_DATASET_NAME
-    project_id = os.environ.get("DOMINO_PROJECT_ID", "")
-    if not project_id:
-        raise RuntimeError(
-            "DOMINO_PROJECT_ID not set. "
-            "The CLI requires Domino environment variables."
-        )
-    # Import here to avoid circular imports at module level
-    try:
-        from domino_datasets import ensure_dataset, get_rw_snapshot_id
-        ds = ensure_dataset(
-            project_id=project_id,
-            name=AUTODOC_DATASET_NAME,
-            description="Auto Model Docs artifacts",
-        )
-        snap_id = ds.get("rwSnapshotId") or ""
-        if not snap_id:
-            snap_id = get_rw_snapshot_id(ds["id"], project_id) or ""
-        init_store(ds["id"], snap_id, project_id)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to initialize DatasetStore for CLI: {exc}"
-        ) from exc
+    from artifact_layout import get_layout
+    from domino_artifacts import ARTIFACTS_MOUNT
+
+    base = Path(ARTIFACTS_MOUNT)
+    if not base.exists():
+        # Running outside Domino (local dev) — skip
+        return
+
+    for subdir in (get_layout().docs_dir, get_layout().specs_dir, get_layout().internal_dir):
+        (base / subdir).mkdir(parents=True, exist_ok=True)
 
 
 def _get_default_code_root() -> Path:

@@ -95,7 +95,7 @@ def _build_mock_state():
     mock_state.domino_client = MagicMock()
     mock_state.domino_job_store = MagicMock()
     mock_state.spec_store = MagicMock()
-    mock_state.domino_datasets = MagicMock()
+    mock_state.domino_artifacts = MagicMock()
     return mock_state
 
 
@@ -189,7 +189,7 @@ class TestBuildJobCommand:
         cmd = je._build_job_command(req, "/spec.yaml")
         assert "--model" in cmd and "gpt-4" in cmd
         assert "--code-root" in cmd
-        # --output is no longer passed (CLI ignores it; output goes via DatasetStore)
+        # --output is no longer passed (CLI ignores it; output goes via ArtifactStore)
         assert "--output" not in cmd
         assert "--max-files" in cmd and "10" in cmd
         assert "--generation-workers" in cmd
@@ -291,13 +291,11 @@ class TestSubmitDominoJob:
         assert result.status == "failed"
 
     @pytest.mark.asyncio
-    async def test_dataset_spec_path_resolved(self, _mock_studio):
+    async def test_artifact_spec_path_resolved(self, _mock_studio):
         je = _import_job_engine()
         store = _mock_studio.domino_job_store
         client = _mock_studio.domino_client
-        datasets = _mock_studio.domino_datasets
 
-        datasets.get_dataset_mount_prefix.return_value = "/mnt/data"
         store.create_job.return_value = "job-4"
         store.count_active_jobs.return_value = 1
         client.submit_job.return_value = "run-xyz"
@@ -307,31 +305,36 @@ class TestSubmitDominoJob:
             "domino_run_id": "run-xyz",
         }
 
-        # Mock the dataset_store.get_store().file_exists_api() check
-        mock_ds_store = MagicMock()
-        mock_ds_store.file_exists_api.return_value = True
-        with patch.dict(sys.modules, {"dataset_store": MagicMock(get_store=lambda: mock_ds_store)}):
+        # Mock the domino_artifacts.get_store().file_exists() check
+        mock_artifact_store = MagicMock()
+        mock_artifact_store.file_exists.return_value = True
+        with patch.dict(sys.modules, {"domino_artifacts": MagicMock(
+            get_store=lambda: mock_artifact_store,
+            ARTIFACTS_MOUNT="/mnt/artifacts",
+        )}):
             req = JobRequest(
-                spec_path="dataset://my-dataset/spec.yaml",
+                spec_path="specs/my_spec.yaml",
                 provider="anthropic", project_id="proj-123",
             )
             await je._submit_domino_job(req, "test_user")
         # Verify the spec path was resolved to an absolute mount path
         call_args = store.create_job.call_args
         spec_in_db = call_args[1].get("spec_path") or call_args[0][3]
-        assert spec_in_db == "/mnt/data/my-dataset/spec.yaml"
+        assert spec_in_db == "/mnt/artifacts/specs/my_spec.yaml"
 
     @pytest.mark.asyncio
-    async def test_dataset_spec_deleted_externally_raises(self, _mock_studio):
+    async def test_artifact_spec_deleted_externally_raises(self, _mock_studio):
         """Spec file deleted in Domino UI between selection and submission."""
         je = _import_job_engine()
-        _mock_studio.domino_datasets.get_dataset_mount_prefix.return_value = "/mnt/data"
 
-        mock_ds_store = MagicMock()
-        mock_ds_store.file_exists_api.return_value = False
-        with patch.dict(sys.modules, {"dataset_store": MagicMock(get_store=lambda: mock_ds_store)}):
+        mock_artifact_store = MagicMock()
+        mock_artifact_store.file_exists.return_value = False
+        with patch.dict(sys.modules, {"domino_artifacts": MagicMock(
+            get_store=lambda: mock_artifact_store,
+            ARTIFACTS_MOUNT="/mnt/artifacts",
+        )}):
             req = JobRequest(
-                spec_path="dataset://autodoc/specs/doc_spec.yaml",
+                spec_path="specs/doc_spec.yaml",
                 provider="anthropic", project_id="proj-123",
             )
             with pytest.raises(ValueError, match="no longer exists"):
@@ -340,8 +343,8 @@ class TestSubmitDominoJob:
         _mock_studio.domino_job_store.create_job.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_non_dataset_spec_path_skips_verification(self, _mock_studio):
-        """Absolute paths (not dataset://) skip the API check."""
+    async def test_spec_content_upload_resolves_to_mount_path(self, _mock_studio):
+        """Spec provided via content + filename is saved and resolved to /mnt/artifacts/."""
         je = _import_job_engine()
         store = _mock_studio.domino_job_store
         client = _mock_studio.domino_client
@@ -353,13 +356,16 @@ class TestSubmitDominoJob:
         store.get_job.return_value = {
             "id": "job-5", "username": "test_user", "status": "submitted",
         }
+        _mock_studio.spec_store.save_spec.return_value = "specs/uuid_doc_spec.yaml"
 
-        req = JobRequest(
-            spec_path="/mnt/data/autodoc/specs/doc_spec.yaml",
-            provider="anthropic", project_id="proj-123",
-        )
-        # Should not call dataset_store at all for non-dataset:// paths
-        await je._submit_domino_job(req, "test_user")
+        with patch.dict(sys.modules, {"domino_artifacts": MagicMock(
+            ARTIFACTS_MOUNT="/mnt/artifacts",
+        )}):
+            req = JobRequest(
+                spec_content="title: Test", spec_filename="doc_spec.yaml",
+                provider="anthropic", project_id="proj-123",
+            )
+            await je._submit_domino_job(req, "test_user")
         client.submit_job.assert_called_once()
 
 

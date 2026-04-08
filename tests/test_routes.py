@@ -104,7 +104,7 @@ def _mock_studio_modules():
     mock_state.domino_client = MagicMock()
     mock_state.domino_job_store = MagicMock()
     mock_state.spec_store = MagicMock()
-    mock_state.domino_datasets = MagicMock()
+    mock_state.domino_artifacts = MagicMock()
 
     # ui_components module
     mock_ui = ModuleType("studio.ui_components")
@@ -291,49 +291,25 @@ class TestApiRoutes:
         req = _make_request()
         routes["/api/hardware-tiers"](req)
 
-    def test_datasets_returns_json(self, _mock_studio_modules):
+    def test_spec_files_returns_json(self, _mock_studio_modules):
         mod = _import_routes_api()
         routes = _register(mod, "register_api_routes")
-        ds = _mock_studio_modules["state"].domino_datasets
-        ds.list_datasets.return_value = [{"id": "ds-1", "name": "test-ds"}]
+        _mock_studio_modules["state"].spec_store = MagicMock()
+        _mock_studio_modules["state"].spec_store.list_specs.return_value = [
+            {"name": "spec.yaml", "path": "specs/spec.yaml", "size_kb": 1.0, "created_at": "2026-04-07"},
+        ]
         req = _make_request(query_params={"projectId": "proj-123"})
-        result = routes["/api/datasets"](req)
-        ds.list_datasets.assert_called_once()
+        result = routes["/api/spec-files"](req)
+        _mock_studio_modules["state"].spec_store.list_specs.assert_called_once()
 
-    def test_datasets_returns_empty_when_domino_unavailable(self, _mock_studio_modules):
+    def test_spec_files_returns_empty_when_domino_unavailable(self, _mock_studio_modules):
         _mock_studio_modules["state"]._DOMINO_AVAILABLE = False
         mod = _import_routes_api()
         routes = _register(mod, "register_api_routes")
         req = _make_request()
-        result = routes["/api/datasets"](req)
+        result = routes["/api/spec-files"](req)
         body = json.loads(result.body.decode())
         assert body == []
-
-    def test_datasets_error_returns_500(self, _mock_studio_modules):
-        mod = _import_routes_api()
-        routes = _register(mod, "register_api_routes")
-        ds = _mock_studio_modules["state"].domino_datasets
-        ds.list_datasets.side_effect = RuntimeError("API error")
-        req = _make_request(query_params={"projectId": "proj-123"})
-        result = routes["/api/datasets"](req)
-        assert result.status_code == 500
-
-    def test_dataset_files_requires_dataset_id(self, _mock_studio_modules):
-        mod = _import_routes_api()
-        routes = _register(mod, "register_api_routes")
-        req = _make_request(query_params={})
-        result = routes["/api/dataset-files"](req)
-        assert result.status_code == 400
-
-    def test_dataset_files_returns_files(self, _mock_studio_modules):
-        mod = _import_routes_api()
-        routes = _register(mod, "register_api_routes")
-        ds = _mock_studio_modules["state"].domino_datasets
-        ds.get_rw_snapshot_id.return_value = "snap-1"
-        ds.list_files.return_value = [{"fileName": "spec.yaml"}]
-        req = _make_request(query_params={"datasetId": "ds-1", "projectId": "proj-123"})
-        result = routes["/api/dataset-files"](req)
-        ds.list_files.assert_called_once()
 
     def test_download_template(self, _mock_studio_modules):
         mod = _import_routes_api()
@@ -476,5 +452,5 @@ class TestSpecRoutes:
         req = _make_request(query_params={"projectId": "proj-123"})
         routes["/spec-list"](req)
 
-    # delete_spec and cleanup_specs routes removed — Domino Datasets API
+    # delete_spec and cleanup_specs routes removed — Domino Artifacts API
     # does not support file-level deletion.

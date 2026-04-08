@@ -1,4 +1,4 @@
-"""API routes: branches, hardware tiers, language detection, datasets, etc."""
+"""API routes: branches, hardware tiers, language detection, spec files, etc."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from .state import (
     _get_default_code_root,
     _resolve_request_project_id,
     domino_client,
-    domino_datasets,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,108 +93,32 @@ def register_api_routes(rt):
 
     rt("/api/detect-language")(api_detect_language)
 
-    def api_datasets(req: Request):
-        """List writable datasets for the project."""
+    # ------------------------------------------------------------------
+    # Spec files (backed by Domino Artifacts DFS)
+    # ------------------------------------------------------------------
+
+    def api_spec_files(req: Request):
+        """List spec files in the target project's artifacts."""
         if not _DOMINO_AVAILABLE:
             return Response(json.dumps([]), media_type="application/json")
-        pid = _resolve_request_project_id(req)
-        logger.info("GET /api/datasets — project=%s", pid)
+        logger.info("GET /api/spec-files")
         try:
-            datasets = domino_datasets.list_datasets(pid)
-            logger.info("GET /api/datasets — returned %d datasets", len(datasets))
-            return Response(json.dumps(datasets), media_type="application/json")
+            from .state import spec_store
+            specs = spec_store.list_specs()
+            logger.info("GET /api/spec-files — returned %d files", len(specs))
+            return Response(json.dumps(specs), media_type="application/json")
         except Exception as exc:
-            logger.warning("Failed to list datasets: %s", exc, exc_info=True)
+            logger.warning("Failed to list spec files: %s", exc, exc_info=True)
             return Response(
                 json.dumps({"error": str(exc)}),
                 status_code=500,
                 media_type="application/json",
             )
 
-    rt("/api/datasets")(api_datasets)
+    rt("/api/spec-files")(api_spec_files)
 
-    def api_dataset_files(req: Request):
-        """Browse files in a dataset (directories + yaml only)."""
-        if not _DOMINO_AVAILABLE:
-            return Response(json.dumps([]), media_type="application/json")
-
-        dataset_id = req.query_params.get("datasetId", "")
-        snapshot_id = req.query_params.get("snapshotId", "")
-        path = req.query_params.get("path", "")
-        pid = _resolve_request_project_id(req)
-
-        if not dataset_id:
-            return Response(
-                json.dumps({"error": "datasetId required"}),
-                status_code=400,
-                media_type="application/json",
-            )
-
-        # Resolve snapshot ID if not provided
-        if not snapshot_id:
-            snapshot_id = domino_datasets.get_rw_snapshot_id(dataset_id, pid)
-        if not snapshot_id:
-            return Response(
-                json.dumps({"error": "Could not resolve snapshot for dataset"}),
-                status_code=400,
-                media_type="application/json",
-            )
-
-        logger.info("GET /api/dataset-files — dataset=%s snapshot=%s path='%s'", dataset_id, snapshot_id, path)
-        try:
-            files = domino_datasets.list_files(snapshot_id, path, pid)
-            logger.info("GET /api/dataset-files — returned %d items", len(files))
-            return Response(json.dumps(files), media_type="application/json")
-        except Exception as exc:
-            logger.warning("Failed to list files: %s", exc, exc_info=True)
-            return Response(
-                json.dumps({"error": str(exc)}),
-                status_code=500,
-                media_type="application/json",
-            )
-
-    rt("/api/dataset-files")(api_dataset_files)
-
-    async def api_ensure_autodoc_specs(req: Request):
-        """Ensure the autodoc dataset exists, return its metadata.
-
-        Uses the unified 'autodoc' dataset (not the legacy 'autodoc-specs').
-        Specs live under the specs/ subdirectory within this dataset.
-        """
-        if not _DOMINO_AVAILABLE:
-            return Response(
-                json.dumps({"error": "Domino not available"}),
-                status_code=400,
-                media_type="application/json",
-            )
-        pid = _resolve_request_project_id(req)
-        logger.info("POST /api/ensure-autodoc-specs — project=%s", pid)
-        try:
-            from dataset_store import AUTODOC_DATASET_NAME
-            ds = domino_datasets.ensure_dataset(
-                pid,
-                name=AUTODOC_DATASET_NAME,
-                description="Auto Model Docs artifacts",
-            )
-            if not ds.get("id"):
-                logger.warning("ensure-autodoc-specs returned dataset with empty id: %s", ds)
-                raise RuntimeError("Dataset was created/found but has no ID — check Domino Datasets API response")
-            if not ds.get("rwSnapshotId"):
-                ds["rwSnapshotId"] = domino_datasets.get_rw_snapshot_id(ds["id"], pid)
-            logger.info("POST /api/ensure-autodoc-specs — dataset id=%s name=%s", ds.get("id"), ds.get("name"))
-            return Response(json.dumps(ds), media_type="application/json")
-        except Exception as exc:
-            logger.warning("Failed to ensure autodoc dataset: %s", exc, exc_info=True)
-            return Response(
-                json.dumps({"error": str(exc)}),
-                status_code=500,
-                media_type="application/json",
-            )
-
-    rt("/api/ensure-autodoc-specs")(api_ensure_autodoc_specs)
-
-    async def api_upload_spec_to_dataset(req: Request):
-        """Upload a spec file via the DatasetStore."""
+    async def api_upload_spec(req: Request):
+        """Upload a spec file to the target project's artifacts."""
         if not _DOMINO_AVAILABLE:
             return Response(
                 json.dumps({"error": "Domino not available"}),
@@ -214,18 +137,14 @@ def register_api_routes(rt):
             )
 
         raw_filename = getattr(file_upload, "filename", "spec.yaml")
-        # Sanitize: strip path components to prevent directory traversal
         filename = raw_filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "spec.yaml"
         content = await file_upload.read()
-        logger.info("POST /api/upload-spec-to-dataset — file='%s' (%d bytes)", filename, len(content))
+        logger.info("POST /api/upload-spec — file='%s' (%d bytes)", filename, len(content))
 
         try:
-            from dataset_store import get_store
-            from artifact_layout import get_layout
-            store = get_store()
-            upload_path = f"{get_layout().specs_dir}/{filename}"
-            store.write_file(upload_path, content)
-            logger.info("POST /api/upload-spec-to-dataset — success, path=%s", upload_path)
+            from .state import spec_store
+            upload_path = spec_store.save_spec(filename, content.decode("utf-8", errors="replace"))
+            logger.info("POST /api/upload-spec — success, path=%s", upload_path)
             return Response(
                 json.dumps({"path": upload_path, "fileName": filename}),
                 media_type="application/json",
@@ -238,11 +157,10 @@ def register_api_routes(rt):
                 media_type="application/json",
             )
 
-    rt("/api/upload-spec-to-dataset")(api_upload_spec_to_dataset)
+    rt("/api/upload-spec")(api_upload_spec)
 
     def api_download_template():
         """Serve the bundled doc_spec.yaml as a downloadable reference template."""
-        # doc_spec.yaml is in auto_model_docs/ (parent of studio/)
         template_path = Path(__file__).resolve().parent.parent / "doc_spec.yaml"
         if not template_path.exists():
             return Response("Template not found", status_code=404)

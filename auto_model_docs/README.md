@@ -111,9 +111,9 @@ auto_model_docs/
   studio/                     # Studio UI package (state, styles, scripts, routes)
   domino_auth.py              # Shared Domino API host + auth (JWT-first)
   domino_client.py            # Domino API client (jobs, projects, hardware tiers)
-  domino_datasets.py          # Domino Datasets API client (browse, upload)
-  domino_job_store.py         # SQLite job history
-  spec_store.py               # Spec file persistence to target project dataset
+  domino_artifacts.py          # Domino Artifacts (DFS) file store via REST API
+  domino_job_store.py         # JSON job index (stored in artifacts)
+  spec_store.py               # Spec file persistence (via ArtifactStore)
   auth_context.py             # Per-request JWT forwarding via ContextVar
   main.py                     # CLI entry point
   doc_spec.yaml               # Default spec file

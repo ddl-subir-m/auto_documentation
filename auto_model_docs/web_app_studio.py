@@ -243,20 +243,12 @@ def index(req: Request):
         Input(name="spec_path", id="field-spec_path", type="hidden", value=""),
     )
 
-    # Dataset browser + upload
+    # Artifact spec browser + upload
     spec_card_children.append(
         Div(
             Label("Spec file", Span(" *", cls="required-star")),
             Div(
-                Select(
-                    Option("Loading datasets...", value="", disabled=True, selected=True),
-                    id="spec-dataset-select",
-                ),
-                cls="field",
-            ),
-            Div(id="spec-breadcrumb", cls="spec-breadcrumb"),
-            Div(
-                Span("Select a dataset to browse spec files", style="color: var(--outline); font-size: 0.8125rem;"),
+                Span("Loading spec files...", style="color: var(--outline); font-size: 0.8125rem;"),
                 id="spec-file-list",
                 cls="spec-file-list",
             ),

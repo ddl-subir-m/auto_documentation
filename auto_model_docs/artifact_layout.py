@@ -1,7 +1,7 @@
 """Central path resolver for all autodoc artifacts.
 
 All artifact paths flow through this module. Paths are logical paths
-relative to the dataset root, used with the DatasetStore for actual I/O.
+relative to /mnt/artifacts/, used with the ArtifactStore or filesystem for I/O.
 
 Directory structure within the autodoc dataset:
     docs/          — Generated .docx and .ipynb files
@@ -23,8 +23,8 @@ _layout: Optional["ArtifactLayout"] = None
 class ArtifactLayout:
     """Logical path resolver for autodoc artifacts within a dataset.
 
-    Paths returned are relative to the dataset root. All actual I/O
-    goes through DatasetStore (dataset_store.py).
+    Paths returned are relative to /mnt/artifacts/. In a job container,
+    I/O goes through the filesystem. From the web app, via ArtifactStore.
     """
 
     # -- User-visible paths (relative to dataset root) --

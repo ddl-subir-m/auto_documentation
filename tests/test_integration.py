@@ -2,7 +2,7 @@
 
 Tests the full request -> route handler -> response path with:
 - Real HTTP via httpx AsyncClient + Starlette app
-- Mocked DatasetStore for job_store and spec_store I/O
+- Mocked ArtifactStore for job_store and spec_store I/O
 - Real auth_context ContextVar propagation through middleware
 - Mocked Domino API client (no live API calls)
 
@@ -57,22 +57,19 @@ def _load_module(name: str, filename: str) -> ModuleType:
 def _build_test_app(tmp_path: Path, monkeypatch):
     """Construct a Starlette app wired with real route handlers.
 
-    Uses in-memory DatasetStore mock for job_store and spec_store,
+    Uses in-memory ArtifactStore mock for job_store and spec_store,
     mocked domino_client, and real auth_context propagation.
     """
     import domino_job_store as store
     import spec_store
     import auth_context
-    import dataset_store
+    import domino_artifacts
     import artifact_layout
 
-    # Set up in-memory file store for DatasetStore
+    # Set up in-memory file store for ArtifactStore
     _mem_files: dict[str, bytes] = {}
 
     class _MemStore:
-        dataset_id = "ds-integration"
-        snapshot_id = "snap-integration"
-
         def write_file(self, path, content):
             _mem_files[path] = content
 
@@ -90,25 +87,22 @@ def _build_test_app(tmp_path: Path, monkeypatch):
                 name = k[len(prefix):] if prefix else k
                 if "/" in name:
                     continue  # skip nested
-                results.append({"fileName": name, "isDirectory": False, "sizeInBytes": len(_mem_files[k])})
+                results.append({"name": name, "size": len(_mem_files[k])})
             return results
 
         def file_exists(self, path):
             return path in _mem_files
 
-        def file_exists_api(self, path):
-            """API-only check (same as file_exists for in-memory store)."""
-            return path in _mem_files
+        def get_head_commit(self):
+            return "fake-commit-id"
 
-        def read_file_meta(self, path):
-            if path not in _mem_files:
-                raise FileNotFoundError(path)
-            return {"sizeInBytes": len(_mem_files[path])}
+        def invalidate_cache(self):
+            pass
 
     mem_store = _MemStore()
-    # Pre-seed a spec file so dataset:// path verification passes
-    _mem_files["spec.yaml"] = b"title: Test\n"
-    dataset_store._store = mem_store
+    # Pre-seed a spec file so artifact path verification passes
+    _mem_files["specs/spec.yaml"] = b"title: Test\n"
+    domino_artifacts._store = mem_store
     artifact_layout.init_layout()
 
     # Mock domino_client
@@ -132,15 +126,6 @@ def _build_test_app(tmp_path: Path, monkeypatch):
     mock_client.resolve_project.return_value = mock_info
     mock_client.set_ui_host = MagicMock()
 
-    mock_datasets = MagicMock()
-    mock_datasets.list_datasets.return_value = [
-        {"id": "ds-1", "name": "autodoc-specs", "rwSnapshotId": "snap-1"},
-    ]
-    mock_datasets.AUTODOC_SPECS_DATASET = "autodoc-specs"
-    mock_datasets.build_spec_mount_path.return_value = "/mnt/data/autodoc-specs/spec.yaml"
-    mock_datasets.get_rw_snapshot_id.return_value = "snap-1"
-    mock_datasets.list_files.return_value = []
-
     # Set up studio.state
     studio_pkg = ModuleType("studio")
     studio_pkg.__path__ = [os.path.join(_pkg_dir, "studio")]
@@ -152,7 +137,7 @@ def _build_test_app(tmp_path: Path, monkeypatch):
     mock_state.domino_client = mock_client
     mock_state.domino_job_store = store
     mock_state.spec_store = spec_store
-    mock_state.domino_datasets = mock_datasets
+    mock_state.domino_artifacts = domino_artifacts
     mock_state.auth_context = auth_context
     mock_state._TARGET_PROJECT_ID = "proj-integration"
     mock_state._TARGET_PROJECT_NAME = "test-project"
@@ -350,7 +335,7 @@ def _build_test_app(tmp_path: Path, monkeypatch):
         "store": store,
         "spec_store": spec_store,
         "domino_client": mock_client,
-        "domino_datasets": mock_datasets,
+        "domino_artifacts": domino_artifacts,
         "auth_context": auth_context,
         "doc_spec": mock_doc_spec,
         "_restore": None,
@@ -380,9 +365,9 @@ def integration_env(tmp_path, monkeypatch):
     yield env
 
     # Restore
-    import dataset_store
+    import domino_artifacts
     import artifact_layout
-    dataset_store.reset_store()
+    domino_artifacts.reset_store()
     artifact_layout.reset_layout()
 
     for key, val in saved_modules.items():
@@ -404,37 +389,11 @@ def client(integration_env):
 
 class TestApiRoutesIntegration:
 
-    def test_datasets_endpoint(self, client, integration_env):
-        resp = client.get("/api/datasets?projectId=proj-integration")
+    def test_spec_files_endpoint(self, client, integration_env):
+        resp = client.get("/api/spec-files?projectId=proj-integration")
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
-        assert len(data) == 1
-        assert data[0]["name"] == "autodoc-specs"
-
-    def test_datasets_error_returns_500(self, client, integration_env):
-        integration_env["domino_datasets"].list_datasets.side_effect = RuntimeError("API down")
-        resp = client.get("/api/datasets?projectId=proj-integration")
-        assert resp.status_code == 500
-        assert "error" in resp.json()
-        integration_env["domino_datasets"].list_datasets.side_effect = None
-        integration_env["domino_datasets"].list_datasets.return_value = [
-            {"id": "ds-1", "name": "autodoc-specs", "rwSnapshotId": "snap-1"},
-        ]
-
-    def test_dataset_files_requires_dataset_id(self, client):
-        resp = client.get("/api/dataset-files")
-        assert resp.status_code == 400
-
-    def test_dataset_files_with_id(self, client, integration_env):
-        integration_env["domino_datasets"].list_files.return_value = [
-            {"fileName": "spec.yaml", "isDirectory": False},
-        ]
-        resp = client.get("/api/dataset-files?datasetId=ds-1&projectId=proj-integration")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) == 1
-        assert data[0]["fileName"] == "spec.yaml"
 
     def test_download_template(self, client):
         resp = client.get("/api/download-template")
@@ -491,10 +450,10 @@ class TestSpecRoutesIntegration:
         assert resp.status_code == 200
         assert "failed" in resp.text.lower() or "Missing title" in resp.text
 
-    def test_spec_list_empty(self, client):
+    def test_spec_list_returns_html(self, client):
         resp = client.get("/spec-list?projectId=proj-integration")
         assert resp.status_code == 200
-        assert "No saved spec" in resp.text
+        assert "spec-list-content" in resp.text
 
     def test_save_spec(self, client):
         resp = client.post("/save-spec", data={
@@ -519,7 +478,7 @@ class TestJobRoutesIntegration:
         store = integration_env["store"]
 
         resp = client.post("/run", data={
-            "spec_path": "dataset://autodoc-specs/spec.yaml",
+            "spec_path": "specs/spec.yaml",
             "provider": "anthropic",
             "target_project": "proj-integration",
         })
@@ -564,7 +523,7 @@ class TestJobRoutesIntegration:
     def test_job_history_returns_submitted_jobs(self, client, integration_env):
         """Jobs created via /run appear in /job-history."""
         client.post("/run", data={
-            "spec_path": "dataset://autodoc-specs/spec.yaml",
+            "spec_path": "specs/spec.yaml",
             "provider": "anthropic",
             "target_project": "proj-integration",
         })
@@ -586,7 +545,7 @@ class TestAuthMiddlewareIntegration:
         assert ac.get_request_auth_header() is None
 
         client.get(
-            "/api/datasets?projectId=proj-integration",
+            "/api/spec-files?projectId=proj-integration",
             headers={"Authorization": "Bearer integration-jwt"},
         )
 
@@ -618,7 +577,7 @@ class TestCrossCuttingIntegration:
 
         # Submit a 3rd via HTTP
         client.post("/run", data={
-            "spec_path": "dataset://autodoc-specs/spec.yaml",
+            "spec_path": "specs/spec.yaml",
             "provider": "anthropic",
             "target_project": "proj-integration",
         })

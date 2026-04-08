@@ -152,7 +152,7 @@ MAIN_DOM_JS = r"""
                         .then(function(html) {
                             var el = document.getElementById('project-id-resolved');
                             if (el) el.outerHTML = html;
-                            // Output location is fixed (autodoc dataset → docs/)
+                            // Output location is fixed (artifacts → docs/)
                             // No need to update the display field.
                         })
                         .catch(function() {});
@@ -169,31 +169,17 @@ MAIN_DOM_JS = r"""
             projectIdInput.addEventListener('blur', onProjectIdChange);
         }
 
-        // ── Dataset spec browser (Domino mode) ───────────────────────────
-        var specDatasetSelect = document.getElementById('spec-dataset-select');
+        // ── Artifact spec browser ─────────────────────────────────────────
         var specFileList = document.getElementById('spec-file-list');
-        var specBreadcrumb = document.getElementById('spec-breadcrumb');
         var specSelectedIndicator = document.getElementById('spec-selected-indicator');
         var specSelectedName = document.getElementById('spec-selected-name');
         var specMachineUpload = document.getElementById('spec-machine-upload');
         var specUploadStatus = document.getElementById('spec-upload-status');
         var specPathHidden = document.getElementById('field-spec_path');
 
-        // State
-        var _specDatasets = [];
-        var _specCurrentDatasetId = '';
-        var _specCurrentDatasetName = '';
-        var _specCurrentSnapshotId = '';
-        var _specCurrentPath = '';
-        var _specAutoDocSpecsId = '';
-
         function getProjectIdParam() {
-            var formEl = document.getElementById('main-form');
-            var pid = '';
-            // Check projectId from query string
             var params = new URLSearchParams(window.location.search);
-            pid = params.get('projectId') || params.get('project_id') || '';
-            // Also check the project-id field
+            var pid = params.get('projectId') || params.get('project_id') || '';
             if (!pid) {
                 var pidInput = document.getElementById('field-project-id');
                 if (pidInput) pid = pidInput.value.trim();
@@ -201,162 +187,53 @@ MAIN_DOM_JS = r"""
             return pid ? '&projectId=' + encodeURIComponent(pid) : '';
         }
 
-        function loadDatasets() {
-            if (!specDatasetSelect) return;
-            console.log('[spec-browser] Loading writable datasets...');
-            var qs = '?' + getProjectIdParam().replace(/^&/, '');
-            fetch('api/datasets' + qs)
-                .then(_checkResp).then(function(r) { return r.json(); })
-                .then(function(datasets) {
-                    if (datasets.error) {
-                        console.error('[spec-browser] Error loading datasets:', datasets.error);
-                        specDatasetSelect.innerHTML = '<option value="">Error: ' + datasets.error + '</option>';
-                        return;
-                    }
-                    _specDatasets = datasets;
-                    console.log('[spec-browser] Loaded ' + datasets.length + ' datasets:', datasets.map(function(d) { return d.name; }));
-                    if (datasets.length === 0) {
-                        specDatasetSelect.innerHTML = '<option value="">No datasets found for this project</option>';
-                        console.warn('[spec-browser] No writable datasets returned — upload a spec file to auto-create one');
-                        return;
-                    }
-                    var html = '<option value="">Choose a dataset...</option>';
-                    for (var i = 0; i < datasets.length; i++) {
-                        html += '<option value="' + datasets[i].id + '" data-name="' + datasets[i].name + '" data-snapshot="' + (datasets[i].rwSnapshotId || '') + '">'
-                            + datasets[i].name + '</option>';
-                    }
-                    specDatasetSelect.innerHTML = html;
-
-                    // Auto-select autodoc if it exists
-                    for (var j = 0; j < datasets.length; j++) {
-                        if (datasets[j].name === 'autodoc') {
-                            specDatasetSelect.value = datasets[j].id;
-                            _specAutoDocSpecsId = datasets[j].id;
-                            onDatasetChange();
-                            return;
-                        }
-                    }
-                })
-                .catch(function(err) {
-                    console.error('[spec-browser] Failed to load datasets:', err);
-                    specDatasetSelect.innerHTML = '<option value="">Failed to load datasets</option>';
-                });
-        }
-
-        function onDatasetChange() {
-            if (!specDatasetSelect) return;
-            var opt = specDatasetSelect.options[specDatasetSelect.selectedIndex];
-            console.log('[spec-browser] Dataset selected:', opt ? opt.getAttribute('data-name') : 'none');
-            _specCurrentDatasetId = specDatasetSelect.value;
-            _specCurrentDatasetName = opt ? opt.getAttribute('data-name') || '' : '';
-            _specCurrentSnapshotId = opt ? opt.getAttribute('data-snapshot') || '' : '';
-            _specCurrentPath = '';
-            if (_specCurrentDatasetId) {
-                browseFiles('');
-            } else {
-                if (specFileList) specFileList.innerHTML = '<span class="spec-file-empty">Select a dataset to browse spec files</span>';
-                if (specBreadcrumb) specBreadcrumb.innerHTML = '';
-            }
-        }
-
-        function browseFiles(path) {
-            _specCurrentPath = path;
+        function loadSpecs() {
             if (!specFileList) return;
-            console.log('[spec-browser] Browsing path:', path || '(root)', 'in dataset:', _specCurrentDatasetName);
+            console.log('[spec-browser] Loading spec files from artifacts...');
             specFileList.innerHTML = '<span class="spec-file-empty">Loading...</span>';
-            renderBreadcrumb(path);
-
-            var qs = '?datasetId=' + encodeURIComponent(_specCurrentDatasetId);
-            if (_specCurrentSnapshotId) qs += '&snapshotId=' + encodeURIComponent(_specCurrentSnapshotId);
-            if (path) qs += '&path=' + encodeURIComponent(path);
-            qs += getProjectIdParam();
-
-            fetch('api/dataset-files' + qs)
+            var qs = '?' + getProjectIdParam().replace(/^&/, '');
+            fetch('api/spec-files' + qs)
                 .then(_checkResp).then(function(r) { return r.json(); })
                 .then(function(files) {
-                    if (files.error) {
-                        console.error('[spec-browser] File listing error:', files.error);
-                        specFileList.innerHTML = '<span class="spec-file-empty">Error: ' + files.error + '</span>';
-                        return;
-                    }
-                    console.log('[spec-browser] Found ' + files.length + ' items at path:', path || '(root)');
+                    console.log('[spec-browser] Found ' + files.length + ' spec files');
                     if (files.length === 0) {
-                        specFileList.innerHTML = '<span class="spec-file-empty">No YAML files found in this location</span>';
+                        specFileList.innerHTML = '<span class="spec-file-empty">No spec files found. Upload one below.</span>';
                         return;
                     }
                     var html = '';
-                    // Sort: directories first, then files
-                    files.sort(function(a, b) {
-                        if (a.isDirectory && !b.isDirectory) return -1;
-                        if (!a.isDirectory && b.isDirectory) return 1;
-                        return a.fileName.localeCompare(b.fileName);
-                    });
                     for (var i = 0; i < files.length; i++) {
                         var f = files[i];
-                        var icon = f.isDirectory ? '\ud83d\udcc1' : '\ud83d\udcc4';
-                        var size = f.isDirectory ? '' : formatBytes(f.sizeInBytes || 0);
-                        var fullPath = path ? path + '/' + f.fileName : f.fileName;
-                        html += '<div class="spec-file-item" data-path="' + fullPath + '" data-dir="' + f.isDirectory + '" data-name="' + f.fileName + '">'
-                            + '<span class="spec-file-icon">' + icon + '</span>'
-                            + '<span class="spec-file-name">' + f.fileName + '</span>'
+                        var size = formatBytes(f.size || 0);
+                        html += '<div class="spec-file-item" data-path="' + f.path + '" data-name="' + f.name + '">'
+                            + '<span class="spec-file-icon">\ud83d\udcc4</span>'
+                            + '<span class="spec-file-name">' + f.name + '</span>'
                             + '<span class="spec-file-size">' + size + '</span>'
                             + '</div>';
                     }
                     specFileList.innerHTML = html;
-
                     // Attach click handlers
                     var items = specFileList.querySelectorAll('.spec-file-item');
                     for (var j = 0; j < items.length; j++) {
-                        items[j].addEventListener('click', onFileClick);
+                        items[j].addEventListener('click', function(e) {
+                            var el = e.currentTarget;
+                            var allItems = specFileList.querySelectorAll('.spec-file-item');
+                            for (var k = 0; k < allItems.length; k++) allItems[k].classList.remove('selected');
+                            el.classList.add('selected');
+                            selectSpec(el.getAttribute('data-path'));
+                        });
                     }
                 })
-                .catch(function() {
-                    specFileList.innerHTML = '<span class="spec-file-empty">Failed to load files</span>';
+                .catch(function(err) {
+                    console.error('[spec-browser] Failed to load specs:', err);
+                    specFileList.innerHTML = '<span class="spec-file-empty">Failed to load spec files</span>';
                 });
         }
 
-        function onFileClick(e) {
-            var el = e.currentTarget;
-            var isDir = el.getAttribute('data-dir') === 'true';
-            var path = el.getAttribute('data-path');
-            if (isDir) {
-                browseFiles(path);
-            } else {
-                // Select this file
-                var items = specFileList.querySelectorAll('.spec-file-item');
-                for (var i = 0; i < items.length; i++) items[i].classList.remove('selected');
-                el.classList.add('selected');
-                selectSpecFile(_specCurrentDatasetName, path);
-            }
-        }
-
-        function selectSpecFile(datasetName, filePath) {
-            console.log('[spec-browser] Selected:', datasetName + '/' + filePath);
+        function selectSpec(filePath) {
+            console.log('[spec-browser] Selected:', filePath);
             if (specSelectedIndicator) specSelectedIndicator.style.display = '';
-            if (specSelectedName) specSelectedName.textContent = datasetName + '/' + filePath;
-            // Build mount path and set the hidden form field
-            // The server will resolve the correct mount prefix
-            if (specPathHidden) {
-                // Use a marker so the server knows this is a dataset reference
-                specPathHidden.value = 'dataset://' + datasetName + '/' + filePath;
-            }
-        }
-
-        function renderBreadcrumb(path) {
-            if (!specBreadcrumb) return;
-            var parts = path ? path.split('/').filter(Boolean) : [];
-            var html = '<span class="spec-breadcrumb-link" onclick="window._specBrowse(\'\')">root</span>';
-            var cumulative = '';
-            for (var i = 0; i < parts.length; i++) {
-                cumulative += (i > 0 ? '/' : '') + parts[i];
-                html += '<span class="spec-breadcrumb-sep">/</span>';
-                if (i === parts.length - 1) {
-                    html += '<span class="spec-breadcrumb-current">' + parts[i] + '</span>';
-                } else {
-                    html += '<span class="spec-breadcrumb-link" onclick="window._specBrowse(\'' + cumulative + '\')">' + parts[i] + '</span>';
-                }
-            }
-            specBreadcrumb.innerHTML = html;
+            if (specSelectedName) specSelectedName.textContent = filePath;
+            if (specPathHidden) specPathHidden.value = filePath;
         }
 
         function formatBytes(bytes) {
@@ -366,42 +243,26 @@ MAIN_DOM_JS = r"""
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         }
 
-        // Global for breadcrumb onclick
-        window._specBrowse = function(path) { browseFiles(path); };
-
-        // Upload from machine → autodoc dataset
+        // Upload from machine → project artifacts
         if (specMachineUpload) {
             specMachineUpload.addEventListener('change', function(e) {
                 var file = e.target.files[0];
                 if (!file) return;
                 console.log('[spec-browser] Upload from machine:', file.name, '(' + file.size + ' bytes)');
                 if (specUploadStatus) { specUploadStatus.textContent = 'Uploading ' + file.name + '...'; specUploadStatus.style.color = ''; }
-                // Validate spec content before uploading
                 if (typeof validateSpecContent === 'function') validateSpecContent(file);
 
-                // Ensure autodoc dataset exists, then upload
                 var qs = '?' + getProjectIdParam().replace(/^&/, '');
-                fetch('api/ensure-autodoc-specs' + qs, { method: 'POST' })
-                    .then(_checkResp).then(function(r) { return r.json(); })
-                    .then(function(ds) {
-                        if (ds.error) throw new Error(ds.error);
-                        console.log('[spec-browser] autodoc dataset ensured: id=' + ds.id);
-                        _specAutoDocSpecsId = ds.id;
-                        var fd = new FormData();
-                        fd.append('datasetId', ds.id);
-                        fd.append('datasetName', ds.name || 'autodoc');
-                        fd.append('file', file);
-                        return fetch('api/upload-spec-to-dataset' + qs, { method: 'POST', body: fd });
-                    })
+                var fd = new FormData();
+                fd.append('file', file);
+                fetch('api/upload-spec' + qs, { method: 'POST', body: fd })
                     .then(_checkResp).then(function(r) { return r.json(); })
                     .then(function(result) {
                         if (result.error) throw new Error(result.error);
                         console.log('[spec-browser] Upload success:', result.fileName, '→', result.path);
                         if (specUploadStatus) { specUploadStatus.textContent = 'Uploaded: ' + result.fileName; specUploadStatus.style.color = '#2e7d32'; }
-                        // Select the uploaded file
-                        selectSpecFile('autodoc', result.path);
-                        // Refresh datasets if autodoc was just created
-                        loadDatasets();
+                        selectSpec(result.path);
+                        loadSpecs();
                     })
                     .catch(function(err) {
                         console.error('[spec-browser] Upload failed:', err.message);
@@ -410,11 +271,8 @@ MAIN_DOM_JS = r"""
             });
         }
 
-        // Wire dataset select change
-        if (specDatasetSelect) {
-            specDatasetSelect.addEventListener('change', onDatasetChange);
-            loadDatasets();
-        }
+        // Load specs on page init
+        loadSpecs();
 
         // ── Toggle base URL and model name fields based on provider selection
         var OPENAI_DEFAULT_MODEL = 'kimi-k2-0905-preview';

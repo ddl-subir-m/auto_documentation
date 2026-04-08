@@ -1,4 +1,4 @@
-"""Tests for spec_store.py — spec file persistence via DatasetStore."""
+"""Tests for spec_store.py — spec file persistence via ArtifactStore."""
 
 from __future__ import annotations
 
@@ -15,23 +15,23 @@ for p in (_repo_root, _pkg_dir):
         sys.path.insert(0, p)
 
 import artifact_layout
-import dataset_store
+import domino_artifacts
 import spec_store
 
 
 @pytest.fixture(autouse=True)
 def _mock_store():
-    """Set up ArtifactLayout and a mock DatasetStore for every test."""
+    """Set up ArtifactLayout and a mock ArtifactStore for every test."""
     artifact_layout.reset_layout()
     artifact_layout.init_layout()
 
-    mock = MagicMock(spec=dataset_store.DatasetStore)
+    mock = MagicMock(spec=domino_artifacts.ArtifactStore)
     mock.list_files.return_value = []
-    dataset_store.reset_store()
-    dataset_store._store = mock
+    domino_artifacts.reset_store()
+    domino_artifacts._store = mock
     yield mock
     artifact_layout.reset_layout()
-    dataset_store.reset_store()
+    domino_artifacts.reset_store()
 
 
 class TestSaveSpec:
@@ -45,7 +45,7 @@ class TestSaveSpec:
         assert path.endswith("_my_spec.yaml")
         assert content == b"title: Test"
 
-    def test_returns_dataset_path(self, _mock_store):
+    def test_returns_artifact_path(self, _mock_store):
         result = spec_store.save_spec("spec.yaml", "content")
         assert isinstance(result, str)
         assert result.startswith("specs/")
@@ -74,22 +74,23 @@ class TestListSpecs:
 
     def test_returns_metadata(self, _mock_store):
         _mock_store.list_files.return_value = [
-            {"fileName": "uuid_test.yaml", "isDirectory": False, "sizeInBytes": 1024, "lastModified": "2026-04-07"},
+            {"name": "uuid_test.yaml", "size": 1024, "key": "abc123", "path": "specs/uuid_test.yaml", "lastModified": "2026-04-07"},
         ]
         specs = spec_store.list_specs()
         assert len(specs) == 1
         assert specs[0]["name"] == "uuid_test.yaml"
         assert specs[0]["size_kb"] == 1.0
 
-    def test_filters_directories(self, _mock_store):
+    def test_multiple_files(self, _mock_store):
         _mock_store.list_files.return_value = [
-            {"fileName": "subdir", "isDirectory": True, "sizeInBytes": 0},
-            {"fileName": "spec.yaml", "isDirectory": False, "sizeInBytes": 512},
+            {"name": "spec_a.yaml", "size": 512, "key": "k1", "path": "specs/spec_a.yaml"},
+            {"name": "spec_b.yaml", "size": 256, "key": "k2", "path": "specs/spec_b.yaml"},
         ]
         specs = spec_store.list_specs()
-        assert len(specs) == 1
-        assert specs[0]["name"] == "spec.yaml"
+        assert len(specs) == 2
+        assert specs[0]["name"] == "spec_a.yaml"
+        assert specs[1]["name"] == "spec_b.yaml"
 
 
-# Delete operations removed — Domino Datasets API does not support
-# file-level deletion. Only entire datasets can be marked for deletion.
+# Delete operations removed — Domino Artifacts API does not support
+# file-level deletion.

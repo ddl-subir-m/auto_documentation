@@ -41,8 +41,8 @@ class DocumentBuilder:
         """Initialize the document builder.
 
         Args:
-            output_dir: Logical output directory (dataset-relative path).
-                Actual I/O goes through DatasetStore.
+            output_dir: Logical output directory (artifact-relative path).
+                Actual I/O goes through filesystem (/mnt/artifacts/).
         """
         self.output_dir = output_dir
 
@@ -882,19 +882,17 @@ class DocumentBuilder:
                     doc.add_paragraph(cid, style="List Bullet")
 
     def _save_document(self, doc: Document) -> str:
-        """Save the document to the dataset via DatasetStore."""
+        """Save the generated document to artifacts."""
         import io
         from artifact_layout import get_layout
-        from dataset_store import get_store
+        from domino_artifacts import write_artifact
 
-        # Generate filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"model_docs_{timestamp}.docx"
-        dataset_path = f"{get_layout().docs_dir}/{filename}"
+        artifact_path = f"{get_layout().docs_dir}/{filename}"
 
-        # Save to in-memory buffer, then upload
         buffer = io.BytesIO()
         doc.save(buffer)
-        get_store().write_file(dataset_path, buffer.getvalue())
+        write_artifact(artifact_path, buffer.getvalue())
 
-        return dataset_path
+        return artifact_path

@@ -74,8 +74,8 @@ class NotebookBuilder:
         """Initialize the notebook builder.
 
         Args:
-            output_dir: Logical output directory (dataset-relative path).
-                Actual I/O goes through DatasetStore.
+            output_dir: Logical output directory (artifact-relative path).
+                Actual I/O goes through filesystem (/mnt/artifacts/).
             dependencies: List of package names to check/install. Defaults to
                 DEFAULT_DEPENDENCIES if not provided.
             notebook_path: Custom path for the generated notebook. If not provided,
@@ -949,22 +949,20 @@ print(f"Exported to: {{output_path}}")'''
         return new_code_cell(source=code)
 
     def _save_notebook(self, nb: nbformat.NotebookNode) -> str:
-        """Save the notebook to the dataset via DatasetStore."""
+        """Save the generated notebook to artifacts."""
         import io
         from artifact_layout import get_layout
-        from dataset_store import get_store
+        from domino_artifacts import write_artifact
 
         if self.notebook_path:
-            # Custom path: use the filename but place it in docs dir
             filename = str(self.notebook_path).rsplit("/", 1)[-1]
         else:
             filename = "model_docs_notebook.ipynb"
 
-        dataset_path = f"{get_layout().docs_dir}/{filename}"
+        artifact_path = f"{get_layout().docs_dir}/{filename}"
 
-        # Write notebook to in-memory buffer, then upload
         buffer = io.StringIO()
         nbformat.write(nb, buffer)
-        get_store().write_file(dataset_path, buffer.getvalue().encode("utf-8"))
+        write_artifact(artifact_path, buffer.getvalue().encode("utf-8"))
 
-        return dataset_path
+        return artifact_path

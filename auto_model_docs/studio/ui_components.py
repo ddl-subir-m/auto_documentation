@@ -92,7 +92,7 @@ def _validate_environment() -> list:
                 action="Job submission may fail. Set DOMINO_API_HOST.",
             ))
 
-    # Output and cache are managed via DatasetStore — no local directories needed.
+    # Output and cache are managed via /mnt/artifacts/ — no local directories needed.
 
     return warnings
 

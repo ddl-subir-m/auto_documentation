@@ -227,14 +227,14 @@ auto_model_docs/
 ├── doc_spec.yaml            # Example document specification
 ├── domino_auth.py           # Shared Domino API host + auth resolution
 ├── domino_client.py         # Domino API client (jobs, projects, branches)
-├── domino_datasets.py       # Domino Datasets API client (browse, upload)
-├── domino_job_store.py      # SQLite job history (per-project)
-├── spec_store.py            # Spec file persistence
+├── domino_artifacts.py      # Domino Artifacts (DFS) file store via REST API
+├── domino_job_store.py      # JSON job index (per-project, stored in artifacts)
+├── spec_store.py            # Spec file persistence (via ArtifactStore)
 ├── auth_context.py          # Per-request JWT forwarding via ContextVar
 ├── studio/                  # Studio UI package
 │   ├── state.py             # Shared mutable state, dataclasses, helpers
 │   ├── job_engine.py        # Job submission, command building, background polling
-│   ├── routes_api.py        # API routes (branches, tiers, datasets, language detection)
+│   ├── routes_api.py        # API routes (branches, tiers, spec files, language detection)
 │   ├── routes_job.py        # Job routes (run, stop, history)
 │   ├── routes_spec.py       # Spec routes (validate, save, list, delete)
 │   ├── ui_components.py     # FT component helpers (forms, status panels, tables)

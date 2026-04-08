@@ -21,7 +21,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
-for _mod_name in ("domino_datasets", "domino_client", "auth_context"):
+for _mod_name in ("domino_artifacts", "domino_client", "auth_context"):
     logging.getLogger(_mod_name).setLevel(logging.INFO)
 
 # ---------------------------------------------------------------------------
@@ -29,8 +29,14 @@ for _mod_name in ("domino_datasets", "domino_client", "auth_context"):
 # ---------------------------------------------------------------------------
 
 def _import_sibling(name: str):
-    """Import a .py file from the auto_model_docs directory (parent of studio/)."""
+    """Import a .py file from the auto_model_docs directory (parent of studio/).
+
+    Returns the existing module from sys.modules if already loaded, to avoid
+    creating duplicate module objects with separate global namespaces.
+    """
     import sys
+    if name in sys.modules:
+        return sys.modules[name]
     # studio/state.py -> studio/ -> auto_model_docs/
     path = Path(__file__).resolve().parent.parent / f"{name}.py"
     if not path.exists():
@@ -65,7 +71,7 @@ domino_client: Any = None
 domino_job_store: Any = None
 spec_store: Any = None
 auth_context: Any = None
-domino_datasets: Any = None
+domino_artifacts: Any = None
 _DOMINO_AVAILABLE: bool = False
 
 try:
@@ -73,7 +79,7 @@ try:
     domino_job_store = _import_sibling("domino_job_store")
     spec_store = _import_sibling("spec_store")
     auth_context = _import_sibling("auth_context")
-    domino_datasets = _import_sibling("domino_datasets")
+    domino_artifacts = _import_sibling("domino_artifacts")
     _DOMINO_AVAILABLE = True
 except Exception as _import_exc:
     logging.getLogger(__name__).warning("Domino modules unavailable: %s", _import_exc, exc_info=True)
@@ -157,13 +163,12 @@ def _set_target_project(project_id: str) -> bool:
     """Capture the target project from the ?projectId query param.
 
     Called on every page load but only acts on the first call.
-    Initializes ArtifactLayout and DatasetStore for the target project.
+    Initializes ArtifactLayout and ArtifactStore for the target project.
     Returns ``True`` when the project was newly captured (first load),
     ``False`` when it was already set.
     """
     import studio.state as _self  # avoid stale module-level refs
     from artifact_layout import init_layout
-    from dataset_store import init_store, AUTODOC_DATASET_NAME
 
     if _self._TARGET_PROJECT_ID is not None:
         return False  # already captured
@@ -178,38 +183,22 @@ def _set_target_project(project_id: str) -> bool:
             # Initialize artifact layout (logical paths)
             init_layout()
 
-            # Ensure the autodoc dataset exists and initialize the store
-            if domino_datasets:
+            # Initialize the ArtifactStore for the target project
+            if domino_artifacts:
                 try:
-                    ds = domino_datasets.ensure_dataset(
+                    domino_artifacts.init_store(
+                        owner=info.owner_username,
+                        project_name=info.name,
                         project_id=project_id,
-                        name=AUTODOC_DATASET_NAME,
-                        description="Auto Model Docs artifacts",
                     )
-                    ds_id = ds.get("id") or ""
-                    if not ds_id:
-                        raise RuntimeError(
-                            f"Dataset '{AUTODOC_DATASET_NAME}' created/found but has no ID. "
-                            f"Raw response: {ds}"
-                        )
-                    snap_id = ds.get("rwSnapshotId") or ""
-                    if not snap_id:
-                        snap_id = domino_datasets.get_rw_snapshot_id(ds_id, project_id) or ""
-                    if not snap_id:
-                        raise RuntimeError(
-                            f"Could not resolve snapshot ID for dataset '{ds_id}'. "
-                            f"The dataset may still be initializing."
-                        )
-                    init_store(ds_id, snap_id, project_id)
                 except Exception as exc:
                     logger.error(
-                        "Failed to initialize DatasetStore for project %s: %s",
+                        "Failed to initialize ArtifactStore for project %s: %s",
                         project_id, exc, exc_info=True,
                     )
                     raise RuntimeError(
                         f"Cannot initialize artifact storage for project {project_id}. "
-                        f"Check dataset permissions and Domino API availability. "
-                        f"Error: {exc}"
+                        f"Check Domino API availability. Error: {exc}"
                     ) from exc
 
             if domino_job_store:
