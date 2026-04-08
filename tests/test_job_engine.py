@@ -392,9 +392,8 @@ class TestReconcileStaleJobs:
 # _poll_domino_jobs (single iteration)
 # ---------------------------------------------------------------------------
 
-class TestPollDominoJobs:
-    @pytest.mark.asyncio
-    async def test_poll_updates_active_jobs(self, _mock_studio):
+class TestRefreshActiveJobStatuses:
+    def test_updates_active_jobs(self, _mock_studio):
         je = _import_job_engine()
         store = _mock_studio.domino_job_store
         client = _mock_studio.domino_client
@@ -410,44 +409,12 @@ class TestPollDominoJobs:
             "local_status": "succeeded",
         }
 
-        call_count = 0
-        async def _break_after_one(t):
-            nonlocal call_count
-            call_count += 1
-            if call_count > 1:
-                raise asyncio.CancelledError()
-
-        with patch("asyncio.sleep", side_effect=_break_after_one):
-            with pytest.raises(asyncio.CancelledError):
-                await je._poll_domino_jobs()
+        je._refresh_active_job_statuses()
 
         client.get_job_status.assert_called_with("run-1")
         store.update_job.assert_called()
 
-    @pytest.mark.asyncio
-    async def test_poll_skips_when_domino_unavailable(self, _mock_studio):
-        je = _import_job_engine()
-
-        # Patch the module-level _DOMINO_AVAILABLE
-        original = je._DOMINO_AVAILABLE
-        je._DOMINO_AVAILABLE = False
-
-        call_count = 0
-        async def _break_after_one(t):
-            nonlocal call_count
-            call_count += 1
-            if call_count > 1:
-                raise asyncio.CancelledError()
-
-        with patch("asyncio.sleep", side_effect=_break_after_one):
-            with pytest.raises(asyncio.CancelledError):
-                await je._poll_domino_jobs()
-
-        _mock_studio.domino_job_store.get_active_jobs.assert_not_called()
-        je._DOMINO_AVAILABLE = original
-
-    @pytest.mark.asyncio
-    async def test_poll_promotes_queued_jobs(self, _mock_studio):
+    def test_promotes_queued_jobs(self, _mock_studio):
         je = _import_job_engine()
         store = _mock_studio.domino_job_store
         client = _mock_studio.domino_client
@@ -463,16 +430,7 @@ class TestPollDominoJobs:
         client.submit_job.return_value = "run-promoted"
         client.build_job_url.return_value = "https://domino/jobs/run-promoted"
 
-        call_count = 0
-        async def _break_after_one(t):
-            nonlocal call_count
-            call_count += 1
-            if call_count > 1:
-                raise asyncio.CancelledError()
-
-        with patch("asyncio.sleep", side_effect=_break_after_one):
-            with pytest.raises(asyncio.CancelledError):
-                await je._poll_domino_jobs()
+        je._refresh_active_job_statuses()
 
         client.submit_job.assert_called_once()
         store.update_job.assert_called()

@@ -17,6 +17,7 @@ from .ui_components import (
 from .job_engine import (
     _parse_request,
     _submit_domino_job,
+    _refresh_active_job_statuses,
 )
 
 
@@ -49,7 +50,14 @@ def register_job_routes(rt):
     rt("/run")(run)
 
     def job_history():
+        """Return job history table, refreshing active job statuses first.
+
+        This is polled every 10s via HTMX. The request carries the viewer's
+        JWT, so we can check Domino job statuses with proper auth.
+        """
         username = _get_username()
+        if _DOMINO_AVAILABLE:
+            _refresh_active_job_statuses()
         return _render_job_history_table(username)
 
     rt("/job-history")(job_history)

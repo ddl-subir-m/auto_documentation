@@ -214,66 +214,76 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
 
 
 # ---------------------------------------------------------------------------
-# Background polling
+# Status refresh (called during HTMX poll with viewer's JWT)
 # ---------------------------------------------------------------------------
 
-async def _poll_domino_jobs() -> None:
-    """Background task: poll Domino for active job status updates."""
-    while True:
-        await asyncio.sleep(10)
-        if not _DOMINO_AVAILABLE or not _get_target_project_name():
-            continue
-        try:
-            # Update active jobs (status from Domino Jobs API)
-            from datetime import datetime, timezone
-            active_jobs = domino_job_store.get_active_jobs()
-            for row in active_jobs:
-                run_id = row.get("domino_run_id")
-                if not run_id:
-                    continue
-                try:
-                    status_info = domino_client.get_job_status(run_id)
-                    domino_status = status_info.get("domino_status", "")
-                    mapped = status_info.get("local_status", "submitted")
-                    updates: dict[str, Any] = {}
-                    if domino_status != row.get("domino_status"):
-                        updates["domino_status"] = domino_status
-                    if mapped != row.get("status"):
-                        updates["status"] = mapped
-                    if mapped in ("succeeded", "failed", "cancelled"):
-                        updates["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
-                    if updates:
-                        domino_job_store.update_job(row["id"], **updates)
-                except Exception as exc:
-                    logger.warning("Poll error for run %s: %s", run_id, exc)
+def _refresh_active_job_statuses() -> None:
+    """Check Domino API for active job status updates.
 
-            # Promote queued jobs for all users when slots open
-            for uname in domino_job_store.get_queued_usernames():
-                active = domino_job_store.count_active_jobs(uname)
-                if active > _max_jobs():
-                    continue
-                oldest = domino_job_store.get_oldest_queued_job(uname)
-                if not oldest or oldest.get("domino_run_id"):
-                    continue
-                try:
-                    cmd = oldest.get("command", "")
-                    run_id = domino_client.submit_job(
-                        cmd,
-                        branch=oldest.get("branch"),
-                        tier_id=oldest.get("hardware_tier"),
-                        project_id=oldest.get("project_id"),
-                    )
-                    job_url = domino_client.build_job_url(run_id, project_id=oldest.get("project_id"))
-                    domino_job_store.update_job(
-                        oldest["id"],
-                        status="submitted",
-                        domino_run_id=run_id,
-                        job_url=job_url,
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to promote queued job %s: %s", oldest["id"], exc)
-        except Exception as exc:
-            logger.warning("Domino poll loop error: %s", exc, exc_info=True)
+    Called from the job-history HTMX endpoint, which runs in request
+    context with the viewer's JWT for proper auth.
+    """
+    from datetime import datetime, timezone
+    try:
+        active_jobs = domino_job_store.get_active_jobs()
+        for row in active_jobs:
+            run_id = row.get("domino_run_id")
+            if not run_id:
+                continue
+            try:
+                status_info = domino_client.get_job_status(run_id)
+                domino_status = status_info.get("domino_status", "")
+                mapped = status_info.get("local_status", "submitted")
+                updates: dict[str, Any] = {}
+                if domino_status != row.get("domino_status"):
+                    updates["domino_status"] = domino_status
+                if mapped != row.get("status"):
+                    updates["status"] = mapped
+                if mapped in ("succeeded", "failed", "cancelled"):
+                    updates["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
+                if updates:
+                    domino_job_store.update_job(row["id"], **updates)
+            except Exception as exc:
+                logger.warning("Status refresh error for run %s: %s", run_id, exc)
+
+        # Promote queued jobs when slots open
+        for uname in domino_job_store.get_queued_usernames():
+            active = domino_job_store.count_active_jobs(uname)
+            if active > _max_jobs():
+                continue
+            oldest = domino_job_store.get_oldest_queued_job(uname)
+            if not oldest or oldest.get("domino_run_id"):
+                continue
+            try:
+                cmd = oldest.get("command", "")
+                run_id = domino_client.submit_job(
+                    cmd,
+                    branch=oldest.get("branch"),
+                    tier_id=oldest.get("hardware_tier"),
+                    project_id=oldest.get("project_id"),
+                )
+                job_url = domino_client.build_job_url(run_id, project_id=oldest.get("project_id"))
+                domino_job_store.update_job(
+                    oldest["id"],
+                    status="submitted",
+                    domino_run_id=run_id,
+                    job_url=job_url,
+                )
+            except Exception as exc:
+                logger.warning("Failed to promote queued job %s: %s", oldest["id"], exc)
+    except Exception as exc:
+        logger.warning("Job status refresh error: %s", exc, exc_info=True)
+
+
+async def _poll_domino_jobs() -> None:
+    """Background task: kept for compatibility but no longer polls Domino.
+
+    Status refreshes now happen during HTMX polls (job-history endpoint)
+    which run in request context with the viewer's JWT.
+    """
+    # No-op — status refresh moved to _refresh_active_job_statuses()
+    while True:
+        await asyncio.sleep(3600)  # Sleep indefinitely
 
 
 def _reconcile_stale_jobs() -> None:

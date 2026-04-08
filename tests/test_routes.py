@@ -137,6 +137,7 @@ def _mock_studio_modules():
         spec_path="/spec.yaml", project_id="proj-123",
     ))
     mock_job_engine._submit_domino_job = AsyncMock()
+    mock_job_engine._refresh_active_job_statuses = MagicMock()
 
     # fasthtml.common — provide real Response import + FT component stubs
     from starlette.responses import Response as StarletteResponse, FileResponse as StarletteFileResponse
