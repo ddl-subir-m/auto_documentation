@@ -203,6 +203,26 @@ class CodeScanner:
         # Cap at max_files (default 100 for ranking, Stage 2 narrows further)
         return files[:self.max_files]
 
+    def _read_files(self, files: List[Path]) -> List[Dict[str, str]]:
+        """Read files and prepend line numbers to each line.
+
+        Returns a list of {"file": relative_path, "content": numbered_content}.
+        """
+        results = []
+        for path in files:
+            try:
+                rel_path = str(path.relative_to(self.code_root))
+            except ValueError:
+                rel_path = str(path)
+            try:
+                raw = path.read_text(errors="replace")
+                lines = raw.split("\n")
+                numbered = "\n".join(f"{i + 1}: {line}" for i, line in enumerate(lines))
+                results.append({"file": rel_path, "content": numbered})
+            except Exception:
+                continue
+        return results
+
     # ──────────────────────────────────────────────────────────────────
     # Stage 1: File card extraction
     # ──────────────────────────────────────────────────────────────────
@@ -436,6 +456,10 @@ class CodeScanner:
                     pass
 
         for item in evidence:
+            # Skip if the LLM already provided line numbers
+            if item.get("start_line") is not None and item.get("end_line") is not None:
+                continue
+
             filepath = item.get("file", "")
             content = file_contents.get(filepath, "")
             if not content:

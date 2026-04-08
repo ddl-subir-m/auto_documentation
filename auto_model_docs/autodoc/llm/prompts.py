@@ -185,7 +185,8 @@ CRITICAL INSTRUCTIONS:
 - Do NOT claim SMOTE, cross-validation, or other techniques unless they are explicitly imported and used
 - For the "insights" field, only describe what is demonstrably in the code - no assumptions or common practices
 - For "code_evidence", provide concise statements that can be quoted in the report.
-- Each evidence item must include: statement, file path, symbol (class/function name), and a short code snippet that demonstrates the claim."""
+- Each evidence item must include: statement, file path, symbol (class/function name), and a short code snippet that demonstrates the claim.
+- Include start_line and end_line numbers from the source file for each evidence item when line numbers are available in the code listing."""
 
 
 CODE_ANALYSIS_SCHEMA: Dict[str, Any] = {
@@ -247,6 +248,8 @@ CODE_ANALYSIS_SCHEMA: Dict[str, Any] = {
                     "file": {"type": "string"},
                     "symbol": {"type": "string"},
                     "snippet": {"type": "string"},
+                    "start_line": {"type": "integer", "description": "Starting line number of the evidence in the source file"},
+                    "end_line": {"type": "integer", "description": "Ending line number of the evidence in the source file"},
                 },
                 "required": ["statement", "file"],
             },

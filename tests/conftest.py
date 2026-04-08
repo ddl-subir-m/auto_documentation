@@ -19,8 +19,10 @@ import pytest
 # Ensure auto_model_docs is importable
 # ---------------------------------------------------------------------------
 _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
+_pkg_dir = os.path.join(_repo_root, "auto_model_docs")
+for _p in (_repo_root, _pkg_dir):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 # ---------------------------------------------------------------------------
 # Stub exception hierarchy — used only when the real ones aren't available yet
