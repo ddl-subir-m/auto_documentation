@@ -51,8 +51,10 @@ def _mock_store():
     fake = _FakeStore()
     domino_artifacts.reset_store()
     domino_artifacts._store = fake
+    store._cached_index = None  # Clear write-through cache
     store.init_db()
     yield fake
+    store._cached_index = None
     domino_artifacts.reset_store()
 
 

@@ -28,17 +28,27 @@ _MAX_COMPLETED_JOBS = 50  # Keep at most this many completed jobs per user
 _COMPLETED_STATUSES = {"succeeded", "failed", "cancelled"}
 _INDEX_LOCK = threading.Lock()  # Serialize read-modify-write on the JSON index
 
+# Write-through cache: the DFS API is eventually consistent, so reads
+# immediately after writes may return stale data. We cache the last
+# written index so subsequent reads see the latest state.
+_cached_index: list[dict[str, Any]] | None = None
+
 
 # ---------------------------------------------------------------------------
 # Index I/O
 # ---------------------------------------------------------------------------
 
 def _read_index() -> list[dict[str, Any]]:
-    """Load the job index from artifacts."""
+    """Load the job index from artifacts (or write-through cache)."""
+    global _cached_index
+    if _cached_index is not None:
+        return [dict(j) for j in _cached_index]  # return copies
     from domino_artifacts import get_store
     try:
         content = get_store().read_file(_INDEX_PATH)
-        return json.loads(content)
+        jobs = json.loads(content)
+        _cached_index = jobs
+        return [dict(j) for j in jobs]
     except FileNotFoundError:
         return []
     except Exception as exc:
@@ -48,6 +58,7 @@ def _read_index() -> list[dict[str, Any]]:
 
 def _write_index(jobs: list[dict[str, Any]]) -> None:
     """Write the job index to artifacts, pruning old completed jobs."""
+    global _cached_index
     from domino_artifacts import get_store
 
     # Prune: keep all active jobs, cap completed jobs per user
@@ -67,6 +78,7 @@ def _write_index(jobs: list[dict[str, Any]]) -> None:
 
     content = json.dumps(jobs, indent=2).encode("utf-8")
     get_store().write_file(_INDEX_PATH, content)
+    _cached_index = jobs  # Update write-through cache
 
 
 def _now_iso() -> str:
