@@ -196,18 +196,38 @@ def get_queued_usernames() -> list[str]:
 
 
 def reconcile_stale_jobs() -> None:
-    """Mark submitted/running jobs with no run ID as failed (app restarted)."""
+    """Reconcile job statuses after app restart.
+
+    Jobs without a domino_run_id are marked failed (never submitted).
+    Jobs with a domino_run_id get their status refreshed from the Domino API.
+    """
     with _INDEX_LOCK:
         jobs = _read_index()
         changed = False
         for job in jobs:
-            if (
-                job.get("status") in ("submitted", "pending", "running")
-                and not job.get("domino_run_id")
-            ):
+            if job.get("status") not in ("submitted", "pending", "running", "queued"):
+                continue
+            if not job.get("domino_run_id"):
+                # Never submitted to Domino — mark failed
                 job["status"] = "failed"
                 job["domino_status"] = "App restarted"
                 changed = True
+            else:
+                # Has a run ID — check actual status from Domino
+                try:
+                    from domino_client import get_job_status
+                    status_info = get_job_status(job["domino_run_id"])
+                    domino_status = status_info.get("domino_status", "")
+                    mapped = status_info.get("local_status", "submitted")
+                    if domino_status != job.get("domino_status") or mapped != job.get("status"):
+                        job["domino_status"] = domino_status
+                        job["status"] = mapped
+                        if mapped in ("succeeded", "failed", "cancelled"):
+                            from datetime import datetime, timezone
+                            job["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
+                        changed = True
+                except Exception as exc:
+                    logger.warning("Failed to reconcile job %s: %s", job.get("id"), exc)
         if changed:
             _write_index(jobs)
 
