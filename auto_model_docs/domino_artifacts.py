@@ -101,6 +101,9 @@ def _artifact_request(
 
     def _do_request(c: httpx.Client) -> Any:
         headers = _get_auth_headers()
+        # Domino's Play framework rejects POST/PUT without a CSRF token
+        if method.upper() in ("POST", "PUT", "PATCH", "DELETE"):
+            headers["Csrf-Token"] = "nocheck"
         if files is not None:
             # multipart/form-data — let httpx set Content-Type with boundary
             return c.request(method, url, files=files, headers=headers)
@@ -209,6 +212,7 @@ class ArtifactStore:
             "POST", api_path, client=self._client,
             files={"upfile": (filename, content)},
             timeout=60.0,
+            expect_json=False,
         )
         self._head_commit = None
         logger.info("ArtifactStore.write_file('%s') complete", path)
