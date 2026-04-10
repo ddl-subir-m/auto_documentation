@@ -266,7 +266,12 @@ class ArtifactStore:
         )
         result = []
         for f in raw:
-            file_path = f.get("path", "")
+            raw_path = f.get("path", "")
+            # v4 API returns path as an object with canonicalizedPathString
+            if isinstance(raw_path, dict):
+                file_path = raw_path.get("canonicalizedPathString", "")
+            else:
+                file_path = raw_path
             name = file_path.rsplit("/", 1)[-1] if file_path else ""
             if not name:
                 continue
