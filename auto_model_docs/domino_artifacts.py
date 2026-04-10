@@ -18,6 +18,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote as _url_quote
 
 import httpx
 
@@ -82,6 +83,7 @@ def _artifact_request(
     *,
     client: httpx.Client | None = None,
     content: bytes | None = None,
+    files: dict[str, Any] | None = None,
     json: Any = None,
     params: dict[str, Any] | None = None,
     timeout: float = _DEFAULT_TIMEOUT,
@@ -99,7 +101,10 @@ def _artifact_request(
 
     def _do_request(c: httpx.Client) -> Any:
         headers = _get_auth_headers()
-        if content is not None:
+        if files is not None:
+            # multipart/form-data — let httpx set Content-Type with boundary
+            return c.request(method, url, files=files, headers=headers)
+        elif content is not None:
             headers["Content-Type"] = "application/octet-stream"
             return c.request(method, url, content=content, headers=headers)
         elif json is not None:
@@ -186,15 +191,24 @@ class ArtifactStore:
     # ------------------------------------------------------------------
 
     def write_file(self, path: str, content: bytes) -> None:
-        """Upload a file to artifacts via PUT API.
+        """Upload a file to artifacts via multipart POST.
+
+        Uses the v4 private API:
+        POST /v4/projects/{projectId}/commits/head/files/{path}
 
         Subdirectories are created automatically. Overwrites existing files.
         """
-        api_path = f"/v1/projects/{self._owner}/{self._project}/{path}"
+        encoded_path = _url_quote(path, safe="")
+        api_path = (
+            f"/v4/projects/{self._project_id}/commits/head"
+            f"/files/{encoded_path}"
+        )
+        filename = path.rsplit("/", 1)[-1]
         logger.info("ArtifactStore.write_file('%s', %d bytes)", path, len(content))
         _artifact_request(
-            "PUT", api_path, client=self._client,
-            content=content, expect_json=False, timeout=60.0,
+            "POST", api_path, client=self._client,
+            files={"upfile": (filename, content)},
+            timeout=60.0,
         )
         self._head_commit = None
         logger.info("ArtifactStore.write_file('%s') complete", path)
@@ -206,22 +220,27 @@ class ArtifactStore:
     def read_file(self, path: str) -> bytes:
         """Download file content from artifacts.
 
-        Resolves the blob key via list_files(), then downloads by key.
+        Uses the documented public API:
+        GET /api/projects/v1/projects/{projectId}/files/{commitId}/{path}/content
+
         Raises FileNotFoundError if the file doesn't exist.
         """
-        dir_path, filename = self._split_path(path)
-        files = self.list_files(dir_path)
-        match = next((f for f in files if f["name"] == filename), None)
-        if not match:
-            raise FileNotFoundError(f"File not found in artifacts: {path}")
-
-        blob_key = match["key"]
-        api_path = f"/v1/projects/{self._owner}/{self._project}/blobs/{blob_key}"
-        logger.info("ArtifactStore.read_file('%s') key=%s", path, blob_key[:8])
-        return _artifact_request(
-            "GET", api_path, client=self._client,
-            expect_json=False, timeout=60.0,
+        commit_id = self.get_head_commit()
+        encoded_path = _url_quote(path, safe="")
+        api_path = (
+            f"/api/projects/v1/projects/{self._project_id}"
+            f"/files/{commit_id}/{encoded_path}/content"
         )
+        logger.info("ArtifactStore.read_file('%s') commit=%s", path, commit_id[:8])
+        try:
+            return _artifact_request(
+                "GET", api_path, client=self._client,
+                expect_json=False, timeout=60.0,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise FileNotFoundError(f"File not found in artifacts: {path}") from exc
+            raise
 
     # ------------------------------------------------------------------
     # List
@@ -230,29 +249,32 @@ class ArtifactStore:
     def list_files(self, dir_path: str = "") -> list[dict[str, Any]]:
         """List files in a directory. Returns normalized dicts with keys:
         name, size, key, path, lastModified.
+
+        Uses the v4 private API:
+        GET /v4/projects/{projectId}/commits/head/files/{path}
+
+        Auto-resolves HEAD commit — no separate get_head_commit() call needed.
         """
-        commit_id = self.get_head_commit()
-        params = {
-            "ownerUsername": self._owner,
-            "projectName": self._project,
-            "filePath": dir_path,
-            "commitId": commit_id,
-        }
-        logger.info("ArtifactStore.list_files('%s') commit=%s", dir_path, commit_id[:8])
-        raw = _artifact_request(
-            "GET", "/v4/files/browseFiles", client=self._client, params=params,
+        encoded_path = _url_quote(dir_path, safe="") if dir_path else ""
+        api_path = (
+            f"/v4/projects/{self._project_id}/commits/head"
+            f"/files/{encoded_path}"
         )
-        # Normalize response into a consistent shape
+        logger.info("ArtifactStore.list_files('%s')", dir_path)
+        raw = _artifact_request(
+            "GET", api_path, client=self._client,
+        )
         result = []
         for f in raw:
-            name = f.get("name") or f.get("fileName") or ""
+            file_path = f.get("path", "")
+            name = file_path.rsplit("/", 1)[-1] if file_path else ""
             if not name:
                 continue
             result.append({
                 "name": name,
-                "size": f.get("size") or f.get("sizeInBytes") or 0,
+                "size": f.get("size", 0),
                 "key": f.get("key", ""),
-                "path": f.get("path") or f.get("quotedFilePath") or "",
+                "path": file_path,
                 "lastModified": f.get("lastModified"),
             })
         return result
@@ -277,24 +299,19 @@ class ArtifactStore:
     def get_head_commit(self) -> str:
         """Resolve the HEAD commitId for the default DFS branch.
 
+        Uses the documented public API:
+        GET /api/projects/beta/projects/{projectId}/commits/head
+
         Cached until invalidated by a write.
         """
         if self._head_commit:
             return self._head_commit
 
-        params = {
-            "ownerUsername": self._owner,
-            "projectName": self._project,
-            "pathString": "",
-        }
+        api_path = f"/api/projects/beta/projects/{self._project_id}/commits/head"
         data = _artifact_request(
-            "GET", "/v4/code/browseCode", client=self._client, params=params,
+            "GET", api_path, client=self._client,
         )
-        commit_id = (
-            data.get("commitSettings", {}).get("headCommitId")
-            or data.get("commitSettings", {}).get("thisCommitId")
-            or ""
-        )
+        commit_id = data.get("commitId", "")
         if not commit_id:
             raise RuntimeError(
                 f"Could not resolve HEAD commit for {self._owner}/{self._project}"
