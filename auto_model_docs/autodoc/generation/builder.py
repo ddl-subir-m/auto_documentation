@@ -882,19 +882,97 @@ class DocumentBuilder:
                     doc.add_paragraph(cid, style="List Bullet")
 
     def _save_document(self, doc: Document) -> str:
-        """Save the document to the dataset via DatasetStore."""
+        """Save the document to the dataset via DatasetStore.
+
+        Always saves both a .docx and a .pdf.  Returns the PDF path
+        (the docx is also kept for editing purposes).
+        """
         import io
         from artifact_layout import get_layout
         from dataset_store import get_store
 
         # Generate filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"model_docs_{timestamp}.docx"
-        dataset_path = f"{get_layout().docs_dir}/{filename}"
+        docs_dir = get_layout().docs_dir
+        docx_path = f"{docs_dir}/model_docs_{timestamp}.docx"
+        pdf_path = f"{docs_dir}/model_docs_{timestamp}.pdf"
 
-        # Save to in-memory buffer, then upload
+        # Save .docx to in-memory buffer, then upload
         buffer = io.BytesIO()
         doc.save(buffer)
-        get_store().write_file(dataset_path, buffer.getvalue())
+        docx_bytes = buffer.getvalue()
+        get_store().write_file(docx_path, docx_bytes)
 
-        return dataset_path
+        # Convert .docx -> HTML (via mammoth) -> PDF (via WeasyPrint)
+        try:
+            import mammoth
+            import weasyprint
+
+            html_result = mammoth.convert_to_html(io.BytesIO(docx_bytes))
+            styled_html = _wrap_html_for_pdf(html_result.value)
+            pdf_bytes = weasyprint.HTML(string=styled_html).write_pdf()
+            get_store().write_file(pdf_path, pdf_bytes)
+            return pdf_path
+        except Exception as exc:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning(
+                "PDF conversion failed, falling back to .docx: %s", exc
+            )
+            return docx_path
+
+
+# ---------------------------------------------------------------------------
+# PDF helpers
+# ---------------------------------------------------------------------------
+
+def _wrap_html_for_pdf(body_html: str) -> str:
+    """Wrap mammoth-generated HTML in a styled page ready for WeasyPrint."""
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page {{
+    size: A4;
+    margin: 2.5cm 2cm 2.5cm 2.5cm;
+  }}
+  body {{
+    font-family: "Arial", "Helvetica", sans-serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    color: #1a1a1a;
+  }}
+  h1 {{ font-size: 20pt; margin-top: 1.4em; margin-bottom: 0.3em; color: #1a3a5c; page-break-after: avoid; }}
+  h2 {{ font-size: 15pt; margin-top: 1.2em; margin-bottom: 0.3em; color: #1a3a5c; page-break-after: avoid; }}
+  h3 {{ font-size: 12pt; margin-top: 1em;  margin-bottom: 0.2em; color: #2c5282; page-break-after: avoid; }}
+  p  {{ margin: 0.4em 0 0.6em 0; }}
+  ul, ol {{ margin: 0.3em 0 0.6em 1.5em; }}
+  li {{ margin-bottom: 0.2em; }}
+  table {{
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.8em 0;
+    font-size: 10pt;
+  }}
+  th, td {{
+    border: 1px solid #c0c0c0;
+    padding: 5px 8px;
+    text-align: left;
+    vertical-align: top;
+  }}
+  th {{ background: #e8edf3; font-weight: bold; }}
+  code, pre {{
+    font-family: "Courier New", monospace;
+    font-size: 9.5pt;
+    background: #f5f5f5;
+    padding: 2px 4px;
+    border-radius: 2px;
+  }}
+  pre {{ padding: 8px; display: block; white-space: pre-wrap; }}
+  a {{ color: #2b6cb0; text-decoration: none; }}
+</style>
+</head>
+<body>
+{body_html}
+</body>
+</html>"""

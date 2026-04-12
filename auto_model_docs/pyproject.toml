@@ -38,6 +38,8 @@ dependencies = [
     "nbformat>=5.9.0",  # For Jupyter notebook generation
     "nbclient>=0.8.0",  # For executing notebook cells
     "ipykernel>=6.0.0",  # Jupyter kernel for notebook execution
+    "mammoth>=1.6.0",   # docx -> HTML for PDF conversion
+    "weasyprint>=60.0", # HTML -> PDF conversion
 ]
 
 [project.optional-dependencies]
