@@ -148,6 +148,11 @@ console = Console()
     is_flag=True,
     help="Disable automatic Domino project filtering (scan all projects)",
 )
+@click.option(
+    "--target-project-id",
+    default=None,
+    help="Domino project ID to write output to (overrides DOMINO_PROJECT_ID for dataset storage)",
+)
 def main(
     spec: str,
     code_root: str | None,
@@ -169,6 +174,7 @@ def main(
     models: str | None,
     latest_only: bool,
     disable_project_filtering: bool,
+    target_project_id: str | None,
 ) -> None:
     """Generate model documentation from ML codebases.
 
@@ -225,7 +231,7 @@ def main(
         from artifact_layout import init_layout, get_layout
         from dataset_store import init_store, AUTODOC_DATASET_NAME
         init_layout()
-        _init_cli_dataset_store()
+        _init_cli_dataset_store(target_project_id=target_project_id)
         output_dir = get_layout().docs_dir
         code_dir = settings.code_root if settings.code_root.exists() else _get_default_code_root()
 
@@ -422,14 +428,19 @@ def _regenerate_notebook_from_cache(
     console.print()
 
 
-def _init_cli_dataset_store() -> None:
+def _init_cli_dataset_store(target_project_id: str | None = None) -> None:
     """Initialize the DatasetStore for CLI mode (Domino job container).
 
     In a Domino job container, we have access to the Domino API and
     need to find or create the autodoc dataset in the current project.
     """
     from dataset_store import init_store, AUTODOC_DATASET_NAME
-    project_id = os.environ.get("DOMINO_PROJECT_ID", "")
+    # target_project_id (CLI arg) takes top priority, then env vars
+    project_id = (
+        target_project_id
+        or os.environ.get("AUTODOC_TARGET_PROJECT_ID")
+        or os.environ.get("DOMINO_PROJECT_ID", "")
+    )
     if not project_id:
         raise RuntimeError(
             "DOMINO_PROJECT_ID not set. "

@@ -86,6 +86,8 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
     command = ["python", "/mnt/code/auto_model_docs/main.py"]
     if spec_path:
         command += ["--spec", spec_path]
+    if req.project_id:
+        command += ["--target-project-id", req.project_id]
     if req.provider:
         command += ["--provider", req.provider]
     if req.model:
@@ -115,12 +117,36 @@ def _build_job_command(req: JobRequest, spec_path: Optional[str]) -> list[str]:
     return command
 
 
-def _build_job_command_str(req: JobRequest, spec_path: Optional[str]) -> str:
+def _build_job_command_str(
+    req: JobRequest,
+    spec_path: Optional[str],
+    spec_content: Optional[str] = None,
+    target_project_id: Optional[str] = None,
+) -> str:
     """Build the full shell command for a Domino job.
 
-    Quotes arguments that contain spaces to prevent shell splitting.
+    When *spec_content* is provided the spec YAML is base64-encoded and
+    written to /tmp/autodoc_spec.yaml at job start, so the job container
+    does not need the target-project dataset mounted.
+
+    When *target_project_id* is provided it is exported as
+    AUTODOC_TARGET_PROJECT_ID so the job writes output to the correct
+    project's dataset rather than its own.
     """
+    import base64
     import shlex
+
+    if spec_content:
+        encoded = base64.b64encode(spec_content.encode("utf-8")).decode("ascii")
+        write_cmd = (
+            f"python3 -c \""
+            f"import base64; open('/tmp/autodoc_spec.yaml','wb')"
+            f".write(base64.b64decode('{encoded}'))\""
+        )
+        parts = _build_job_command(req, "/tmp/autodoc_spec.yaml")
+        main_cmd = " ".join(shlex.quote(p) for p in parts)
+        return f"{write_cmd} && {main_cmd}"
+
     parts = _build_job_command(req, spec_path)
     return " ".join(shlex.quote(p) for p in parts)
 
@@ -141,44 +167,42 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
     # Ensure DB is initialised
     domino_job_store.init_db()
 
-    # Resolve spec path — must be an absolute mount path so the Domino
-    # job container can read it from the mounted "autodoc" dataset.
-    spec_path: Optional[str] = None
+    # Resolve spec content so it can be inlined into the job command.
+    # The job runs in the app's own project (not the target project), so the
+    # target project's dataset is not mounted — we cannot pass a mount path.
+    spec_content_inline: Optional[str] = None
+    spec_path: Optional[str] = None  # kept only for job-history display
+
     if req.spec_content and req.spec_filename:
-        saved = spec_store.save_spec(req.spec_filename, req.spec_content)
-        # Convert dataset-relative path to absolute mount path
-        from dataset_store import AUTODOC_DATASET_NAME
-        mount_prefix = domino_datasets.get_dataset_mount_prefix()
-        spec_path = f"{mount_prefix}/{AUTODOC_DATASET_NAME}/{saved}"
+        # Uploaded directly — save a copy to the dataset for history, then inline.
+        spec_store.save_spec(req.spec_filename, req.spec_content)
+        spec_content_inline = req.spec_content
+        spec_path = req.spec_filename  # display label only
     elif req.spec_path:
-        # Resolve dataset:// references to actual mount paths
         if req.spec_path.startswith("dataset://"):
-            parts = req.spec_path[len("dataset://"):].split("/", 1)
-            dataset_name = parts[0]
-            file_path = parts[1] if len(parts) > 1 else ""
-            mount_prefix = domino_datasets.get_dataset_mount_prefix()
-            spec_path = f"{mount_prefix}/{dataset_name}/{file_path}"
+            ds_relative = req.spec_path[len("dataset://"):].split("/", 1)
+            if len(ds_relative) > 1:
+                from dataset_store import get_store
+                store = get_store()
+                if not store.file_exists_api(ds_relative[1]):
+                    raise ValueError(
+                        "The selected spec file no longer exists in the dataset. "
+                        "Please select or upload a spec file and try again."
+                    )
+                spec_content_inline = store.read_file(ds_relative[1]).decode("utf-8")
+            spec_path = req.spec_path
         else:
             spec_path = req.spec_path
 
-    if not spec_path:
+    if not spec_content_inline and not spec_path:
         raise ValueError("A spec file is required. Please select or upload a spec before generating documentation.")
 
-    # Verify the spec file still exists in the dataset (it may have been
-    # deleted externally via the Domino UI between selection and submission).
-    if req.spec_path and req.spec_path.startswith("dataset://"):
-        # Extract the dataset-relative path for API verification
-        ds_relative = req.spec_path[len("dataset://"):].split("/", 1)
-        if len(ds_relative) > 1:
-            from dataset_store import get_store
-            if not get_store().file_exists_api(ds_relative[1]):
-                raise ValueError(
-                    f"The selected spec file no longer exists in the dataset. "
-                    f"It may have been deleted. Please select or upload a spec file and try again."
-                )
-
     # Build command and create the DB row (status=queued)
-    command_str = _build_job_command_str(req, spec_path)
+    command_str = _build_job_command_str(
+        req, spec_path,
+        spec_content=spec_content_inline,
+        target_project_id=req.project_id,
+    )
 
     job_id = domino_job_store.create_job(
         username=username,
@@ -197,15 +221,20 @@ async def _submit_domino_job(req: JobRequest, username: str) -> DominoJobRecord:
         row = domino_job_store.get_job(job_id)
         return _db_record_to_dataclass(row)
 
+    # Always run the job in the app's own project (where main.py lives).
+    # The target project (req.project_id) is only used for dataset/spec storage.
+    import os
+    app_project_id = os.environ.get("DOMINO_PROJECT_ID") or req.project_id
+
     # Under the limit — submit immediately
     try:
         run_id = domino_client.submit_job(
             command_str,
             branch=req.branch,
             tier_id=req.hardware_tier,
-            project_id=req.project_id,
+            project_id=app_project_id,
         )
-        job_url = domino_client.build_job_url(run_id, project_id=req.project_id)
+        job_url = domino_client.build_job_url(run_id, project_id=app_project_id)
         domino_job_store.update_job(
             job_id,
             status="submitted",
@@ -267,14 +296,16 @@ async def _poll_domino_jobs() -> None:
                 if not oldest or oldest.get("domino_run_id"):
                     continue
                 try:
+                    import os
+                    _app_pid = os.environ.get("DOMINO_PROJECT_ID") or oldest.get("project_id")
                     cmd = oldest.get("command", "")
                     run_id = domino_client.submit_job(
                         cmd,
                         branch=oldest.get("branch"),
                         tier_id=oldest.get("hardware_tier"),
-                        project_id=oldest.get("project_id"),
+                        project_id=_app_pid,
                     )
-                    job_url = domino_client.build_job_url(run_id, project_id=oldest.get("project_id"))
+                    job_url = domino_client.build_job_url(run_id, project_id=_app_pid)
                     domino_job_store.update_job(
                         oldest["id"],
                         status="submitted",

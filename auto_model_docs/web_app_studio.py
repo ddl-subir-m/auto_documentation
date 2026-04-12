@@ -68,9 +68,14 @@ app, rt = fast_app(
 @rt("/")
 def index(req: Request):
     # Cache the external host on first request so Domino job URLs resolve correctly.
+    # In a workspace the x-forwarded-host header is absent and the host header is
+    # the internal cluster hostname (*.svc.cluster.local), which is not reachable
+    # from the browser.  Fall back to DOMINO_API_HOST in that case.
     if _DOMINO_AVAILABLE:
         host = req.headers.get("x-forwarded-host") or req.headers.get("host") or ""
         scheme = req.headers.get("x-forwarded-proto", "https")
+        if not host or ".svc.cluster.local" in host or ".domino-compute" in host:
+            host = os.environ.get("DOMINO_API_HOST", "")
         domino_client.set_ui_host(host, scheme)
 
     # Guard: projectId query param is required.  Domino's reverse proxy
@@ -193,11 +198,20 @@ def index(req: Request):
     default_spec = _get_default_spec_path()
     username = _get_username()
     try:
+        from dotenv import dotenv_values as _dv
+        _dot = _dv(Path(__file__).resolve().parents[1] / ".env")
+        _current_provider = (
+            _dot.get("AUTODOC_LLM_PROVIDER") or _dot.get("LLM_PROVIDER") or "anthropic"
+        )
+        _current_model = (
+            _dot.get("AUTODOC_LLM_MODEL") or _dot.get("LLM_MODEL")
+            or ("claude-sonnet-4-20250514" if _current_provider == "anthropic" else "kimi-k2-0905-preview")
+        )
         _settings = Settings()
-        _current_model = "kimi-k2-0905-preview"
         _current_base_url = _settings.openai_base_url or "https://api.moonshot.ai/v1"
     except Exception:
-        _current_model = "kimi-k2-0905-preview"
+        _current_provider = "anthropic"
+        _current_model = "claude-sonnet-4-20250514"
         _current_base_url = "https://api.moonshot.ai/v1"
 
     # Pre-fetch branches and hardware tiers for server-side rendering
@@ -591,8 +605,8 @@ def index(req: Request):
         Div(
             Label("Provider", for_="field-provider"),
             Select(
-                Option("Anthropic", value="anthropic"),
-                Option("OpenAI (Compatible)", value="openai", selected=True),
+                Option("Anthropic", value="anthropic", selected=_current_provider == "anthropic"),
+                Option("OpenAI (Compatible)", value="openai", selected=_current_provider == "openai"),
                 name="provider",
                 id="field-provider",
             ),
@@ -601,10 +615,10 @@ def index(req: Request):
         Div(
             Div(
                 Label("Model", for_="field-model"),
-                Span("\u24d8", cls="info-tooltip", data_tooltip="Leave blank to use default (kimi-k2-0905-preview)"),
+                Span("\u24d8", cls="info-tooltip", data_tooltip="Leave blank to use provider default"),
                 cls="label-row",
             ),
-            Input(name="model", id="field-model", type="text", value=_current_model, placeholder="kimi-k2-0905-preview"),
+            Input(name="model", id="field-model", type="text", value=_current_model, placeholder=_current_model),
             cls="field",
             id="model-name-field",
             style="display: none;",
@@ -749,7 +763,7 @@ register_job_routes(rt)
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 HOST = os.environ.get("APP_HOST", "0.0.0.0")
-PORT = int(os.environ.get("APP_PORT", "8888"))
+PORT = int(os.environ.get("APP_PORT", "9888"))
 
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 

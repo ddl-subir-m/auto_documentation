@@ -235,8 +235,25 @@ def _get_target_project_name() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _get_default_code_root() -> Path:
-    """Return the default code root: /mnt/code for git projects,
-    /mnt for DFS projects, or cwd as fallback."""
+    """Return the default code root.
+
+    Priority: .env file CODE_ROOT → OS env CODE_ROOT → /mnt/code → /mnt → cwd.
+    The .env file is checked first so user config there beats Domino-injected vars.
+    """
+    # Check .env file directly (bypasses OS env var priority)
+    try:
+        from dotenv import dotenv_values
+        _repo_root = Path(__file__).resolve().parents[2]
+        dot_env = dotenv_values(_repo_root / ".env")
+        val = dot_env.get("AUTODOC_CODE_ROOT") or dot_env.get("CODE_ROOT")
+        if val and val.strip():
+            return Path(val.strip())
+    except Exception:
+        pass
+    # Fall back to OS environment
+    env_val = os.environ.get("AUTODOC_CODE_ROOT") or os.environ.get("CODE_ROOT")
+    if env_val:
+        return Path(env_val)
     if Path("/mnt/code").exists():
         return Path("/mnt/code")
     if Path("/mnt").exists():
