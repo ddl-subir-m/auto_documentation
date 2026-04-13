@@ -136,6 +136,10 @@ def _build_job_command_str(
     import base64
     import shlex
 
+    # Ensure PDF-conversion packages are present in the job container.
+    # Installs are no-ops if the packages are already available.
+    pip_cmd = "pip install -q mammoth weasyprint"
+
     if spec_content:
         encoded = base64.b64encode(spec_content.encode("utf-8")).decode("ascii")
         write_cmd = (
@@ -145,10 +149,11 @@ def _build_job_command_str(
         )
         parts = _build_job_command(req, "/tmp/autodoc_spec.yaml")
         main_cmd = " ".join(shlex.quote(p) for p in parts)
-        return f"{write_cmd} && {main_cmd}"
+        return f"{pip_cmd} && {write_cmd} && {main_cmd}"
 
     parts = _build_job_command(req, spec_path)
-    return " ".join(shlex.quote(p) for p in parts)
+    main_cmd = " ".join(shlex.quote(p) for p in parts)
+    return f"{pip_cmd} && {main_cmd}"
 
 
 # ---------------------------------------------------------------------------
