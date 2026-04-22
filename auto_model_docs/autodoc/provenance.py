@@ -1,6 +1,6 @@
-"""MVP provenance stamping for generated .docx documents.
+"""Provenance stamping for generated .docx documents.
 
-Records 5 required fields in two places for every generated doc:
+Records 8 provenance fields in two places for every generated doc:
 
 1. Word document custom properties (visible in File > Info > Properties)
 2. A SQLite row in ``autodoc_provenance.db`` (co-located with ``autodoc_jobs.db``)
@@ -12,30 +12,37 @@ rolled back.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from lxml import etree
 
 logger = logging.getLogger(__name__)
 
-MVP_FIELDS = (
+PROVENANCE_FIELDS = (
     "bundle_id",
     "policy_version_id",
     "commit_sha",
     "generated_by_user",
     "generated_at",
+    "generator_version",
+    "template_version",
+    "run_environment",
 )
+
+MVP_FIELDS = PROVENANCE_FIELDS[:5]
 
 _CUSTOM_PROPS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
 _VT_NS = "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"
@@ -54,16 +61,47 @@ class ProvenanceRecord:
     commit_sha: Optional[str]
     generated_by_user: str
     generated_at: str
+    generator_version: str = "unknown"
+    template_version: str = "unknown"
+    run_environment: Mapping[str, Any] = field(default_factory=dict)
+
+    def properties(self) -> dict[str, str]:
+        """Serialize all 8 fields to strings for stamping into custom properties."""
+        out: dict[str, str] = {}
+        for name in PROVENANCE_FIELDS:
+            val = getattr(self, name)
+            if val is None:
+                out[name] = ""
+            elif isinstance(val, Mapping):
+                out[name] = json.dumps(dict(val), sort_keys=True)
+            else:
+                out[name] = str(val)
+        return out
 
     def mvp_properties(self) -> dict[str, str]:
-        return {f: ("" if getattr(self, f) is None else str(getattr(self, f))) for f in MVP_FIELDS}
+        """Backward-compat: only the 5 MVP fields."""
+        props = self.properties()
+        return {k: props[k] for k in MVP_FIELDS}
 
 
 def capture_context(
     bundle_id: Optional[str] = None,
     policy_version_id: Optional[str] = None,
+    spec: Any = None,
 ) -> ProvenanceRecord:
-    """Capture the 5 MVP provenance fields at Job start time."""
+    """Capture the 8 provenance fields at Job start time.
+
+    ``spec`` is the parsed spec YAML (dict-like) or a DocumentSpec-like object.
+    If supplied, it must expose ``template_version``; otherwise a clean
+    ``ValueError`` is raised. When ``spec`` is ``None``, ``template_version``
+    defaults to ``"unknown"`` (used by callers that don't yet plumb the spec
+    through — tests cover the explicit path).
+    """
+    if spec is None:
+        template_version = "unknown"
+    else:
+        template_version = _extract_template_version(spec)
+
     return ProvenanceRecord(
         provenance_id=uuid.uuid4().hex[:12],
         bundle_id=bundle_id,
@@ -71,7 +109,23 @@ def capture_context(
         commit_sha=_resolve_commit_sha(),
         generated_by_user=os.environ.get("DOMINO_STARTING_USERNAME") or "unknown",
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        generator_version=_resolve_generator_version(),
+        template_version=template_version,
+        run_environment=_resolve_run_environment(),
     )
+
+
+def _extract_template_version(spec: Any) -> str:
+    if isinstance(spec, Mapping):
+        value = spec.get("template_version")
+    else:
+        value = getattr(spec, "template_version", None)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise ValueError(
+            "spec is missing required 'template_version' frontmatter field; "
+            "every template spec must declare template_version"
+        )
+    return str(value)
 
 
 def _resolve_commit_sha() -> Optional[str]:
@@ -91,13 +145,43 @@ def _resolve_commit_sha() -> Optional[str]:
     return os.environ.get("DOMINO_WORKING_DIR_GIT_REF_ID") or None
 
 
+def _resolve_generator_version() -> str:
+    """Read ``version`` from the package's pyproject.toml. Falls back to 'unknown'."""
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    try:
+        try:
+            import tomllib  # Python 3.11+
+        except ImportError:  # pragma: no cover - 3.10 fallback
+            import tomli as tomllib  # type: ignore
+        with open(pyproject, "rb") as fh:
+            data = tomllib.load(fh)
+        version = data.get("project", {}).get("version")
+        if isinstance(version, str) and version.strip():
+            return version
+    except (OSError, ValueError) as exc:
+        logger.debug("failed to read generator_version from %s: %s", pyproject, exc)
+    except Exception as exc:  # pragma: no cover
+        logger.debug("unexpected error reading generator_version: %s", exc)
+    return "unknown"
+
+
+def _resolve_run_environment() -> dict[str, Optional[str]]:
+    return {
+        "domino_env_id": os.environ.get("DOMINO_ENVIRONMENT_ID"),
+        "domino_run_id": os.environ.get("DOMINO_RUN_ID"),
+        "python_version": (
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Word custom-properties stamping
 # ---------------------------------------------------------------------------
 
 def stamp_word_properties(docx_path: str, record: ProvenanceRecord) -> None:
-    """Inject the 5 MVP fields as Word custom properties into a saved .docx."""
-    properties = record.mvp_properties()
+    """Inject all 8 provenance fields as Word custom properties into a saved .docx."""
+    properties = record.properties()
     custom_xml = _build_custom_xml(properties)
 
     with zipfile.ZipFile(docx_path, "r") as zin:
@@ -188,11 +272,22 @@ CREATE TABLE IF NOT EXISTS provenance (
     commit_sha TEXT,
     generated_by_user TEXT NOT NULL,
     generated_at TEXT NOT NULL,
+    generator_version TEXT,
+    template_version TEXT,
+    run_environment TEXT,
     docx_path TEXT NOT NULL,
     created_ts REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_provenance_bundle ON provenance(bundle_id);
 """
+
+# (column_name, sql_type) pairs that phase-2 adds. Older DBs created before
+# these columns existed are upgraded in place via ALTER TABLE.
+_ADDED_COLUMNS = (
+    ("generator_version", "TEXT"),
+    ("template_version", "TEXT"),
+    ("run_environment", "TEXT"),
+)
 
 
 def default_db_path() -> str:
@@ -203,17 +298,28 @@ def _connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.executescript(_SCHEMA)
+    _migrate_schema(conn)
     return conn
 
 
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(provenance)")}
+    for name, col_type in _ADDED_COLUMNS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE provenance ADD COLUMN {name} {col_type}")
+    conn.commit()
+
+
 def write_provenance_row(db_path: str, record: ProvenanceRecord, docx_path: str) -> None:
+    run_env_json = json.dumps(dict(record.run_environment or {}), sort_keys=True)
     with _connect(db_path) as conn:
         conn.execute(
             """
             INSERT INTO provenance
                 (provenance_id, bundle_id, policy_version_id, commit_sha,
-                 generated_by_user, generated_at, docx_path, created_ts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 generated_by_user, generated_at, generator_version,
+                 template_version, run_environment, docx_path, created_ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.provenance_id,
@@ -222,6 +328,9 @@ def write_provenance_row(db_path: str, record: ProvenanceRecord, docx_path: str)
                 record.commit_sha,
                 record.generated_by_user,
                 record.generated_at,
+                record.generator_version,
+                record.template_version,
+                run_env_json,
                 docx_path,
                 time.time(),
             ),
