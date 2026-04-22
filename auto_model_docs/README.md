@@ -2,6 +2,8 @@
 
 Generate ML model documentation automatically by scanning codebases and MLflow artifacts with LLM-powered analysis. Produces Word documents and Jupyter notebooks with evidence-traced citations back to source code.
 
+> **MRM Portal integration in progress.** This codebase is being folded into the Domino MRM Portal so validators can generate compliant docs directly from a model detail page — bundle context (owner, risk tier, intended use, policy version) threads through the pipeline as a first-class input instead of being LLM-inferred. Standalone Studio deploys as a Domino App are going away; the pipeline continues to run as on-demand Domino Jobs triggered from Portal. For the current plan, read `../IMPLEMENTATION.md` at the repo root. For historical design rationale see `../PRD_v2.md` and the design doc under `~/.gstack/projects/`.
+
 ## How it works
 
 ```
