@@ -386,8 +386,12 @@ def test_metadata_citation_mocked(
 
 @pytest.mark.llm
 @pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY not set; skipping real-LLM eval.",
+    not os.environ.get("ANTHROPIC_API_KEY", "").startswith("sk-ant-"),
+    reason=(
+        "Real ANTHROPIC_API_KEY not set (expected prefix 'sk-ant-'); "
+        "skipping real-LLM eval. CI sets a dummy value for unit tests; "
+        "this test requires a genuine key."
+    ),
 )
 def test_metadata_citation_real_llm(
     mem_store, bundle_context_path, empty_code_root
