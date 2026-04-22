@@ -1,0 +1,124 @@
+# Canonical Model Development Document (MDD) Specification
+# Aligned with SR 11-7 (OCC/Fed model risk guidance) and EU AI Act
+# Article 11 technical documentation requirements for high-risk AI systems.
+# Generated docs are draft artifacts intended for validator and compliance review.
+
+template_version: "1.0"
+template_id: "mdd"
+template_label: "Model Development Document"
+
+title: "Model Development Document"
+authors: "Model Development Team"
+citation_style: "numeric"
+
+sections:
+  - Executive Summary
+  - Model Overview
+  - Intended Use and Business Purpose
+  - Regulatory Context and Risk Tier
+  - Data Sources and Preparation
+  - Methodology and Model Design
+  - "Developmental Testing and Performance: per_model"
+  - Limitations, Assumptions, and Known Weaknesses
+  - Implementation and Operational Controls
+  - Ongoing Monitoring Plan
+  - Governance, Roles, and Approvals
+  - Appendix
+
+hints:
+  "Executive Summary": >
+    One-page synopsis for senior stakeholders and validators. State the model's
+    purpose, the business problem it addresses, the population it serves,
+    headline performance metrics, key limitations, and the risk tier assigned
+    under the institution's model risk framework. Avoid technical jargon;
+    the audience includes Risk Committee members who may not be modelers.
+
+  "Model Overview": >
+    Describe the model type (e.g., logistic regression, gradient-boosted trees,
+    neural network), target variable, and prediction horizon. Identify the
+    model owner, developer, and first-line business sponsor. Reference the
+    governance bundle, policy version, and any prior model versions being
+    replaced. State whether this is a new build, a periodic rebuild, or a
+    material change, per SR 11-7's change-management expectations.
+
+  "Intended Use and Business Purpose": >
+    Define the specific decision the model supports (approve/decline,
+    pricing tier, fraud score, risk rating) and the population it is
+    approved to score. Enumerate excluded populations, non-supported
+    products or jurisdictions, and any use cases the model is NOT
+    authorized for. Per EU AI Act Article 13, explicitly describe foreseeable
+    misuse. Tie intended use to the evidence in the governance bundle.
+
+  "Regulatory Context and Risk Tier": >
+    State the model's risk tier (e.g., High / Medium / Low) and the criteria
+    that placed it there. Cite applicable regulations (SR 11-7, OCC 2011-12,
+    EU AI Act for EU deployments, local supervisory expectations). Identify
+    the lifecycle stage (development, pre-deployment validation, production)
+    and the downstream obligations each tier triggers (validation frequency,
+    monitoring cadence, governance attestations).
+
+  "Data Sources and Preparation": >
+    Enumerate data sources (internal systems, vendor feeds, external bureaus),
+    refresh cadence, and governance classifications (PII, confidential).
+    Describe the development, validation, and out-of-time test populations
+    with sample sizes, time windows, and any exclusions. Document feature
+    engineering, imputation, encoding, and sampling decisions with the
+    rationale for each. Flag representativeness concerns relative to the
+    intended-use population — a central SR 11-7 requirement and EU AI Act
+    Article 10 obligation.
+
+  "Methodology and Model Design": >
+    Justify the algorithm choice against simpler alternatives considered
+    (conceptual soundness per SR 11-7). Document hyperparameter selection,
+    objective function, regularization, and any class-weighting. Describe
+    expert judgment or constraints baked into the model (monotonicity,
+    feature exclusions, capping). For black-box methods, describe the
+    interpretability approach (SHAP, permutation importance, surrogate
+    models) used to support validator review.
+
+  "Developmental Testing and Performance": >
+    Present training, validation, and out-of-time holdout performance using
+    the metrics relevant to the task (AUC, KS, Gini, Brier, RMSE, MAPE,
+    accuracy, precision/recall, calibration). Break out performance by
+    material segments (product, channel, geography, protected class where
+    permitted). Compare against any champion model or benchmark. Discuss
+    stability across time and segments — overfitting, segment bias, and
+    population drift are the typical validator concerns.
+
+  "Limitations, Assumptions, and Known Weaknesses": >
+    Enumerate the assumptions required for the model to remain valid
+    (stationarity, data availability, economic regime). List known weak
+    segments, edge cases, and scenarios where model outputs should be
+    overridden or escalated. Describe sensitivity to input perturbations
+    and any stress-test results. Per EU AI Act, document accuracy limits
+    and foreseeable failure modes so deployers can exercise human oversight.
+
+  "Implementation and Operational Controls": >
+    Describe the production architecture: scoring pipeline, refresh cadence,
+    latency, failure modes, and rollback plan. Document input validation,
+    output range checks, and override procedures. Identify change controls
+    (who can deploy a new version, what approvals gate it) and access
+    controls on the scoring endpoint. Cover cybersecurity and robustness
+    measures required under EU AI Act Article 15 for high-risk systems.
+
+  "Ongoing Monitoring Plan": >
+    Specify the metrics monitored post-deployment (performance, calibration,
+    stability, data quality, fairness where applicable), their thresholds,
+    alert routing, and review cadence. Identify the party responsible for
+    each monitoring activity and the escalation path when thresholds breach.
+    Reference the companion Monitoring Report template that operationalizes
+    this plan. Per SR 11-7, monitoring must be proportionate to model risk.
+
+  "Governance, Roles, and Approvals": >
+    List the roles involved (developer, owner, independent validator,
+    approver, business sponsor) with named individuals where possible.
+    Summarize the approvals already obtained and those still pending.
+    Reference the governance policy version that governed this development
+    and cite the bundle evidence supporting compliance. Include the review
+    history and the next scheduled model review date.
+
+  "Appendix": >
+    Include supplementary material that supports the main narrative: full
+    hyperparameter grids, feature dictionaries, extended performance tables,
+    code file inventories, and a glossary of acronyms. Reference exhibits
+    by number rather than reproducing large tables inline in the main body.

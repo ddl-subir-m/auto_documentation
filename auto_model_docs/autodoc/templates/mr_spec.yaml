@@ -1,0 +1,108 @@
+# Canonical Monitoring Report (MR) Specification
+# Periodic ongoing-monitoring report satisfying SR 11-7's third pillar
+# (ongoing monitoring) and EU AI Act Article 61 post-market monitoring
+# obligations for high-risk AI systems.
+
+template_version: "1.0"
+template_id: "mr"
+template_label: "Monitoring Report"
+
+title: "Model Monitoring Report"
+authors: "Model Risk Monitoring Team"
+citation_style: "numeric"
+
+sections:
+  - Executive Summary
+  - Monitoring Period and Scope
+  - "Performance Trend: per_model"
+  - Population Stability and Data Quality
+  - Input and Output Drift Analysis
+  - Calibration and Fairness Checks
+  - Threshold Breaches and Alerts
+  - Operational Stability and Usage
+  - Findings and Recommended Actions
+  - Next Review and Sign-Off
+  - Appendix
+
+hints:
+  "Executive Summary": >
+    One-paragraph health summary for the Model Risk Committee: is the
+    model performing within approved tolerances, are there any breaches
+    warranting action, and is the recommended posture to continue, watch,
+    or escalate? Call out any material change from the prior monitoring
+    period. Keep it decision-oriented — the audience is approving, not
+    debugging.
+
+  "Monitoring Period and Scope": >
+    State the reporting window (start and end dates), the populations
+    and products covered, and any segments explicitly excluded (e.g.,
+    pilot geographies, decommissioned channels). Reference the model
+    version in production during the window and any mid-period changes
+    (retrains, threshold adjustments, patch releases) that affect
+    interpretation of the metrics.
+
+  "Performance Trend": >
+    Present the headline performance metrics over time (AUC, KS, Gini,
+    Brier, MAPE, error rate — whatever the approved monitoring plan
+    specifies). Compare against the development baseline and the prior
+    monitoring period. Highlight any statistically or operationally
+    significant drift. Use visualizations where they aid the trend
+    narrative rather than packing the section with tables.
+
+  "Population Stability and Data Quality": >
+    Report population stability index (PSI) or an equivalent measure at
+    the score and feature level. Summarize data-quality metrics:
+    missingness rates, range violations, type mismatches, upstream feed
+    failures. Highlight features whose distributions have shifted
+    materially from the development sample — a leading indicator under
+    SR 11-7's ongoing monitoring guidance.
+
+  "Input and Output Drift Analysis": >
+    Decompose drift into input drift (covariate shift), concept drift
+    (target-feature relationship change), and output drift (score
+    distribution change). Identify the top contributing features and
+    whether drift is driven by genuine population change, data pipeline
+    issues, or seasonal effects. Link each drift signal to the
+    corresponding threshold and whether it breached.
+
+  "Calibration and Fairness Checks": >
+    Report calibration (predicted probability vs. observed outcome rates
+    across score bins) and calibration drift. Where in scope, summarize
+    fairness metrics across protected or policy-defined segments
+    (disparate impact, equal-opportunity gaps). EU AI Act Article 10(2)(f)
+    requires examination of possible biases throughout the system's
+    lifetime — not just at development.
+
+  "Threshold Breaches and Alerts": >
+    List each monitoring threshold breach during the period with: metric,
+    threshold, observed value, duration, root-cause hypothesis, and the
+    action taken (or why no action was warranted). Report alert volume and
+    any suppressed or deferred alerts. Unactioned chronic breaches are a
+    governance red flag.
+
+  "Operational Stability and Usage": >
+    Report scoring volume, latency distribution, error rate, upstream and
+    downstream incident impact, and any override or manual-intervention
+    activity. Flag operational issues that could bias the performance
+    metrics above (e.g., if a data feed failure caused default-valued
+    predictions during part of the window).
+
+  "Findings and Recommended Actions": >
+    Enumerate concrete findings with a severity rating, owner, and due
+    date. Recommended actions range from "continue monitoring" to
+    "retrain now" to "escalate to validation for re-review." Each action
+    must be traceable to evidence in the preceding sections — no
+    recommendations without stated basis.
+
+  "Next Review and Sign-Off": >
+    State the next monitoring review date, any trigger events that would
+    pull the review forward (retrain, material breach, regulatory
+    request), and the sign-off chain for this report (monitoring lead,
+    model owner, validation if required). Include the final monitoring
+    disposition: Green / Amber / Red or the institution's equivalent.
+
+  "Appendix": >
+    Include full metric tables by segment and period, detailed PSI and
+    drift decomposition tables, and any supporting charts or raw data
+    references. Keep the main body decision-oriented and push detailed
+    evidence here.
