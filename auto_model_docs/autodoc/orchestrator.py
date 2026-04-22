@@ -68,6 +68,7 @@ class Orchestrator:
         model_names: Optional[List[str]] = None,
         latest_only: bool = False,
         disable_project_filtering: bool = False,
+        bundle_context: Optional[Dict[str, Any]] = None,
     ):
         """Initialize the orchestrator.
 
@@ -94,6 +95,8 @@ class Orchestrator:
         self.output_dir = output_dir
         self.generate_notebook = generate_notebook
         self.notebook_path = notebook_path
+        # Shape 1 bundle context from Portal; consumed in U6.
+        self.bundle_context = bundle_context
 
         # Detect language before creating sanitizer and scanner
         detected_profile, detected_count = detect_language(code_root)
