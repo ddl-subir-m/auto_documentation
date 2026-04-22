@@ -4,11 +4,31 @@ This module contains all prompts used throughout the system,
 making it easy to review, update, and maintain them in one place.
 """
 
+import json
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from autodoc.core.models import LanguageProfile
     from autodoc.scanning.file_card import FileCard
+
+
+def format_bundle_context(bundle_context: Optional[Dict[str, Any]]) -> str:
+    """Format a governance bundle context dict as a prompt section.
+
+    Returns an empty string when bundle_context is None or empty so that
+    prompts are byte-identical to the spec-only flow.
+    """
+    if not bundle_context:
+        return ""
+    try:
+        payload = json.dumps(bundle_context, indent=2, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        payload = str(bundle_context)
+    return (
+        "\n\n## Governance Bundle Context "
+        "(factual grounding from the governance bundle — cite verbatim where relevant)\n"
+        f"{payload}"
+    )
 
 
 # =============================================================================
@@ -399,6 +419,7 @@ def build_narrative_prompt(
     artifact_data: str = "",
     code_evidence: str = "",
     mlflow_evidence: str = "",
+    bundle_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build prompt for generating narrative content.
 
@@ -424,6 +445,7 @@ def build_narrative_prompt(
     artifact_section = f"\n\n## Available Artifact Data\n{artifact_data}" if artifact_data else ""
     code_section = f"\n\n{code_evidence}" if code_evidence else ""
     mlflow_section = f"\n\n{mlflow_evidence}" if mlflow_evidence else ""
+    bundle_section = format_bundle_context(bundle_context)
 
     return f"""Write professional documentation content.
 
@@ -438,7 +460,7 @@ def build_narrative_prompt(
 - Data Sources: {data_sources}{model_line}{model_info}
 
 ## Additional Context
-{insights or "No additional insights available."}{artifact_section}{code_section}{mlflow_section}
+{insights or "No additional insights available."}{artifact_section}{code_section}{mlflow_section}{bundle_section}
 
 ## Instructions
 - Write 2-4 paragraphs of clear, professional prose
@@ -468,6 +490,7 @@ def build_table_prompt(
     artifact_data: str = "",
     code_evidence: str = "",
     mlflow_evidence: str = "",
+    bundle_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build prompt for generating table content.
 
@@ -487,6 +510,7 @@ def build_table_prompt(
     artifact_section = f"\n\n## Available Artifact Data\n{artifact_data}" if artifact_data else ""
     code_section = f"\n\n{code_evidence}" if code_evidence else ""
     mlflow_section = f"\n\n{mlflow_evidence}" if mlflow_evidence else ""
+    bundle_section = format_bundle_context(bundle_context)
 
     return f"""Generate a data table for documentation.
 
@@ -498,7 +522,7 @@ def build_table_prompt(
 - Model Classes: {model_classes}
 - Transformations: {transformations}
 - Hyperparameters: {hyperparameters}{metrics_info}{artifact_section}
-{code_section}{mlflow_section}
+{code_section}{mlflow_section}{bundle_section}
 
 CRITICAL INSTRUCTIONS:
 - ONLY include metrics and values that are explicitly provided in the "Available Context" above
@@ -543,6 +567,7 @@ def build_chart_prompt(
     artifact_data: str = "",
     code_evidence: str = "",
     mlflow_evidence: str = "",
+    bundle_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build prompt for generating chart data.
 
@@ -561,6 +586,7 @@ def build_chart_prompt(
     artifact_section = f"\n\n## Available Artifact Data\n{artifact_data}" if artifact_data else ""
     code_section = f"\n\n{code_evidence}" if code_evidence else ""
     mlflow_section = f"\n\n{mlflow_evidence}" if mlflow_evidence else ""
+    bundle_section = format_bundle_context(bundle_context)
 
     return f"""Generate data for a {chart_type} chart.
 
@@ -570,7 +596,7 @@ def build_chart_prompt(
 ## Context
 - Model Type: {model_classes}
 - ML Task: {ml_task_type}
-{code_section}{mlflow_section}
+{code_section}{mlflow_section}{bundle_section}
 
 ## Instructions for Chart Generation:
 1. If metrics are provided above (e.g., "roc_auc: 0.6903", "precision: 0.2399"), use them as:
@@ -621,6 +647,7 @@ def build_list_prompt(
     features: str,
     code_evidence: str = "",
     mlflow_evidence: str = "",
+    bundle_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build prompt for generating list content.
 
@@ -634,6 +661,8 @@ def build_list_prompt(
     Returns:
         Formatted prompt string.
     """
+    bundle_section = format_bundle_context(bundle_context)
+
     return f"""Generate a list for documentation.
 
 ## Purpose: {purpose}
@@ -644,7 +673,7 @@ def build_list_prompt(
 - ML Task: {ml_task_type}
 - Features: {features}
 {code_evidence}
-{mlflow_evidence}
+{mlflow_evidence}{bundle_section}
 
 CRITICAL: Only include information that is explicitly provided in the context above.
 Do NOT fabricate metrics, statistics, or claim methodologies that are not mentioned.

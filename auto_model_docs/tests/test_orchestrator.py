@@ -722,6 +722,173 @@ class TestSemaphoreInit:
 # ---------------------------------------------------------------------------
 
 
+class TestBundleContextThreading:
+    """bundle_context kwarg threads from generate() through PLAN and GENERATE."""
+
+    @patch("autodoc.orchestrator.Orchestrator._save_results_cache")
+    @patch("autodoc.orchestrator.ArtifactScanner")
+    @patch("autodoc.orchestrator.CodeScanner")
+    @patch("autodoc.orchestrator.DocumentBuilder")
+    @patch("autodoc.orchestrator.SectionPlanner")
+    @patch("autodoc.orchestrator.ContentGenerator")
+    @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
+    def test_no_bundle_context_leaves_generation_context_none(
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as,
+        mock_save_cache,
+    ):
+        """Backward compat: omitting bundle_context leaves it None on every GenerationContext."""
+        orch = Orchestrator(
+            llm=_make_mock_llm(),
+            sanitizer=_make_mock_sanitizer(),
+            code_root=Path("/tmp"),
+        )
+        orch.planner.slice_for_section = lambda section, bc: bc
+        orch.code_scanner.scan = AsyncMock(return_value=CodeContext())
+        orch.artifact_scanner.scan = AsyncMock(return_value=ArtifactContext())
+
+        captured_plan_contexts = []
+
+        async def capture_plan(section, context):
+            captured_plan_contexts.append(context)
+            return SectionPlan(
+                number="1", name=section.name, title=section.name,
+                content_blocks=[ContentBlock(type=ContentType.NARRATIVE, purpose="d")],
+            )
+
+        orch.planner.plan_section = capture_plan
+
+        captured_gen_contexts = []
+
+        async def capture_gen(block, context):
+            captured_gen_contexts.append(context)
+            return GeneratedContent(block_type=ContentType.NARRATIVE, content="t")
+
+        orch.generator.generate = capture_gen
+        orch.builder.build = AsyncMock(return_value=Path("/tmp/out.docx"))
+
+        asyncio.get_event_loop().run_until_complete(orch.generate(_make_spec()))
+
+        assert captured_plan_contexts, "planner.plan_section was never called"
+        assert captured_gen_contexts, "generator.generate was never called"
+        for ctx in captured_plan_contexts + captured_gen_contexts:
+            assert ctx.bundle_context is None
+
+    @patch("autodoc.orchestrator.Orchestrator._save_results_cache")
+    @patch("autodoc.orchestrator.ArtifactScanner")
+    @patch("autodoc.orchestrator.CodeScanner")
+    @patch("autodoc.orchestrator.DocumentBuilder")
+    @patch("autodoc.orchestrator.SectionPlanner")
+    @patch("autodoc.orchestrator.ContentGenerator")
+    @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
+    def test_bundle_context_reaches_planner_and_generator(
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as,
+        mock_save_cache,
+    ):
+        bundle_ctx = {
+            "bundle_id": "b-1",
+            "policy_version_id": "p-1",
+            "bundle": {"owner": "Alice Chen", "risk_tier": "High",
+                       "intended_use": "Credit risk scoring for consumer loans, US market."},
+            "policy_def": {"version": "1.0"},
+        }
+
+        orch = Orchestrator(
+            llm=_make_mock_llm(),
+            sanitizer=_make_mock_sanitizer(),
+            code_root=Path("/tmp"),
+        )
+        orch.planner.slice_for_section = lambda section, bc: bc
+        orch.code_scanner.scan = AsyncMock(return_value=CodeContext())
+        orch.artifact_scanner.scan = AsyncMock(return_value=ArtifactContext())
+
+        plan_contexts = []
+
+        async def capture_plan(section, context):
+            plan_contexts.append(context)
+            return SectionPlan(
+                number="1", name=section.name, title=section.name,
+                content_blocks=[ContentBlock(type=ContentType.NARRATIVE, purpose="d")],
+            )
+
+        orch.planner.plan_section = capture_plan
+
+        gen_contexts = []
+
+        async def capture_gen(block, context):
+            gen_contexts.append(context)
+            return GeneratedContent(block_type=ContentType.NARRATIVE, content="t")
+
+        orch.generator.generate = capture_gen
+        orch.builder.build = AsyncMock(return_value=Path("/tmp/out.docx"))
+
+        spec = _make_spec(sections=[SectionSpec(name="Purpose"), SectionSpec(name="Data")])
+        asyncio.get_event_loop().run_until_complete(
+            orch.generate(spec, bundle_context=bundle_ctx)
+        )
+
+        # Every section-planning call gets the full bundle_context
+        assert len(plan_contexts) == 2
+        for ctx in plan_contexts:
+            assert ctx.bundle_context == bundle_ctx
+
+        # Every content-generation call gets the same bundle_context
+        assert len(gen_contexts) == 2
+        for ctx in gen_contexts:
+            assert ctx.bundle_context == bundle_ctx
+
+    @patch("autodoc.orchestrator.Orchestrator._save_results_cache")
+    @patch("autodoc.orchestrator.ArtifactScanner")
+    @patch("autodoc.orchestrator.CodeScanner")
+    @patch("autodoc.orchestrator.DocumentBuilder")
+    @patch("autodoc.orchestrator.SectionPlanner")
+    @patch("autodoc.orchestrator.ContentGenerator")
+    @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
+    def test_scan_output_identical_with_and_without_bundle_context(
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as,
+        mock_save_cache,
+    ):
+        """SCAN's code_ctx/artifact_ctx are unchanged by presence of bundle_context."""
+        code_ctx = CodeContext(model_classes=["XGBClassifier"])
+        artifact_ctx = ArtifactContext()
+
+        orch = Orchestrator(
+            llm=_make_mock_llm(),
+            sanitizer=_make_mock_sanitizer(),
+            code_root=Path("/tmp"),
+        )
+        orch.planner.slice_for_section = lambda section, bc: bc
+        orch.code_scanner.scan = AsyncMock(return_value=code_ctx)
+        orch.artifact_scanner.scan = AsyncMock(return_value=artifact_ctx)
+
+        captured = {"plan": [], "gen": []}
+
+        async def capture_plan(section, context):
+            captured["plan"].append((context.code_context, context.artifact_context))
+            return SectionPlan(
+                number="1", name=section.name, title=section.name,
+                content_blocks=[ContentBlock(type=ContentType.NARRATIVE, purpose="d")],
+            )
+
+        async def capture_gen(block, context):
+            captured["gen"].append((context.code_context, context.artifact_context))
+            return GeneratedContent(block_type=ContentType.NARRATIVE, content="t")
+
+        orch.planner.plan_section = capture_plan
+        orch.generator.generate = capture_gen
+        orch.builder.build = AsyncMock(return_value=Path("/tmp/out.docx"))
+
+        asyncio.get_event_loop().run_until_complete(orch.generate(_make_spec()))
+        asyncio.get_event_loop().run_until_complete(
+            orch.generate(_make_spec(), bundle_context={"bundle_id": "b", "policy_version_id": "p",
+                                                         "bundle": {}, "policy_def": {}})
+        )
+
+        # Same code/artifact refs threaded through both runs
+        for code_obj, artifact_obj in captured["plan"] + captured["gen"]:
+            assert code_obj is code_ctx
+            assert artifact_obj is artifact_ctx
+
+
 class TestCacheSpecFields:
     """DocumentSpec fields survive the cache round-trip."""
 

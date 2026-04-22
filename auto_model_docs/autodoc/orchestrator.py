@@ -166,6 +166,7 @@ class Orchestrator:
         spec: DocumentSpec,
         on_progress: Optional[ProgressCallback] = None,
         on_status: Optional[StatusCallback] = None,
+        bundle_context: Optional[Dict[str, Any]] = None,
     ) -> Path:
         """Execute the full document generation pipeline.
 
@@ -173,6 +174,11 @@ class Orchestrator:
             spec: Document specification.
             on_progress: Optional callback for progress updates.
                         Called with (phase_name, progress_fraction).
+            bundle_context: Optional governance bundle facts loaded by
+                autodoc.bundle_context.load_context. When provided, threaded
+                through SCAN/PLAN/GENERATE as factual grounding for LLM
+                prompts. When None, behavior is identical to the spec-only
+                pipeline (no prompt changes, no new inputs).
 
         Returns:
             Path to the generated Word document.
@@ -247,7 +253,9 @@ class Orchestrator:
         if on_progress:
             on_progress("Planning", 0.0)
 
-        plans = await self._plan_all_sections(spec, code_ctx, artifact_ctx, on_progress)
+        plans = await self._plan_all_sections(
+            spec, code_ctx, artifact_ctx, on_progress, bundle_context=bundle_context
+        )
 
         if on_progress:
             on_progress("Planning", 1.0)
@@ -257,7 +265,7 @@ class Orchestrator:
             on_progress("Generating", 0.0)
 
         results = await self._generate_all_content(
-            plans, code_ctx, artifact_ctx, on_progress
+            plans, code_ctx, artifact_ctx, on_progress, bundle_context=bundle_context
         )
 
         if on_progress:
@@ -489,13 +497,19 @@ class Orchestrator:
         code_ctx: CodeContext,
         artifact_ctx: ArtifactContext,
         on_progress: Optional[ProgressCallback] = None,
+        bundle_context: Optional[Dict[str, Any]] = None,
     ) -> List[SectionPlan]:
         """Plan all sections in the document."""
         # Build list of (section, context, section_number) tuples for all planning tasks
         planning_tasks: List[tuple[SectionSpec, GenerationContext, str]] = []
         section_num = 1
 
+        # Per-section slicing of bundle_context is a future refinement; for now
+        # the planner hands the full dict to every section (see SectionPlanner).
         for section in spec.sections:
+            section_bundle_ctx = self.planner.slice_for_section(
+                section, bundle_context
+            )
             if section.per_model:
                 models = artifact_ctx.models or []
 
@@ -506,6 +520,7 @@ class Orchestrator:
                         artifact_context=artifact_ctx,
                         section_name=section.name,
                         hint=spec.hints.get(section.name),
+                        bundle_context=section_bundle_ctx,
                     )
                     planning_tasks.append((section, context, str(section_num)))
                 else:
@@ -517,6 +532,7 @@ class Orchestrator:
                             model_name=model.name,
                             model_run_id=model.run_id,
                             hint=spec.hints.get(section.name),
+                            bundle_context=section_bundle_ctx,
                         )
                         planning_tasks.append((section, context, f"{section_num}.{j}"))
             else:
@@ -526,6 +542,7 @@ class Orchestrator:
                     artifact_context=artifact_ctx,
                     section_name=section.name,
                     hint=spec.hints.get(section.name),
+                    bundle_context=section_bundle_ctx,
                 )
                 planning_tasks.append((section, context, str(section_num)))
 
@@ -578,6 +595,7 @@ class Orchestrator:
         code_ctx: CodeContext,
         artifact_ctx: ArtifactContext,
         on_progress: Optional[ProgressCallback] = None,
+        bundle_context: Optional[Dict[str, Any]] = None,
     ) -> List[SectionResult]:
         """Generate content for all sections in parallel."""
 
@@ -588,12 +606,19 @@ class Orchestrator:
             across all sections compete for the same worker pool, maximising
             LLM call concurrency.
             """
+            # Reuse the planner's slice so planning and generation see the
+            # same bundle-context view per section.
+            section_spec = SectionSpec(name=plan.name)
+            section_bundle_ctx = self.planner.slice_for_section(
+                section_spec, bundle_context
+            )
             context = GenerationContext(
                 code_context=code_ctx,
                 artifact_context=artifact_ctx,
                 section_name=plan.name,
                 model_name=plan.model_name,
                 model_run_id=plan.model_run_id,
+                bundle_context=section_bundle_ctx,
             )
 
             async def _gen_block(block):

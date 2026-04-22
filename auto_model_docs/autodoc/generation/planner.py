@@ -1,6 +1,8 @@
 """LLM-based section planner for document content."""
 
 import logging
+from typing import Any, Dict, Optional
+
 from autodoc.core.models import (
     ContentBlock,
     ContentType,
@@ -36,6 +38,20 @@ class SectionPlanner:
         """
         self.llm = llm
         self.sanitizer = sanitizer
+
+    def slice_for_section(
+        self,
+        section: SectionSpec,
+        bundle_context: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Return the bundle-context slice relevant to a section.
+
+        Minimal implementation: returns the full bundle_context dict for every
+        section. Per-section slicing (e.g. routing 'intended_use' only to the
+        Purpose section) is a future refinement; the grounding content is small
+        enough that sending it to every section is acceptable for MVP.
+        """
+        return bundle_context
 
     async def plan_section(
         self,
