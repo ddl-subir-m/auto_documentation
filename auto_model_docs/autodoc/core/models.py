@@ -459,6 +459,10 @@ class GenerationContext:
     model_run_id: Optional[str] = None
     hint: Optional[str] = None
     language: str = "python"
+    # Governance bundle facts (bundle_id, policy_version_id, bundle, policy_def)
+    # loaded by autodoc.bundle_context.load_context. None when running via the
+    # spec-only CLI path.
+    bundle_context: Optional[Dict[str, Any]] = None
 
 
 # =============================================================================

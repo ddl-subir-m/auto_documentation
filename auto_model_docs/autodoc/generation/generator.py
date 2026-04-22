@@ -157,6 +157,7 @@ class ContentGenerator:
             artifact_data=artifact_data_str,
             code_evidence=code_evidence,
             mlflow_evidence=mlflow_evidence,
+            bundle_context=context.bundle_context,
         )
 
         response = await self.llm.complete(
@@ -240,6 +241,7 @@ class ContentGenerator:
             artifact_data=artifact_data_str,
             code_evidence=code_evidence,
             mlflow_evidence=mlflow_evidence,
+            bundle_context=context.bundle_context,
         )
 
         result = await self.llm.complete_json(
@@ -364,6 +366,7 @@ class ContentGenerator:
             artifact_data=artifact_data_str,
             code_evidence=code_evidence,
             mlflow_evidence=mlflow_evidence,
+            bundle_context=context.bundle_context,
         )
 
         data = await self.llm.complete_json(
@@ -700,6 +703,7 @@ class ContentGenerator:
             features=", ".join(context.code_context.features[:10]),
             code_evidence=code_evidence,
             mlflow_evidence=mlflow_evidence,
+            bundle_context=context.bundle_context,
         )
 
         result = await self.llm.complete_json(
