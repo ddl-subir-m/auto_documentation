@@ -1,6 +1,6 @@
 # Implementation Plan — MRM Portal × autodoc integration
 
-> Last updated: 2026-04-22
+> Last updated: 2026-04-22 (Phase A + B shipped; Phase C blocked on Portal write access)
 > Source of truth for **what to build and in what order**.
 > For product rationale see `PRD_v2.md`. For architecture decisions see the design doc at `~/.gstack/projects/ddl-subir-m-auto_documentation/subirmansukhani-feature-mrm-portal-integration-design-20260422-111457.md`. This file is the implementer's roadmap.
 
@@ -34,6 +34,33 @@ A validator opens a model page in the MRM Portal, clicks **Generate documentatio
 | Responsive | Desktop-first. Tablet best-effort. Mobile banner ("desktop required"). |
 | Provenance | 5 MVP fields: `bundle_id`, `policy_version_id`, `commit_sha`, `generated_by_user`, `generated_at`. Phase-2 tier per design doc. |
 | Attach-back | Create-then-delete-by-ID (per governance swagger). `prior_attachment_id` tracked in Portal SQLite. |
+
+## Status summary
+
+| Unit | Phase | Status | Landed in |
+|---|---|---|---|
+| U2 — Canonical doc-spec templates | A | ✅ Shipped | PR #6 (`5e54091`) |
+| U3 — `bundle_context.py` loader | A | ✅ Shipped | PR #5 (`c1e9773`) |
+| U4 — Policy-to-spec derivation | A | ⏭️ Deferred → U17 | — |
+| U5 — `main.py` CLI flags | B | ✅ Shipped | PR #9 (`395e4c9`) |
+| U6 — Orchestrator bundle-context plumbing | B | ✅ Shipped | PR #8 (`ef65979`) |
+| U7 — Provenance stamping | B | ✅ Shipped | PR #7 (`426a668`) |
+| U8 — LLM metadata-citation eval (gates M1) | B | ✅ Shipped | PR #10 (`a78e934`) + skipif fix PR #11 (`7a96bc4`) |
+| U9 — Portal attachment wrapper | C | ⏸️ Blocked on Portal write access | — |
+| U10 — Portal autodoc blueprint | C | ⏸️ Blocked on U9 + Portal access | — |
+| U10.5 — Cleanup cron | C | ⏸️ Blocked on U10 | — |
+| U11 — Portal soft lock | C | ⏸️ Blocked on Portal write access | — |
+| U12 — Model detail UI | C | ⏸️ Blocked on U10 + U11 | — |
+| U13 — Playwright E2E | C | ⏸️ Blocked on U12 | — |
+| U14 — `MRM-Portal/DESIGN.md` | D | ⏸️ Not started | — |
+| U15 — Studio retirement | D | ⏸️ Not started (post-MVP soak) | — |
+| U16 — F4.1 inline spec editor | D | ⏸️ Not started (flagged) | — |
+| U17 — Policy-to-spec derivation | D | ⏸️ Not started (post-MVP) | — |
+| U18 — Gap findings + consistency checker | D | ⏸️ Not started (flagged) | — |
+
+**Infra shipped:** CI workflow (`.github/workflows/ci.yml`) + auto-merge on green (`.github/workflows/auto-merge.yml`, `workflow_run`-gated after the `gh pr merge --auto` silent-fallback bug in PR #12 / `fc240c7`). Target branch is `feature/mrm-portal-integration`; master stays human-review-only.
+
+**Next unblock:** Write access to `domino-field/MRM-Portal` (pinged Nick Goble). Once granted, create `feature/autodoc-integration` on Portal and start Phase C.
 
 ## The sequence
 
