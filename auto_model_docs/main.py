@@ -20,6 +20,7 @@ from rich.progress import (
 # Add the parent directory to path for local development
 sys.path.insert(0, str(Path(__file__).parent))
 
+from autodoc.bundle_context import delete_context_file, load_context
 from autodoc.core.config import Settings
 from autodoc.core.models import DocumentSpec
 from autodoc.llm import LLMClient
@@ -148,6 +149,24 @@ console = Console()
     is_flag=True,
     help="Disable automatic Domino project filtering (scan all projects)",
 )
+@click.option(
+    "--bundle-id",
+    default=None,
+    type=str,
+    help="Governance bundle ID (Shape 1 Portal integration; use with --policy-version-id and --context-file)",
+)
+@click.option(
+    "--policy-version-id",
+    default=None,
+    type=str,
+    help="Governance policy version ID (Shape 1 Portal integration; use with --bundle-id and --context-file)",
+)
+@click.option(
+    "--context-file",
+    default=None,
+    type=click.Path(),
+    help="Path to bundle context JSON file written by Portal (Shape 1 Portal integration; use with --bundle-id and --policy-version-id)",
+)
 def main(
     spec: str,
     code_root: str | None,
@@ -169,6 +188,9 @@ def main(
     models: str | None,
     latest_only: bool,
     disable_project_filtering: bool,
+    bundle_id: str | None,
+    policy_version_id: str | None,
+    context_file: str | None,
 ) -> None:
     """Generate model documentation from ML codebases.
 
@@ -187,7 +209,28 @@ def main(
 
     For full configuration options, see the Settings class in autodoc/core/config.py
     """
+    # Validate Shape 1 context flags: all three must appear together or none.
+    context_flags = {
+        "--bundle-id": bundle_id,
+        "--policy-version-id": policy_version_id,
+        "--context-file": context_file,
+    }
+    provided = [name for name, val in context_flags.items() if val]
+    if provided and len(provided) < len(context_flags):
+        missing = [name for name, val in context_flags.items() if not val]
+        console.print(
+            "[bold red]Error:[/] --bundle-id, --policy-version-id, and "
+            "--context-file must be used together "
+            f"(provided: {', '.join(provided)}; missing: {', '.join(missing)})",
+            style="red",
+        )
+        raise SystemExit(2)
+
+    bundle_context: dict | None = None
     try:
+        if context_file:
+            bundle_context = load_context(context_file)
+
         # Configure logging based on verbosity
         log_level = logging.INFO if verbose else logging.WARNING
         logging.basicConfig(
@@ -321,6 +364,7 @@ def main(
             model_names=model_names,
             latest_only=latest_only,
             disable_project_filtering=disable_project_filtering,
+            bundle_context=bundle_context,
         )
 
         # Run generation with progress
@@ -365,6 +409,9 @@ def main(
         if verbose:
             console.print_exception()
         sys.exit(1)
+    finally:
+        if context_file:
+            delete_context_file(context_file)
 
 
 def _regenerate_notebook_from_cache(
