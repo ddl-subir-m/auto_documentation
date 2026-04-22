@@ -1,0 +1,39 @@
+name: Auto-merge
+
+# Enables GitHub's auto-merge feature on PRs targeting the integration branch.
+# GitHub holds the merge until branch protection requirements (CI green) are
+# satisfied, then squash-merges.
+#
+# Target branch: feature/mrm-portal-integration (NOT master — this is an
+# integration branch. Code lands here, gets reviewed in bulk later, then goes
+# to master as one big PR or a series of smaller ones under human review.)
+#
+# One-time GitHub setup required for this to work:
+#   1. Settings → General → Pull Requests → "Allow auto-merge" = ON
+#   2. Settings → Branches → Add branch ruleset for "feature/mrm-portal-integration":
+#      - Require a pull request before merging = ON, Required approvals = 0
+#      - Require status checks to pass = ON, add "CI / pytest" as required
+#   3. Ensure this workflow and ci.yml are both present on
+#      feature/mrm-portal-integration before opening PRs against it.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+jobs:
+  enable-auto-merge:
+    name: enable squash-merge when CI passes
+    runs-on: ubuntu-latest
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.base.ref == 'feature/mrm-portal-integration'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr merge --auto --squash --repo "${{ github.repository }}" "$PR_NUMBER"
