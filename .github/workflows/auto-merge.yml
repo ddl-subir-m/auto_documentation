@@ -1,39 +1,61 @@
 name: Auto-merge
 
-# Enables GitHub's auto-merge feature on PRs targeting the integration branch.
-# GitHub holds the merge until branch protection requirements (CI green) are
-# satisfied, then squash-merges.
+# Free-plan / private-repo workaround: GitHub's native auto-merge feature is
+# gated behind GitHub Pro / public repos. Instead of using `gh pr merge --auto`
+# (which silently falls back to an immediate merge when the repo doesn't allow
+# auto-merge), we do the gating ourselves:
 #
-# Target branch: feature/mrm-portal-integration (NOT master — this is an
-# integration branch. Code lands here, gets reviewed in bulk later, then goes
-# to master as one big PR or a series of smaller ones under human review.)
+#   1. CI workflow runs on the PR (see ci.yml)
+#   2. This workflow fires AFTER CI completes (workflow_run trigger)
+#   3. If CI conclusion == success AND the run was for a PR AND the PR targets
+#      feature/mrm-portal-integration, squash-merge it.
+#   4. If CI failed, this workflow is a no-op — the PR stays open.
 #
-# One-time GitHub setup required for this to work:
-#   1. Settings → General → Pull Requests → "Allow auto-merge" = ON
-#   2. Settings → Branches → Add branch ruleset for "feature/mrm-portal-integration":
-#      - Require a pull request before merging = ON, Required approvals = 0
-#      - Require status checks to pass = ON, add "CI / pytest" as required
-#   3. Ensure this workflow and ci.yml are both present on
-#      feature/mrm-portal-integration before opening PRs against it.
+# Target branch: feature/mrm-portal-integration (integration branch; master
+# is human-review-only).
 
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 jobs:
-  enable-auto-merge:
-    name: enable squash-merge when CI passes
-    runs-on: ubuntu-latest
+  merge-on-green:
+    # Only act on successful runs that were triggered by a PR event.
     if: >
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.base.ref == 'feature/mrm-portal-integration'
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
       pull-requests: write
+      contents: write
     steps:
-      - name: Enable auto-merge (squash)
+      - name: Find the open PR this run was for
+        id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          gh pr merge --auto --squash --repo "${{ github.repository }}" "$PR_NUMBER"
+          # workflow_run exposes the head branch. Find the open PR with that head.
+          PR=$(gh pr list --repo "${{ github.repository }}" \
+                         --head "$HEAD_BRANCH" \
+                         --state open \
+                         --json number,baseRefName \
+                         --jq '.[] | select(.baseRefName == "feature/mrm-portal-integration") | .number' \
+                         | head -n1)
+          echo "number=$PR" >> "$GITHUB_OUTPUT"
+          if [ -z "$PR" ]; then
+            echo "No open PR found for head branch $HEAD_BRANCH targeting feature/mrm-portal-integration — nothing to merge."
+          else
+            echo "Found PR #$PR for head branch $HEAD_BRANCH."
+          fi
+
+      - name: Squash-merge the PR
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          gh pr merge --squash --delete-branch \
+            --repo "${{ github.repository }}" \
+            "$PR_NUMBER"
