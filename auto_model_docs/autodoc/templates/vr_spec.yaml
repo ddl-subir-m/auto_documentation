@@ -1,0 +1,112 @@
+# Canonical Validation Report (VR) Specification
+# Independent validation report aligned with SR 11-7's three pillars of
+# effective validation: evaluation of conceptual soundness, ongoing monitoring,
+# and outcomes analysis. Also satisfies EU AI Act Articles 9, 10, 13, and 15
+# verification obligations for high-risk AI systems.
+
+template_version: "1.0"
+template_id: "vr"
+template_label: "Validation Report"
+
+title: "Independent Model Validation Report"
+authors: "Model Validation Team"
+citation_style: "numeric"
+
+sections:
+  - Executive Summary and Validation Opinion
+  - Validation Scope and Approach
+  - Conceptual Soundness Review
+  - Data Review
+  - Methodology Review
+  - "Outcomes Analysis and Performance Validation: per_model"
+  - Benchmarking and Alternative Models
+  - Implementation and Control Review
+  - Findings, Ratings, and Remediation
+  - Conclusions and Conditions of Approval
+  - Appendix
+
+hints:
+  "Executive Summary and Validation Opinion": >
+    State the overall validation opinion (e.g., Approved, Approved with
+    Conditions, Not Approved, Requires Rework) and the rationale in
+    non-technical terms suitable for the Model Risk Committee. Summarize
+    the most material findings, any conditions the model owner must meet
+    before or after go-live, and the next required validation. Do not
+    hedge the opinion — validators are expected to take a clear position
+    under SR 11-7.
+
+  "Validation Scope and Approach": >
+    State what was in scope (this model version, specific change events,
+    specific use cases) and what was explicitly out of scope. Describe the
+    validation procedures performed, the effective-challenge philosophy
+    applied, data cuts reviewed, and any limitations of the validation
+    itself (data access, time constraints, version availability).
+    Reference the governance policy and risk tier that determined the
+    depth of review.
+
+  "Conceptual Soundness Review": >
+    Evaluate whether the chosen approach is appropriate for the stated
+    business purpose and the underlying data. Assess the theoretical
+    foundations, key assumptions, and the rationale for rejecting
+    alternative methodologies. This is the first pillar of SR 11-7
+    validation — the validator's judgment on whether the model is fit for
+    purpose independent of how well it performs numerically.
+
+  "Data Review": >
+    Independently assess data sources, quality, lineage, and
+    representativeness relative to the intended-use population. Test for
+    completeness, accuracy, timeliness, and known quality issues. Evaluate
+    the adequacy of development, validation, and out-of-time samples.
+    Flag any use of proxy variables, selection bias, or concept drift that
+    could undermine model validity. This supports EU AI Act Article 10
+    data governance expectations.
+
+  "Methodology Review": >
+    Evaluate the modeling choices: algorithm selection, feature engineering,
+    hyperparameter tuning, regularization, handling of class imbalance, and
+    treatment of missing data. Independently reproduce key steps where
+    feasible. Challenge any subjective overrides, expert adjustments, or
+    post-hoc modifications to model outputs.
+
+  "Outcomes Analysis and Performance Validation": >
+    The second pillar of SR 11-7. Independently compute performance metrics
+    on validation and out-of-time holdout data. Evaluate discrimination,
+    calibration, and stability across segments and time. Perform sensitivity
+    and stress testing relevant to the model's risk profile. Compare claimed
+    performance in the MDD against validator-computed results and explain
+    any material differences.
+
+  "Benchmarking and Alternative Models": >
+    Compare the proposed model to the incumbent (champion), a simpler
+    benchmark (e.g., logistic regression baseline), and — where
+    relevant — vendor or academic reference models. Document whether the
+    performance uplift justifies the additional complexity and governance
+    burden. If no benchmark was feasible, explain why.
+
+  "Implementation and Control Review": >
+    Review the production implementation for faithfulness to the documented
+    model: scoring logic, input handling, output generation, and edge-case
+    behavior. Assess operational controls (input validation, output
+    monitoring, override procedures, change management) and cybersecurity
+    posture. Verify that logging and record-keeping meet EU AI Act
+    Article 12 obligations for high-risk systems.
+
+  "Findings, Ratings, and Remediation": >
+    Enumerate findings with a severity rating (e.g., High / Medium / Low)
+    and a clear description of the issue, the risk it creates, and the
+    required remediation. Assign an owner and a due date to each finding.
+    Distinguish findings that must be resolved before go-live from those
+    that can be addressed post-deployment.
+
+  "Conclusions and Conditions of Approval": >
+    Restate the validation opinion with explicit conditions of approval
+    (e.g., "Approved for production use with these three conditions…").
+    State the re-validation trigger conditions — material changes, data
+    shifts, performance degradation thresholds — and the next scheduled
+    validation date. This section is what the approving committee acts on.
+
+  "Appendix": >
+    Include detailed tables supporting the outcomes analysis, validator
+    reproduction code references, full list of data fields reviewed, and
+    any exhibits too lengthy for the body. Keep the appendix indexed so
+    findings can cite specific exhibits.
