@@ -28,7 +28,17 @@ from autodoc.generation.citations import (
     build_mlflow_summary_citation_id,
     parse_citation_id,
 )
+from autodoc import consistency_checker as _consistency
 from autodoc import provenance as _provenance
+
+
+def _auto_findings_enabled() -> bool:
+    return os.environ.get("AUTODOC_AUTO_FINDINGS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 class DocumentBuilder:
@@ -44,6 +54,8 @@ class DocumentBuilder:
         bundle_id: str | None = None,
         policy_version_id: str | None = None,
         provenance_db_path: str | None = None,
+        bundle_context: dict | None = None,
+        scan_result: dict | None = None,
     ):
         """Initialize the document builder.
 
@@ -53,11 +65,18 @@ class DocumentBuilder:
             bundle_id: Optional bundle identifier, stamped into .docx provenance.
             policy_version_id: Optional policy version, stamped into .docx provenance.
             provenance_db_path: Optional override for the provenance SQLite path.
+            bundle_context: Optional governance bundle facts. Consumed by the U18
+                consistency checker when ``AUTODOC_AUTO_FINDINGS=true``.
+            scan_result: Optional dict of SCAN-detected values (owner, risk_tier,
+                intended_use). Diffed against ``bundle_context`` when the U18 flag
+                is on.
         """
         self.output_dir = output_dir
         self.bundle_id = bundle_id
         self.policy_version_id = policy_version_id
         self.provenance_db_path = provenance_db_path
+        self.bundle_context = bundle_context
+        self.scan_result = scan_result
 
     async def build(
         self,
@@ -102,6 +121,10 @@ class DocumentBuilder:
             # Add traceability appendix
             if section_citations:
                 self._add_traceability_appendix(doc, section_citations, registry)
+
+            # U18: optional Findings appendix, gated by AUTODOC_AUTO_FINDINGS.
+            if _auto_findings_enabled():
+                self._add_findings_appendix(doc, spec, results)
 
             # Save document
             output_path = self._save_document(doc)
@@ -893,6 +916,73 @@ class DocumentBuilder:
                     doc.add_paragraph(label, style="List Bullet")
                 else:
                     doc.add_paragraph(cid, style="List Bullet")
+
+    def _collect_section_texts(
+        self, results: List[SectionResult]
+    ) -> Dict[str, str]:
+        texts: Dict[str, str] = {}
+        for result in results:
+            parts: List[str] = []
+            for content in result.contents:
+                if content.block_type == ContentType.NARRATIVE and isinstance(
+                    content.content, str
+                ):
+                    parts.append(content.content)
+                elif content.block_type in (
+                    ContentType.BULLET_LIST,
+                    ContentType.NUMBERED_LIST,
+                ):
+                    if isinstance(content.content, dict):
+                        items = content.content.get("items", [])
+                        title = content.content.get("title", "")
+                        if title:
+                            parts.append(str(title))
+                    else:
+                        items = content.content or []
+                    parts.extend(str(i) for i in items if i)
+                elif content.block_type == ContentType.TABLE and isinstance(
+                    content.content, dict
+                ):
+                    caption = content.content.get("caption")
+                    if caption:
+                        parts.append(str(caption))
+            texts[result.plan.name] = "\n".join(p for p in parts if p)
+        return texts
+
+    def _add_findings_appendix(
+        self,
+        doc: Document,
+        spec: DocumentSpec,
+        results: List[SectionResult],
+    ) -> None:
+        section_texts = self._collect_section_texts(results)
+        gap_findings = _consistency.detect_gaps(spec, section_texts)
+        mismatch_findings = _consistency.check_declared_vs_detected(
+            self.bundle_context, self.scan_result
+        )
+        findings = list(gap_findings) + list(mismatch_findings)
+        if not findings:
+            return
+
+        doc.add_heading("Findings", level=1)
+        intro = doc.add_paragraph()
+        intro.add_run(
+            "Automated consistency checks flagged the following issues for "
+            "reviewer attention."
+        ).italic = True
+
+        for finding in findings:
+            para = doc.add_paragraph(style="List Bullet")
+            header = para.add_run(
+                f"[{finding.severity}] {finding.category} — {finding.section}: "
+            )
+            header.bold = True
+            para.add_run(finding.description)
+            if finding.declared is not None or finding.detected is not None:
+                detail = doc.add_paragraph(style="List Bullet 2")
+                detail.add_run(
+                    f"declared={finding.declared!r}, detected={finding.detected!r}"
+                )
 
     def _save_document(self, doc: Document) -> str:
         """Save the document to the dataset via DatasetStore with provenance."""

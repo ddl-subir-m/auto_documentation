@@ -150,7 +150,10 @@ class Orchestrator:
         )
         self.planner = SectionPlanner(llm=llm, sanitizer=sanitizer)
         self.generator = ContentGenerator(llm=llm)
-        self.builder = DocumentBuilder(output_dir=output_dir)
+        self.builder = DocumentBuilder(
+            output_dir=output_dir,
+            bundle_context=bundle_context,
+        )
 
         # Optional notebook builder
         if generate_notebook:
