@@ -28,6 +28,7 @@ from autodoc.generation.citations import (
     build_mlflow_summary_citation_id,
     parse_citation_id,
 )
+from autodoc import provenance as _provenance
 
 
 class DocumentBuilder:
@@ -37,14 +38,26 @@ class DocumentBuilder:
     title page, table of contents, and content sections.
     """
 
-    def __init__(self, output_dir: str = "docs"):
+    def __init__(
+        self,
+        output_dir: str = "docs",
+        bundle_id: str | None = None,
+        policy_version_id: str | None = None,
+        provenance_db_path: str | None = None,
+    ):
         """Initialize the document builder.
 
         Args:
             output_dir: Logical output directory (dataset-relative path).
                 Actual I/O goes through DatasetStore.
+            bundle_id: Optional bundle identifier, stamped into .docx provenance.
+            policy_version_id: Optional policy version, stamped into .docx provenance.
+            provenance_db_path: Optional override for the provenance SQLite path.
         """
         self.output_dir = output_dir
+        self.bundle_id = bundle_id
+        self.policy_version_id = policy_version_id
+        self.provenance_db_path = provenance_db_path
 
     async def build(
         self,
@@ -882,19 +895,23 @@ class DocumentBuilder:
                     doc.add_paragraph(cid, style="List Bullet")
 
     def _save_document(self, doc: Document) -> str:
-        """Save the document to the dataset via DatasetStore."""
-        import io
+        """Save the document to the dataset via DatasetStore with provenance."""
         from artifact_layout import get_layout
         from dataset_store import get_store
 
-        # Generate filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"model_docs_{timestamp}.docx"
         dataset_path = f"{get_layout().docs_dir}/{filename}"
 
-        # Save to in-memory buffer, then upload
-        buffer = io.BytesIO()
-        doc.save(buffer)
-        get_store().write_file(dataset_path, buffer.getvalue())
+        record = _provenance.capture_context(
+            bundle_id=self.bundle_id,
+            policy_version_id=self.policy_version_id,
+        )
+        db_path = self.provenance_db_path or _provenance.default_db_path()
 
+        def _commit(temp_path: str, final_path: str) -> None:
+            with open(temp_path, "rb") as fh:
+                get_store().write_file(final_path, fh.read())
+
+        _provenance.save_with_provenance(doc, dataset_path, record, db_path, _commit)
         return dataset_path
