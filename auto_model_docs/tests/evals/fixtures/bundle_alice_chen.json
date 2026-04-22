@@ -1,0 +1,24 @@
+{
+  "bundle_id": "b-alice",
+  "policy_version_id": "pv-1",
+  "bundle": {
+    "id": "b-alice",
+    "name": "Credit Risk Scorer v3",
+    "owner": "Alice Chen",
+    "risk_tier": "High",
+    "classificationValue": "High",
+    "intended_use": "Credit risk scoring for consumer loans, US market.",
+    "policyVersionId": "pv-1",
+    "tags": ["credit", "us", "consumer-loans"]
+  },
+  "policy_def": {
+    "id": "pv-1",
+    "version": "1.0",
+    "framework": "SR 11-7",
+    "sections": [
+      "ownership",
+      "risk_classification",
+      "intended_use"
+    ]
+  }
+}

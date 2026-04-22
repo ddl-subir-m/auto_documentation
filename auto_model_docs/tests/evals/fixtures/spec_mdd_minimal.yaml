@@ -1,0 +1,23 @@
+# Minimal MDD-shaped spec for the U8 metadata-citation eval.
+# Shape mirrors autodoc/templates/mdd_spec.yaml with only the three sections
+# required to assert verbatim citation of bundle facts.
+
+template_version: "1.0"
+template_id: "mdd_minimal"
+
+title: "Model Development Document"
+authors: "Model Development Team"
+citation_style: "numeric"
+
+sections:
+  - Model Ownership
+  - Risk Classification
+  - Intended Use
+
+hints:
+  "Model Ownership": >
+    Identify the model owner from the governance bundle.
+  "Risk Classification": >
+    State the model's risk tier exactly as recorded in the governance bundle.
+  "Intended Use": >
+    Describe the intended use exactly as recorded in the governance bundle.
