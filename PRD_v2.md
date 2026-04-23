@@ -15,10 +15,10 @@
 > 1. **§9 Data Flow** — replaced with "Shape 1": Portal reads bundle+policy from the PlatformGraph (not direct governance API), writes a JSON context file to `/mnt/data/{project}/autodoc_inputs/`, Job reads the file at start. No HMAC, no internal Portal endpoints.
 > 2. **§9.1 Caching** — generation cache CUT from MVP. Every click runs a Job (gated by the per-bundle soft lock). Cache becomes a TODOS.md candidate for post-MVP soak data.
 > 3. **§9.1 / §9.2 Content hashing** — REMOVED entirely. No `content_hash_at_submit`, no drift detection, no schema version. Context-file contents ARE the ground truth for the Job.
-> 4. **§7 F3 Policy → doc-spec deriver** — deferred post-MVP. MVP ships canonical-only. Derivation added when a concrete customer policy is available to calibrate against.
+> 4. **§7 F3 Policy → doc-spec deriver** — originally deferred post-MVP. **Shipped ahead of schedule** in PR #16 (`a97f5b2`) as IMPLEMENTATION.md U17: `autodoc/spec_from_policy.py` + `--derive-spec` CLI flag. Falls back to canonical templates when policy keys are missing. Still needs a real customer policy to calibrate the heuristics against.
 > 5. **§7 F4.1 Spec preview & edit** — split out of M2 into post-MVP behind `AUTODOC_INLINE_SPEC_EDIT=true`.
 > 6. **§7 F8 Attachment idempotency** — governance API has no label-based replace (verified 2026-04-22 via swagger). Implementation: create-new-first, then delete-old-by-ID.
-> 7. **Provenance** — trimmed from 14 fields to 5 MVP fields: `bundle_id, policy_version_id, commit_sha, generated_by_user, generated_at`. Full phase-2 field set documented in the design doc.
+> 7. **Provenance** — trimmed from 14 to 8 shipped fields. 5 MVP fields (`bundle_id, policy_version_id, commit_sha, generated_by_user, generated_at`) in PR #7; 3 phase-2 fields (`generator_version, template_version, run_environment`) in PR #15 (`de37554`). Both stamp to .docx custom properties and `autodoc_provenance.db` with idempotent migration for pre-phase-2 schemas.
 > 8. **Auth** — Job uses Domino's ephemeral `/access-token` endpoint (re-acquired per call). No JWT-lifetime concerns. No HMAC plumbing.
 > 9. **Milestones (§11)** — the weekly timeline is no longer the right framing since implementation is CC-accelerated. See `IMPLEMENTATION.md` for the sequenced unit roadmap (U2, U3, U5, U6…) without temporal weeks.
 >

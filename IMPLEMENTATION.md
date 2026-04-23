@@ -1,6 +1,6 @@
 # Implementation Plan — MRM Portal × autodoc integration
 
-> Last updated: 2026-04-22 (Phase A + B shipped; Phase C blocked on Portal write access)
+> Last updated: 2026-04-22 (Phase A + B shipped; U17 + U18 shipped ahead of Phase C; wheel packaging + boundary tests + phase-2 provenance shipped; Phase C still blocked on Portal write access)
 > Source of truth for **what to build and in what order**.
 > For product rationale see `PRD_v2.md`. For architecture decisions see the design doc at `~/.gstack/projects/ddl-subir-m-auto_documentation/subirmansukhani-feature-mrm-portal-integration-design-20260422-111457.md`. This file is the implementer's roadmap.
 
@@ -32,7 +32,7 @@ A validator opens a model page in the MRM Portal, clicks **Generate documentatio
 | Close-on-submit | Modal closes on submit; progress surfaces on Documentation history row + toast. |
 | History layout | Ant DominoTable (dense rows, sortable). |
 | Responsive | Desktop-first. Tablet best-effort. Mobile banner ("desktop required"). |
-| Provenance | 5 MVP fields: `bundle_id`, `policy_version_id`, `commit_sha`, `generated_by_user`, `generated_at`. Phase-2 tier per design doc. |
+| Provenance | 8 fields stamped: 5 MVP (`bundle_id`, `policy_version_id`, `commit_sha`, `generated_by_user`, `generated_at`) + 3 phase-2 (`generator_version`, `template_version`, `run_environment`). Phase-2 shipped in PR #15. |
 | Attach-back | Create-then-delete-by-ID (per governance swagger). `prior_attachment_id` tracked in Portal SQLite. |
 
 ## Status summary
@@ -55,12 +55,24 @@ A validator opens a model page in the MRM Portal, clicks **Generate documentatio
 | U14 — `MRM-Portal/DESIGN.md` | D | ⏸️ Not started | — |
 | U15 — Studio retirement | D | ⏸️ Not started (post-MVP soak) | — |
 | U16 — F4.1 inline spec editor | D | ⏸️ Not started (flagged) | — |
-| U17 — Policy-to-spec derivation | D | ⏸️ Not started (post-MVP) | — |
-| U18 — Gap findings + consistency checker | D | ⏸️ Not started (flagged) | — |
+| U17 — Policy-to-spec derivation | D | ✅ Shipped | PR #16 (`a97f5b2`) |
+| U18 — Gap findings + consistency checker | D | ✅ Shipped (flagged off) | PR #17 (`fdf80fb`) |
 
-**Infra shipped:** CI workflow (`.github/workflows/ci.yml`) + auto-merge on green (`.github/workflows/auto-merge.yml`, `workflow_run`-gated after the `gh pr merge --auto` silent-fallback bug in PR #12 / `fc240c7`). Target branch is `feature/mrm-portal-integration`; master stays human-review-only.
+### Non-unit follow-ons (shipped)
 
-**Next unblock:** Write access to `domino-field/MRM-Portal` (pinged Nick Goble). Once granted, create `feature/autodoc-integration` on Portal and start Phase C.
+| Item | Status | Landed in |
+|---|---|---|
+| B3 — autodoc wheel packaging + env-image deployment guide | ✅ Shipped | PR #13 (`14b433f`) |
+| Governance boundary contract tests (403/409/429/401) | ✅ Shipped | PR #14 (`61a1773`) |
+| Phase-2 provenance fields (generator_version, template_version, run_environment) | ✅ Shipped | PR #15 (`de37554`) |
+
+**Infra shipped:**
+- `.github/workflows/ci.yml` — pytest on PRs/pushes to `feature/mrm-portal-integration`.
+- `.github/workflows/auto-merge.yml` — `workflow_run`-gated squash-merge on green CI (PR #12 / `fc240c7` fixed the earlier `gh pr merge --auto` silent-fallback bug).
+- Both workflows now live on `master` (PR #18 / `03cdc49`). Required because GitHub's `workflow_run` trigger only fires when the listener workflow is on the default branch; during the U17/U18 wave the 5 PRs had green CI but Auto-merge never fired (squash-merged by hand). Fixed going forward.
+- Target branch stays `feature/mrm-portal-integration`; master stays human-review-only.
+
+**Next unblock:** Write access to `domino-field/MRM-Portal` (pinged Nick Goble, no reply yet). Once granted, create `feature/autodoc-integration` on Portal and start Phase C. Nothing autodoc-side is blocked.
 
 ## The sequence
 
@@ -147,7 +159,7 @@ Each unit is one Claude Code session / one PR. Phase A units are independent of 
 |---|---|
 | ~~B1 bundle-revision endpoint check~~ | **CLOSED_NEGATIVE 2026-04-22** — swagger_1.json confirmed no revision field. Moot: content hash removed, so B1 no longer matters. |
 | ~~B2 attachment endpoint idempotency~~ | **CLOSED_PARTIAL 2026-04-22** — POST+DELETE only, no label-based replace. Create-then-delete-by-ID pattern adopted in U9. |
-| ~~B3 autodoc packaging~~ | **CLOSED 2026-04-22** — **vendor autodoc into the customer's Domino environment image for MVP.** One-time deployment step, not a design decision. Deployment guide adds a ~1-page "Prepare the autodoc Domino environment" section covering: copy autodoc wheel into the env image Dockerfile, pin version, rebuild, point target projects at it. Internal PyPI publishing is a post-MVP optimization when release cadence justifies it; NOT an RFC-level blocker. autodoc-context half of B3 was moot (package archived when content hash removed). |
+| ~~B3 autodoc packaging~~ | **CLOSED 2026-04-22** — wheel packaging + env-image deployment guide shipped in PR #13 (`14b433f`). `pyproject.toml` scopes packages to `autodoc*` and ships `main.py` as a top-level py-module so the `autodoc` console script works from a wheel install. `docs/deployment/autodoc-env-image.md` documents the one-time tenant setup (Dockerfile snippet, pin, rebuild, smoke test, release process). Internal PyPI publishing remains a post-MVP optimization when release cadence justifies it. autodoc-context half of B3 was moot (package archived when content hash removed). |
 
 **No open blockers.** All three M1 prerequisites resolved.
 
@@ -158,7 +170,7 @@ Pull the full spec from `~/.gstack/projects/ddl-subir-m-auto_documentation/subir
 - U6 includes a **regression test** proving the existing local-dev flow (`python -m autodoc.main --spec doc_spec.yaml`, no context file) still works. Mandatory.
 - U8 LLM metadata-citation eval **gates M1** — not advisory. Generated doc MUST cite the fixture bundle's owner/risk_tier/intended_use exactly.
 - U13 E2E runs axe-core inside Playwright for every test; zero a11y violations.
-- Boundary contract tests for Job ↔ governance: 403 on attach-back (permission revoked mid-Job), 409 (duplicate attach, B2 idempotency), rate-limit backoff, clock skew on ephemeral tokens.
+- Boundary contract tests for Job ↔ governance: 403 on attach-back (permission revoked mid-Job), 409 (duplicate attach, B2 idempotency), rate-limit backoff, clock skew on ephemeral tokens. **Shipped in PR #14.**
 
 ## Environment flags
 
