@@ -22,10 +22,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from autodoc.bundle_context import delete_context_file, load_context
 from autodoc.core.config import Settings
-from autodoc.core.models import DocumentSpec
+from autodoc.core.models import DocumentSpec, SectionSpec
 from autodoc.llm import LLMClient
 from autodoc.orchestrator import Orchestrator
 from autodoc.scanning import ContentSanitizer
+from autodoc.spec_from_policy import VALID_DOC_TYPES, derive_spec
 
 
 console = Console()
@@ -35,9 +36,21 @@ console = Console()
 @click.option(
     "--spec",
     "-s",
-    required=True,
+    default=None,
     type=click.Path(exists=True),
-    help="Path to YAML document specification",
+    help="Path to YAML document specification (required unless --derive-spec is used)",
+)
+@click.option(
+    "--derive-spec",
+    "derive_spec_type",
+    default=None,
+    type=click.Choice(list(VALID_DOC_TYPES)),
+    help=(
+        "Derive the spec from policy_def in --context-file using the named "
+        "canonical template ({}) instead of loading --spec.".format(
+            "|".join(VALID_DOC_TYPES)
+        )
+    ),
 )
 @click.option(
     "--code-root",
@@ -191,6 +204,7 @@ def main(
     bundle_id: str | None,
     policy_version_id: str | None,
     context_file: str | None,
+    derive_spec_type: str | None,
 ) -> None:
     """Generate model documentation from ML codebases.
 
@@ -222,6 +236,23 @@ def main(
             "[bold red]Error:[/] --bundle-id, --policy-version-id, and "
             "--context-file must be used together "
             f"(provided: {', '.join(provided)}; missing: {', '.join(missing)})",
+            style="red",
+        )
+        raise SystemExit(2)
+
+    # --derive-spec requires --context-file (and thus the full Shape 1 trio).
+    if derive_spec_type and not context_file:
+        console.print(
+            "[bold red]Error:[/] --derive-spec requires --context-file "
+            "(and --bundle-id, --policy-version-id).",
+            style="red",
+        )
+        raise SystemExit(2)
+
+    # Exactly one of --spec or --derive-spec must be present.
+    if not spec and not derive_spec_type:
+        console.print(
+            "[bold red]Error:[/] one of --spec or --derive-spec is required.",
             style="red",
         )
         raise SystemExit(2)
@@ -291,8 +322,21 @@ def main(
             model_names = [name.strip() for name in models.split(",") if name.strip()]
 
         # Load document spec
-        console.print(f"\n[bold blue]Loading specification:[/] {spec}")
-        doc_spec = DocumentSpec.from_yaml(spec)
+        if derive_spec_type:
+            console.print(
+                f"\n[bold blue]Deriving specification from policy_def[/] "
+                f"(doc_type={derive_spec_type})"
+            )
+            derived = derive_spec(
+                (bundle_context or {}).get("policy_def"), derive_spec_type
+            )
+            logging.getLogger("autodoc.spec_from_policy").debug(
+                "derived spec: %s", derived
+            )
+            doc_spec = _doc_spec_from_dict(derived)
+        else:
+            console.print(f"\n[bold blue]Loading specification:[/] {spec}")
+            doc_spec = DocumentSpec.from_yaml(spec)
         console.print(f"[bold]Document:[/] {doc_spec.title}")
         console.print(f"[bold]Sections:[/] {len(doc_spec.sections)}")
 
@@ -498,6 +542,27 @@ def _init_cli_dataset_store() -> None:
         raise RuntimeError(
             f"Failed to initialize DatasetStore for CLI: {exc}"
         ) from exc
+
+
+def _doc_spec_from_dict(data: dict) -> DocumentSpec:
+    """Build a DocumentSpec from an already-parsed dict (e.g. derived spec)."""
+    sections = []
+    for section in data.get("sections", []):
+        if isinstance(section, str):
+            if section.endswith(": per_model"):
+                sections.append(SectionSpec(name=section[:-len(": per_model")], per_model=True))
+            else:
+                sections.append(SectionSpec(name=section))
+        elif isinstance(section, dict):
+            sections.append(SectionSpec(**section))
+    return DocumentSpec(
+        title=data["title"],
+        authors=data.get("authors", "Data Science Team"),
+        sections=sections,
+        hints=data.get("hints", {}),
+        citation_style=data.get("citation_style", "numeric"),
+        formatting=data.get("formatting", {}),
+    )
 
 
 def _get_default_code_root() -> Path:
