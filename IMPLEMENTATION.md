@@ -1,6 +1,6 @@
 # Implementation Plan — MRM Portal × autodoc integration
 
-> Last updated: 2026-04-22 (Phase A + B shipped; U17 + U18 shipped ahead of Phase C; wheel packaging + boundary tests + phase-2 provenance shipped; Phase C still blocked on Portal write access)
+> Last updated: 2026-04-23 (Phase A + B shipped; U17 + U18 shipped ahead of Phase C; wheel packaging + boundary tests + phase-2 provenance shipped; Phase C still blocked on Portal write access)
 > Source of truth for **what to build and in what order**.
 > For product rationale see `PRD_v2.md`. For architecture decisions see the design doc at `~/.gstack/projects/ddl-subir-m-auto_documentation/subirmansukhani-feature-mrm-portal-integration-design-20260422-111457.md`. This file is the implementer's roadmap.
 
