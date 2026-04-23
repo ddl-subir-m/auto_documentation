@@ -1,0 +1,56 @@
+sequenceDiagram
+    actor User
+    participant UI as Portal UI
+    participant API as Portal API
+    participant Graph as PlatformGraph
+    participant FS as Shared FS
+    participant Job as Domino Job (autodoc)
+    participant LLM as LLM Provider
+    participant DB as Provenance DB
+    participant Domino as Domino Bundle API
+
+    User->>UI: Click "Generate" on model detail
+    UI->>API: POST /api/docs/generate {bundle_id, doc_type}
+    API->>Graph: Force-refresh bundle
+    Graph-->>API: bundle + policy_def
+    API->>API: Acquire soft lock (bundle_id, template)
+    API->>FS: Write ctx_{uuid}.json
+    API->>Job: Submit Domino Job (main.py --context-file ...)
+    API-->>UI: 202 Accepted (job_id)
+
+    Note over Job: SCAN → PLAN → GENERATE → BUILD → STAMP
+
+    Job->>FS: Read ctx_{uuid}.json
+    Job->>Job: derive_spec(policy_def, "mdd")
+
+    par SCAN
+        Job->>Job: Code scan (Python, ML frameworks)
+    and
+        Job->>Job: Artifact scan (MLflow runs, metrics)
+    end
+
+    Job->>LLM: PLAN — section prompts + bundle facts
+    LLM-->>Job: Section plans (ContentBlocks)
+
+    loop For each ContentBlock (up to 4 concurrent)
+        Job->>LLM: GENERATE narrative / table / chart / list
+        LLM-->>Job: Content + [@citation] markers
+    end
+
+    Job->>Job: BUILD .docx (cover, TOC, sections, footnotes)
+    Job->>Job: Stamp 8-field provenance (Word custom properties)
+    Job->>DB: INSERT provenance row (atomic with .docx save)
+
+    opt AUTODOC_AUTO_FINDINGS=true
+        Job->>Job: Consistency checker (gaps, declared vs detected)
+    end
+
+    Job->>FS: Write .docx and delete ctx file
+    Job-->>API: Exit 0
+
+    API->>FS: Read .docx
+    API->>Domino: POST bundle attachment
+    Domino-->>API: attachment_id
+    API->>API: Release soft lock
+    API-->>UI: Job complete (SSE / poll)
+    UI-->>User: Download link + History tab updated
