@@ -1,0 +1,61 @@
+name: Auto-merge
+
+# Free-plan / private-repo workaround: GitHub's native auto-merge feature is
+# gated behind GitHub Pro / public repos. Instead of using `gh pr merge --auto`
+# (which silently falls back to an immediate merge when the repo doesn't allow
+# auto-merge), we do the gating ourselves:
+#
+#   1. CI workflow runs on the PR (see ci.yml)
+#   2. This workflow fires AFTER CI completes (workflow_run trigger)
+#   3. If CI conclusion == success AND the run was for a PR AND the PR targets
+#      feature/mrm-portal-integration, squash-merge it.
+#   4. If CI failed, this workflow is a no-op — the PR stays open.
+#
+# Target branch: feature/mrm-portal-integration (integration branch; master
+# is human-review-only).
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+jobs:
+  merge-on-green:
+    # Only act on successful runs that were triggered by a PR event.
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+    steps:
+      - name: Find the open PR this run was for
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          # workflow_run exposes the head branch. Find the open PR with that head.
+          PR=$(gh pr list --repo "${{ github.repository }}" \
+                         --head "$HEAD_BRANCH" \
+                         --state open \
+                         --json number,baseRefName \
+                         --jq '.[] | select(.baseRefName == "feature/mrm-portal-integration") | .number' \
+                         | head -n1)
+          echo "number=$PR" >> "$GITHUB_OUTPUT"
+          if [ -z "$PR" ]; then
+            echo "No open PR found for head branch $HEAD_BRANCH targeting feature/mrm-portal-integration — nothing to merge."
+          else
+            echo "Found PR #$PR for head branch $HEAD_BRANCH."
+          fi
+
+      - name: Squash-merge the PR
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          gh pr merge --squash --delete-branch \
+            --repo "${{ github.repository }}" \
+            "$PR_NUMBER"
