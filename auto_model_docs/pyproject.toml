@@ -48,10 +48,15 @@ dev = [
 ]
 
 [project.scripts]
-autodoc = "auto_model_docs.main:main"
+autodoc = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["autodoc*"]
+exclude = ["tests*", "studio*", "output*", "dist*", "build*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
