@@ -76,6 +76,8 @@ A validator opens a model page in the MRM Portal, clicks **Generate documentatio
 
 ## The sequence
 
+> End-to-end runtime flow (Portal → Job → back): [`diagrams/autodoc-e2e-sequence.mmd`](diagrams/autodoc-e2e-sequence.mmd). Legacy spec-only flowchart (pre-integration): [`diagrams/explanations/auto-documentation-workflow.mmd`](diagrams/explanations/auto-documentation-workflow.mmd).
+
 Each unit is one Claude Code session / one PR. Phase A units are independent of each other. Phase B depends on A. Phase C depends on A. Phase D is optional or post-MVP.
 
 ### Phase A — Foundation (any order)
