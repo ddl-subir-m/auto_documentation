@@ -135,6 +135,155 @@ def test_fallback_never_raises_on_malformed_policy():
 
 
 # ---------------------------------------------------------------------------
+# Domino policy shape (what Portal actually serializes into the context file)
+# ---------------------------------------------------------------------------
+
+# Mirrors the YAML schema documented in MRM-Portal's shared/policy_prompts.py
+# and the value Portal's routes/autodoc.py writes verbatim into the context
+# file (raw response from GET /api/governance/v1/policies/{id}/definition).
+_DOMINO_POLICY = {
+    "id": "pol-1",
+    "version": "v1.0",
+    "stages": [
+        {
+            "policyEntityId": "11111111-1111-1111-1111-111111111111",
+            "name": "Intake",
+            "evidenceSet": [
+                {
+                    "id": "Local.intake-evidence",
+                    "name": "Intake Evidence",
+                    "definition": [
+                        {
+                            "policyEntityId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                            "artifactType": "textinput",
+                            "details": {"label": "Model Card"},
+                        },
+                        {
+                            "policyEntityId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                            "artifactType": "text",
+                            "details": {"text": "Section guidance — should be skipped."},
+                        },
+                    ],
+                }
+            ],
+            "approvals": [
+                {
+                    "policyEntityId": "22222222-2222-2222-2222-222222222222",
+                    "name": "Intake Sign Off",
+                    "evidence": {
+                        "id": "Local.intake-signoff",
+                        "definition": [
+                            {
+                                "artifactType": "radio",
+                                "details": {"label": "Approve Intake?"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+        {
+            "policyEntityId": "33333333-3333-3333-3333-333333333333",
+            "name": "Validation",
+            "evidenceSet": [
+                {
+                    "name": "Validation Evidence",
+                    # Computed-policy shape uses "artifacts", not "definition".
+                    "artifacts": [
+                        {
+                            "artifactType": "textarea",
+                            "details": {"label": "Risk Assessment"},
+                        },
+                    ],
+                }
+            ],
+        },
+    ],
+}
+
+
+@pytest.mark.parametrize("doc_type", VALID_DOC_TYPES)
+def test_derive_walks_domino_policy_stage_names_first(doc_type):
+    spec = derive_spec(_DOMINO_POLICY, doc_type)
+    # Stage names lead the outline; artifact labels follow.
+    assert spec["sections"][:2] == ["Intake", "Validation"]
+    # Both definition[] (raw) and artifacts[] (computed) shapes contribute.
+    assert "Model Card" in spec["sections"]
+    assert "Risk Assessment" in spec["sections"]
+    # Approvals.evidence.definition[] artifacts pulled in too.
+    assert "Approve Intake?" in spec["sections"]
+    # Guidance entries (artifactType=text) are skipped — no label attribute.
+    assert all("Section guidance" not in s for s in spec["sections"])
+
+
+def test_derive_unwraps_definition_envelope_dict():
+    wrapped = {"definition": _DOMINO_POLICY}
+    spec = derive_spec(wrapped, "mdd")
+    assert "Intake" in spec["sections"]
+    assert "Model Card" in spec["sections"]
+
+
+def test_derive_unwraps_definition_envelope_yaml_string():
+    wrapped = {"definition": yaml.safe_dump(_DOMINO_POLICY)}
+    spec = derive_spec(wrapped, "mdd")
+    assert "Intake" in spec["sections"]
+    assert "Model Card" in spec["sections"]
+
+
+def test_derive_handles_unparseable_yaml_string_envelope(caplog):
+    caplog.set_level(logging.WARNING, logger="autodoc.spec_from_policy")
+    spec = derive_spec({"definition": "::: not: valid: : yaml :::"}, "mdd")
+    assert spec == _load_canonical("mdd")
+
+
+def test_derive_falls_back_when_stages_list_is_empty(caplog):
+    caplog.set_level(logging.WARNING, logger="autodoc.spec_from_policy")
+    spec = derive_spec({"id": "p1", "version": "1.0", "stages": []}, "mdd")
+    assert spec == _load_canonical("mdd")
+    assert any("no usable stages" in rec.message for rec in caplog.records)
+
+
+def test_derive_skips_malformed_stages_and_artifacts():
+    policy = {
+        "stages": [
+            "not a dict",
+            {"name": "OK Stage", "evidenceSet": "not a list"},
+            {
+                "name": "",  # blank stage name dropped
+                "evidenceSet": [
+                    {"definition": [{"artifactType": "textinput", "details": "not a dict"}]},
+                    {"definition": [{"artifactType": "textinput"}]},  # missing details
+                    {"definition": [{"artifactType": "textinput", "details": {"label": "Kept"}}]},
+                ],
+            },
+        ]
+    }
+    spec = derive_spec(policy, "mdd")
+    assert spec["sections"] == ["OK Stage", "Kept"]
+
+
+def test_derive_dedupes_across_stages_and_evidence():
+    policy = {
+        "stages": [
+            {
+                "name": "Same",
+                "evidenceSet": [
+                    {"definition": [{"artifactType": "textinput", "details": {"label": "Doc"}}]},
+                ],
+            },
+            {
+                "name": "Same",  # duplicate stage name
+                "evidenceSet": [
+                    {"artifacts": [{"artifactType": "textinput", "details": {"label": "Doc"}}]},
+                ],
+            },
+        ]
+    }
+    spec = derive_spec(policy, "mdd")
+    assert spec["sections"] == ["Same", "Doc"]
+
+
+# ---------------------------------------------------------------------------
 # Shape matches canonical template
 # ---------------------------------------------------------------------------
 
