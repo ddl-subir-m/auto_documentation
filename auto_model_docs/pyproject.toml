@@ -56,6 +56,9 @@ autodoc = "autodoc.main:main"
 [tool.setuptools]
 py-modules = ["main", "artifact_layout", "dataset_store", "domino_auth", "domino_client", "domino_datasets", "auth_context"]
 
+[tool.setuptools.package-data]
+autodoc = ["templates/*.yaml"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["autodoc*"]
