@@ -51,7 +51,7 @@ dev = [
 autodoc = "autodoc.main:main"
 
 [tool.setuptools]
-py-modules = ["main"]
+py-modules = ["main", "artifact_layout", "dataset_store"]
 
 [tool.setuptools.packages.find]
 where = ["."]
