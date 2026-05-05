@@ -48,7 +48,7 @@ dev = [
 ]
 
 [project.scripts]
-autodoc = "main:main"
+autodoc = "autodoc.main:main"
 
 [tool.setuptools]
 py-modules = ["main"]
