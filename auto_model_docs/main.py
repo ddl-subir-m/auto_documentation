@@ -180,6 +180,12 @@ console = Console()
     type=click.Path(),
     help="Path to bundle context JSON file written by Portal (Shape 1 Portal integration; use with --bundle-id and --policy-version-id)",
 )
+@click.option(
+    "--output-file",
+    default=None,
+    type=click.Path(),
+    help="Filesystem path to also write the generated .docx (Portal integration handoff; parent dir is created automatically)",
+)
 def main(
     spec: str,
     code_root: str | None,
@@ -205,6 +211,7 @@ def main(
     policy_version_id: str | None,
     context_file: str | None,
     derive_spec_type: str | None,
+    output_file: str | None,
 ) -> None:
     """Generate model documentation from ML codebases.
 
@@ -430,6 +437,15 @@ def main(
 
             # Run async generation
             output_path = asyncio.run(orchestrator.generate(doc_spec, on_progress))
+
+        # Write to handoff filesystem path if Portal requested it.
+        if output_file:
+            from dataset_store import get_store
+            file_bytes = get_store().read_file(output_path)
+            dest = Path(output_file)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(file_bytes)
+            logger.info("Wrote output to filesystem handoff path: %s", dest)
 
         # Success!
         console.print(f"\n[bold green]Success![/] Document generated:")
