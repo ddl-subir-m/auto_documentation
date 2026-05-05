@@ -445,7 +445,7 @@ def main(
             dest = Path(output_file)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(file_bytes)
-            logger.info("Wrote output to filesystem handoff path: %s", dest)
+            logging.getLogger(__name__).info("Wrote output to filesystem handoff path: %s", dest)
 
         # Success!
         console.print(f"\n[bold green]Success![/] Document generated:")
