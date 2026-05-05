@@ -51,7 +51,7 @@ dev = [
 autodoc = "autodoc.main:main"
 
 [tool.setuptools]
-py-modules = ["main", "artifact_layout", "dataset_store"]
+py-modules = ["main", "artifact_layout", "dataset_store", "domino_auth", "domino_client", "domino_datasets", "auth_context"]
 
 [tool.setuptools.packages.find]
 where = ["."]
