@@ -15,12 +15,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_REQUIRED_KEYS: tuple[tuple[str, type], ...] = (
+REQUIRED_KEYS: tuple[tuple[str, type], ...] = (
     ("bundle_id", str),
     ("policy_version_id", str),
     ("bundle", dict),
     ("policy_def", dict),
 )
+_REQUIRED_KEYS = REQUIRED_KEYS  # backward-compat alias for any external readers
 
 
 class BundleContextError(Exception):

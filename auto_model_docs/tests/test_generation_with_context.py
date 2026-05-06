@@ -116,8 +116,10 @@ async def test_narrative_prompt_unchanged_when_bundle_context_none():
     prompt_a = llm_with.complete.await_args.kwargs["prompt"]
     prompt_b = llm_without.complete.await_args.kwargs["prompt"]
     assert prompt_a == prompt_b
-    # No governance section leaked into the baseline prompt
-    assert "Governance Bundle Context" not in prompt_a
+    # No governance grounding section leaked into the baseline prompt.
+    # (The integrity rules reference 'Governance Bundle Context block' as
+    # context-free guidance; we look for the actual section header.)
+    assert "## Governance Bundle Context" not in prompt_a
     assert "factual grounding" not in prompt_a.lower()
 
 

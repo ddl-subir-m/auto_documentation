@@ -158,6 +158,8 @@ class ContentGenerator:
             code_evidence=code_evidence,
             mlflow_evidence=mlflow_evidence,
             bundle_context=context.bundle_context,
+            doc_type=context.doc_type,
+            other_sections=context.other_sections,
         )
 
         response = await self.llm.complete(
@@ -242,6 +244,7 @@ class ContentGenerator:
             code_evidence=code_evidence,
             mlflow_evidence=mlflow_evidence,
             bundle_context=context.bundle_context,
+            doc_type=context.doc_type,
         )
 
         result = await self.llm.complete_json(
@@ -367,6 +370,7 @@ class ContentGenerator:
             code_evidence=code_evidence,
             mlflow_evidence=mlflow_evidence,
             bundle_context=context.bundle_context,
+            doc_type=context.doc_type,
         )
 
         data = await self.llm.complete_json(
@@ -704,6 +708,7 @@ class ContentGenerator:
             code_evidence=code_evidence,
             mlflow_evidence=mlflow_evidence,
             bundle_context=context.bundle_context,
+            doc_type=context.doc_type,
         )
 
         result = await self.llm.complete_json(

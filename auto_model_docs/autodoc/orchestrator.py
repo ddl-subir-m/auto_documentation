@@ -510,12 +510,20 @@ class Orchestrator:
         planning_tasks: List[tuple[SectionSpec, GenerationContext, str]] = []
         section_num = 1
 
-        # Per-section slicing of bundle_context is a future refinement; for now
-        # the planner hands the full dict to every section (see SectionPlanner).
+        doc_type = spec.template_id
+        all_section_names = [s.name for s in spec.sections]
+        # Stash so the generation phase (which doesn't have the spec) can
+        # read the same doc_type and section list.
+        self._current_doc_type = doc_type
+        self._current_section_names = all_section_names
+
+        # Per-section slicing of bundle_context drops irrelevant keys per
+        # section keyword (see SectionPlanner.slice_for_section).
         for section in spec.sections:
             section_bundle_ctx = self.planner.slice_for_section(
                 section, bundle_context
             )
+            other_section_names = [n for n in all_section_names if n != section.name]
             if section.per_model:
                 models = artifact_ctx.models or []
 
@@ -527,6 +535,8 @@ class Orchestrator:
                         section_name=section.name,
                         hint=spec.hints.get(section.name),
                         bundle_context=section_bundle_ctx,
+                        doc_type=doc_type,
+                        other_sections=other_section_names,
                     )
                     planning_tasks.append((section, context, str(section_num)))
                 else:
@@ -539,6 +549,8 @@ class Orchestrator:
                             model_run_id=model.run_id,
                             hint=spec.hints.get(section.name),
                             bundle_context=section_bundle_ctx,
+                            doc_type=doc_type,
+                            other_sections=other_section_names,
                         )
                         planning_tasks.append((section, context, f"{section_num}.{j}"))
             else:
@@ -549,6 +561,8 @@ class Orchestrator:
                     section_name=section.name,
                     hint=spec.hints.get(section.name),
                     bundle_context=section_bundle_ctx,
+                    doc_type=doc_type,
+                    other_sections=other_section_names,
                 )
                 planning_tasks.append((section, context, str(section_num)))
 
@@ -605,6 +619,17 @@ class Orchestrator:
     ) -> List[SectionResult]:
         """Generate content for all sections in parallel."""
 
+        # Snapshot doc_type / section list at this scope; planner+generator
+        # need to see the same view across phases.
+        gen_doc_type = None
+        gen_other_sections: List[str] = []
+        # Best-effort: read template_id from the planning result if available;
+        # otherwise leave doc-type framing off. We don't have the spec here, so
+        # we recover doc_type from the orchestrator instance state set during
+        # planning. (See _plan_all_sections for where it's stamped.)
+        gen_doc_type = getattr(self, "_current_doc_type", None)
+        gen_other_sections = getattr(self, "_current_section_names", []) or []
+
         async def generate_section(plan: SectionPlan) -> SectionResult:
             """Generate content for a single section.
 
@@ -618,6 +643,7 @@ class Orchestrator:
             section_bundle_ctx = self.planner.slice_for_section(
                 section_spec, bundle_context
             )
+            other_names = [n for n in gen_other_sections if n != plan.name]
             context = GenerationContext(
                 code_context=code_ctx,
                 artifact_context=artifact_ctx,
@@ -625,6 +651,8 @@ class Orchestrator:
                 model_name=plan.model_name,
                 model_run_id=plan.model_run_id,
                 bundle_context=section_bundle_ctx,
+                doc_type=gen_doc_type,
+                other_sections=other_names,
             )
 
             async def _gen_block(block):

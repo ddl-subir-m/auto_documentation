@@ -233,6 +233,11 @@ class DocumentSpec(BaseModel):
     hints: Dict[str, str] = Field(default_factory=dict)
     citation_style: str = "numeric"
     formatting: Dict[str, Any] = Field(default_factory=dict)
+    # Canonical template identifier when the spec was loaded from one of the
+    # built-in templates ("mdd" | "vr" | "mr"). None for user-supplied YAMLs
+    # that don't declare it. Used to inject doc-type framing into LLM prompts.
+    template_id: Optional[str] = None
+    template_label: Optional[str] = None
 
     @classmethod
     def from_yaml(cls, path: str) -> "DocumentSpec":
@@ -277,6 +282,8 @@ class DocumentSpec(BaseModel):
             hints=data.get("hints", {}),
             citation_style=data.get("citation_style", "numeric"),
             formatting=data.get("formatting", {}),
+            template_id=data.get("template_id"),
+            template_label=data.get("template_label"),
         )
 
     @classmethod
@@ -463,6 +470,14 @@ class GenerationContext:
     # loaded by autodoc.bundle_context.load_context. None when running via the
     # spec-only CLI path.
     bundle_context: Optional[Dict[str, Any]] = None
+    # Canonical template id ("mdd" | "vr" | "mr") for the doc being generated.
+    # When set, drives doc-type-specific framing in LLM prompts. None for
+    # user-supplied YAML specs that don't declare a template.
+    doc_type: Optional[str] = None
+    # Names of the other sections in the same document. Used to tell the
+    # narrative writer what other sections will cover so the "do not repeat
+    # other sections" instruction is actionable.
+    other_sections: List[str] = field(default_factory=list)
 
 
 # =============================================================================

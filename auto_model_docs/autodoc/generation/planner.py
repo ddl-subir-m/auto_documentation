@@ -15,6 +15,8 @@ from autodoc.llm.prompts import (
     SECTION_PLANNING_SCHEMA,
     SYSTEM_SECTION_PLANNER,
     build_section_planning_prompt,
+    redact_bundle_context,
+    slice_relevant_keys,
 )
 from autodoc.scanning.sanitizer import ContentSanitizer
 
@@ -46,12 +48,19 @@ class SectionPlanner:
     ) -> Optional[Dict[str, Any]]:
         """Return the bundle-context slice relevant to a section.
 
-        Minimal implementation: returns the full bundle_context dict for every
-        section. Per-section slicing (e.g. routing 'intended_use' only to the
-        Purpose section) is a future refinement; the grounding content is small
-        enough that sending it to every section is acceptable for MVP.
+        Two-step pipeline:
+        1. Redact the raw bundle_context (drop approvals, internal IDs, schema
+           metadata — see autodoc.llm.prompts.redact_bundle_context).
+        2. Slice by section-name keyword (Purpose/Limitations/Governance/etc.)
+           so only relevant keys are forwarded to the LLM. Sections without a
+           keyword match get the full redacted bundle (broad grounding).
         """
-        return bundle_context
+        if not bundle_context:
+            return bundle_context
+        redacted = redact_bundle_context(bundle_context)
+        if not redacted:
+            return None
+        return slice_relevant_keys(section.name, redacted)
 
     async def plan_section(
         self,
@@ -117,6 +126,7 @@ class SectionPlanner:
                 data_sources=data_sources,
                 metrics_info=metrics_info,
                 artifacts_info=artifacts_info,
+                doc_type=context.doc_type,
             )
 
             logger.info(f"Calling LLM for section planning: {section.name}{model_suffix}")

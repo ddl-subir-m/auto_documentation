@@ -347,7 +347,10 @@ def main(
                 f"\n[bold blue]Loading canonical specification:[/] "
                 f"(doc_type={canonical_spec_type})"
             )
-            doc_spec = _doc_spec_from_dict(derive_spec(None, canonical_spec_type))
+            doc_spec = _doc_spec_from_dict(
+                derive_spec(None, canonical_spec_type),
+                template_id=canonical_spec_type,
+            )
         elif derive_spec_type:
             console.print(
                 f"\n[bold blue]Deriving specification from policy_def[/] "
@@ -359,7 +362,7 @@ def main(
             logging.getLogger("autodoc.spec_from_policy").debug(
                 "derived spec: %s", derived
             )
-            doc_spec = _doc_spec_from_dict(derived)
+            doc_spec = _doc_spec_from_dict(derived, template_id=derive_spec_type)
         else:
             console.print(f"\n[bold blue]Loading specification:[/] {spec}")
             doc_spec = DocumentSpec.from_yaml(spec)
@@ -459,12 +462,35 @@ def main(
 
         # Write to handoff filesystem path if Portal requested it.
         if output_file:
+            import hashlib
+            import json as _json
+            from datetime import datetime, timezone
             from dataset_store import get_store
             file_bytes = get_store().read_file(output_path)
             dest = Path(output_file)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(file_bytes)
             logging.getLogger(__name__).info("Wrote output to filesystem handoff path: %s", dest)
+
+            # Sidecar manifest so Portal can read the output path + metadata
+            # without guessing the filename convention. Schema is intentionally
+            # small and stable; any addition is non-breaking.
+            manifest = {
+                "schema_version": 1,
+                "output_path": str(dest),
+                "output_filename": dest.name,
+                "sha256": hashlib.sha256(file_bytes).hexdigest(),
+                "size_bytes": len(file_bytes),
+                "doc_type": doc_spec.template_id,
+                "template_label": doc_spec.template_label,
+                "title": doc_spec.title,
+                "bundle_id": (bundle_context or {}).get("bundle_id"),
+                "policy_version_id": (bundle_context or {}).get("policy_version_id"),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            manifest_path = dest.with_suffix(dest.suffix + ".manifest.json")
+            manifest_path.write_text(_json.dumps(manifest, indent=2, sort_keys=True))
+            logging.getLogger(__name__).info("Wrote manifest: %s", manifest_path)
 
         # Success!
         console.print(f"\n[bold green]Success![/] Document generated:")
@@ -579,7 +605,7 @@ def _init_cli_dataset_store() -> None:
         ) from exc
 
 
-def _doc_spec_from_dict(data: dict) -> DocumentSpec:
+def _doc_spec_from_dict(data: dict, template_id: str | None = None) -> DocumentSpec:
     """Build a DocumentSpec from an already-parsed dict (e.g. derived spec)."""
     sections = []
     for section in data.get("sections", []):
@@ -597,6 +623,8 @@ def _doc_spec_from_dict(data: dict) -> DocumentSpec:
         hints=data.get("hints", {}),
         citation_style=data.get("citation_style", "numeric"),
         formatting=data.get("formatting", {}),
+        template_id=template_id or data.get("template_id"),
+        template_label=data.get("template_label"),
     )
 
 

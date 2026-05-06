@@ -931,3 +931,113 @@ class TestCacheSpecFields:
         assert loaded_spec.hints == {"Overview": "Keep it brief"}
         assert loaded_spec.citation_style == "numeric"
         assert loaded_spec.formatting == {"font_size": 11}
+
+
+class TestDocTypeThreading:
+    """spec.template_id and section names thread through PLAN and GENERATE."""
+
+    @patch("autodoc.orchestrator.Orchestrator._save_results_cache")
+    @patch("autodoc.orchestrator.ArtifactScanner")
+    @patch("autodoc.orchestrator.CodeScanner")
+    @patch("autodoc.orchestrator.DocumentBuilder")
+    @patch("autodoc.orchestrator.SectionPlanner")
+    @patch("autodoc.orchestrator.ContentGenerator")
+    @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
+    def test_doc_type_and_other_sections_propagate(
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as,
+        mock_save_cache,
+    ):
+        orch = Orchestrator(
+            llm=_make_mock_llm(),
+            sanitizer=_make_mock_sanitizer(),
+            code_root=Path("/tmp"),
+        )
+        orch.planner.slice_for_section = lambda section, bc: bc
+        orch.code_scanner.scan = AsyncMock(return_value=CodeContext())
+        orch.artifact_scanner.scan = AsyncMock(return_value=ArtifactContext())
+
+        plan_contexts = []
+
+        async def capture_plan(section, context):
+            plan_contexts.append(context)
+            return SectionPlan(
+                number="1", name=section.name, title=section.name,
+                content_blocks=[ContentBlock(type=ContentType.NARRATIVE, purpose="d")],
+            )
+
+        orch.planner.plan_section = capture_plan
+
+        gen_contexts = []
+
+        async def capture_gen(block, context):
+            gen_contexts.append(context)
+            return GeneratedContent(block_type=ContentType.NARRATIVE, content="t")
+
+        orch.generator.generate = capture_gen
+        orch.builder.build = AsyncMock(return_value=Path("/tmp/out.docx"))
+
+        spec = DocumentSpec(
+            title="MDD",
+            authors="t",
+            sections=[
+                SectionSpec(name="Purpose"),
+                SectionSpec(name="Limitations"),
+                SectionSpec(name="Governance"),
+            ],
+            template_id="mdd",
+        )
+        asyncio.get_event_loop().run_until_complete(orch.generate(spec))
+
+        # Every plan + gen context carries doc_type and the OTHER section names
+        assert len(plan_contexts) == 3
+        assert len(gen_contexts) == 3
+        for ctx in plan_contexts + gen_contexts:
+            assert ctx.doc_type == "mdd"
+            # Self-section excluded; the other two should be present.
+            assert ctx.section_name not in ctx.other_sections
+            assert len(ctx.other_sections) == 2
+
+    @patch("autodoc.orchestrator.Orchestrator._save_results_cache")
+    @patch("autodoc.orchestrator.ArtifactScanner")
+    @patch("autodoc.orchestrator.CodeScanner")
+    @patch("autodoc.orchestrator.DocumentBuilder")
+    @patch("autodoc.orchestrator.SectionPlanner")
+    @patch("autodoc.orchestrator.ContentGenerator")
+    @patch("autodoc.orchestrator.detect_language", return_value=(PYTHON_PROFILE, 1))
+    def test_no_template_id_leaves_doc_type_none(
+        self, mock_detect, mock_gen, mock_planner, mock_builder, mock_cs, mock_as,
+        mock_save_cache,
+    ):
+        """Backward compat: user YAML with no template_id → doc_type stays None."""
+        orch = Orchestrator(
+            llm=_make_mock_llm(),
+            sanitizer=_make_mock_sanitizer(),
+            code_root=Path("/tmp"),
+        )
+        orch.planner.slice_for_section = lambda section, bc: bc
+        orch.code_scanner.scan = AsyncMock(return_value=CodeContext())
+        orch.artifact_scanner.scan = AsyncMock(return_value=ArtifactContext())
+
+        captured = []
+
+        async def capture_plan(section, context):
+            captured.append(context)
+            return SectionPlan(
+                number="1", name=section.name, title=section.name,
+                content_blocks=[ContentBlock(type=ContentType.NARRATIVE, purpose="d")],
+            )
+
+        orch.planner.plan_section = capture_plan
+
+        async def capture_gen(block, context):
+            captured.append(context)
+            return GeneratedContent(block_type=ContentType.NARRATIVE, content="t")
+
+        orch.generator.generate = capture_gen
+        orch.builder.build = AsyncMock(return_value=Path("/tmp/out.docx"))
+
+        asyncio.get_event_loop().run_until_complete(orch.generate(_make_spec()))
+
+        assert captured
+        for ctx in captured:
+            assert ctx.doc_type is None
