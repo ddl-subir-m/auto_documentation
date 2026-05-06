@@ -53,6 +53,17 @@ console = Console()
     ),
 )
 @click.option(
+    "--canonical-spec",
+    "canonical_spec_type",
+    default=None,
+    type=click.Choice(list(VALID_DOC_TYPES)),
+    help=(
+        "Load the canonical template for this doc_type directly, skipping "
+        "policy derivation. Bundle context (if provided) is still used for "
+        "LLM grounding. One of: {}.".format("|".join(VALID_DOC_TYPES))
+    ),
+)
+@click.option(
     "--code-root",
     "-c",
     type=click.Path(exists=True),
@@ -211,6 +222,7 @@ def main(
     policy_version_id: str | None,
     context_file: str | None,
     derive_spec_type: str | None,
+    canonical_spec_type: str | None,
     output_file: str | None,
 ) -> None:
     """Generate model documentation from ML codebases.
@@ -256,10 +268,11 @@ def main(
         )
         raise SystemExit(2)
 
-    # Exactly one of --spec or --derive-spec must be present.
-    if not spec and not derive_spec_type:
+    # Exactly one of --spec, --derive-spec, or --canonical-spec must be present.
+    if not spec and not derive_spec_type and not canonical_spec_type:
         console.print(
-            "[bold red]Error:[/] one of --spec or --derive-spec is required.",
+            "[bold red]Error:[/] one of --spec, --derive-spec, or "
+            "--canonical-spec is required.",
             style="red",
         )
         raise SystemExit(2)
@@ -329,7 +342,13 @@ def main(
             model_names = [name.strip() for name in models.split(",") if name.strip()]
 
         # Load document spec
-        if derive_spec_type:
+        if canonical_spec_type:
+            console.print(
+                f"\n[bold blue]Loading canonical specification:[/] "
+                f"(doc_type={canonical_spec_type})"
+            )
+            doc_spec = _doc_spec_from_dict(derive_spec(None, canonical_spec_type))
+        elif derive_spec_type:
             console.print(
                 f"\n[bold blue]Deriving specification from policy_def[/] "
                 f"(doc_type={derive_spec_type})"
