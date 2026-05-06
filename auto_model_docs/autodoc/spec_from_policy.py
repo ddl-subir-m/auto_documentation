@@ -112,9 +112,9 @@ def _walk_domino_policy(policy: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Return ``(stage_names, artifact_labels)`` from a parsed Domino policy.
 
     Walks ``stages[].evidenceSet[]`` for both ``definition`` (raw YAML
-    shape) and ``artifacts`` (computed-policy shape), plus
-    ``stages[].approvals[].evidence`` for the same two keys. Mirrors the
-    traversal in Portal's ``shared/governance_writeback.py``.
+    shape) and ``artifacts`` (computed-policy shape). Approval sign-off
+    questions (``stages[].approvals[]``) are skipped — those are workflow
+    gate questions, not documentation sections.
     """
     stage_names: list[str] = []
     artifact_labels: list[str] = []
@@ -134,17 +134,6 @@ def _walk_domino_policy(policy: dict[str, Any]) -> tuple[list[str], list[str]]:
             if not isinstance(es, dict):
                 continue
             for art in (es.get("definition") or es.get("artifacts") or []):
-                label = _artifact_label(art)
-                if label:
-                    artifact_labels.append(label)
-
-        for approval in stage.get("approvals") or []:
-            if not isinstance(approval, dict):
-                continue
-            ev = approval.get("evidence")
-            if not isinstance(ev, dict):
-                continue
-            for art in (ev.get("definition") or ev.get("artifacts") or []):
                 label = _artifact_label(art)
                 if label:
                     artifact_labels.append(label)

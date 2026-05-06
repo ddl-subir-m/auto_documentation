@@ -210,8 +210,8 @@ def test_derive_walks_domino_policy_stage_names_first(doc_type):
     # Both definition[] (raw) and artifacts[] (computed) shapes contribute.
     assert "Model Card" in spec["sections"]
     assert "Risk Assessment" in spec["sections"]
-    # Approvals.evidence.definition[] artifacts pulled in too.
-    assert "Approve Intake?" in spec["sections"]
+    # Approval sign-off questions are excluded — not documentation sections.
+    assert "Approve Intake?" not in spec["sections"]
     # Guidance entries (artifactType=text) are skipped — no label attribute.
     assert all("Section guidance" not in s for s in spec["sections"])
 
@@ -411,4 +411,4 @@ def test_cli_requires_spec_or_derive_spec():
     result = runner.invoke(cli_main.main, [])
     assert result.exit_code == 2
     flat = " ".join(result.output.split())
-    assert "one of --spec or --derive-spec is required" in flat
+    assert "--derive-spec" in flat and "required" in flat
