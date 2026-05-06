@@ -1,8 +1,14 @@
 # Implementation Plan — MRM Portal × autodoc integration
 
-> Last updated: 2026-05-05 (Phase C shipped in `domino-field/MRM-Portal@feature/autodoc-integration`; `--canonical-spec` CLI flag added; "Derive from policy" ungreyed in modal; next: deploy autodoc wheel to Domino compute env)
+> Last updated: 2026-05-06 (spec_from_policy approvals fix; handover docs added)
 > Source of truth for **what to build and in what order**.
 > For product rationale see `PRD_v2.md`. For architecture decisions see the design doc at `~/.gstack/projects/ddl-subir-m-auto_documentation/subirmansukhani-feature-mrm-portal-integration-design-20260422-111457.md`. This file is the implementer's roadmap.
+>
+> **Handover docs:**
+> - [`docs/deployment/project-setup-guide.md`](docs/deployment/project-setup-guide.md) — env vars, dataset mounts, target project wiring
+> - [`docs/deployment/autodoc-env-image.md`](docs/deployment/autodoc-env-image.md) — wheel build + compute environment image
+> - [`docs/portal-integration-contract.md`](docs/portal-integration-contract.md) — context file schema, CLI flags, output handoff, failure modes
+> - [`docs/spec-from-policy-decisions.md`](docs/spec-from-policy-decisions.md) — why `spec_from_policy` works the way it does
 
 ## The solution in one paragraph
 
