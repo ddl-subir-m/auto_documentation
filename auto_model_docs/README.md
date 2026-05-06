@@ -45,7 +45,18 @@ The Studio UI provides a 3-column workflow: spec file selection (Domino Dataset 
 ### CLI
 
 ```bash
+# Spec-file mode (standalone, no Portal)
 python auto_model_docs/main.py --spec doc_spec.yaml --code-root /path/to/code
+
+# Portal integration — canonical template (sections fixed, bundle context used for grounding)
+python auto_model_docs/main.py \
+  --bundle-id <id> --policy-version-id <id> --context-file ctx_<uuid>.json \
+  --canonical-spec mdd --provider anthropic
+
+# Portal integration — derive sections from governance policy
+python auto_model_docs/main.py \
+  --bundle-id <id> --policy-version-id <id> --context-file ctx_<uuid>.json \
+  --derive-spec mdd --provider anthropic
 ```
 
 ## Configuration

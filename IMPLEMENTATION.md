@@ -1,6 +1,6 @@
 # Implementation Plan — MRM Portal × autodoc integration
 
-> Last updated: 2026-04-23 (Phase A + B shipped; U17 + U18 shipped ahead of Phase C; wheel packaging + boundary tests + phase-2 provenance shipped; Phase C still blocked on Portal write access)
+> Last updated: 2026-05-05 (Phase C shipped in `domino-field/MRM-Portal@feature/autodoc-integration`; `--canonical-spec` CLI flag added; "Derive from policy" ungreyed in modal; next: deploy autodoc wheel to Domino compute env)
 > Source of truth for **what to build and in what order**.
 > For product rationale see `PRD_v2.md`. For architecture decisions see the design doc at `~/.gstack/projects/ddl-subir-m-auto_documentation/subirmansukhani-feature-mrm-portal-integration-design-20260422-111457.md`. This file is the implementer's roadmap.
 
@@ -25,7 +25,7 @@ A validator opens a model page in the MRM Portal, clicks **Generate documentatio
 | Job → governance API | One call only: POST attachment at BUILD end. Zero reads. |
 | Generation cache | OUT of MVP. Every click runs a Job (after per-bundle lock check). |
 | Content hash | REMOVED. No hash, no drift detection. |
-| Spec source at MVP | Canonical templates only. Policy-derivation and user upload deferred post-MVP. |
+| Spec source | Canonical template (`--canonical-spec`) and derive from policy (`--derive-spec`) both available. Upload deferred post-MVP behind `AUTODOC_INLINE_SPEC_EDIT` flag. |
 | F4.1 inline spec editor | Deferred post-MVP behind `AUTODOC_INLINE_SPEC_EDIT` flag. |
 | Studio retirement | Full port, ships last. Expect >50% slip risk. Week-0 dual-deploy dry-run mitigation (see TODOS.md). |
 | Modal vs drawer | Ant Modal (~560px, centered). |
@@ -46,12 +46,12 @@ A validator opens a model page in the MRM Portal, clicks **Generate documentatio
 | U6 — Orchestrator bundle-context plumbing | B | ✅ Shipped | PR #8 (`ef65979`) |
 | U7 — Provenance stamping | B | ✅ Shipped | PR #7 (`426a668`) |
 | U8 — LLM metadata-citation eval (gates M1) | B | ✅ Shipped | PR #10 (`a78e934`) + skipif fix PR #11 (`7a96bc4`) |
-| U9 — Portal attachment wrapper | C | ⏸️ Blocked on Portal write access | — |
-| U10 — Portal autodoc blueprint | C | ⏸️ Blocked on U9 + Portal access | — |
-| U10.5 — Cleanup cron | C | ⏸️ Blocked on U10 | — |
-| U11 — Portal soft lock | C | ⏸️ Blocked on Portal write access | — |
-| U12 — Model detail UI | C | ⏸️ Blocked on U10 + U11 | — |
-| U13 — Playwright E2E | C | ⏸️ Blocked on U12 | — |
+| U9 — Portal attachment wrapper | C | ✅ Shipped | `domino-field/MRM-Portal@feature/autodoc-integration` |
+| U10 — Portal autodoc blueprint | C | ✅ Shipped | `domino-field/MRM-Portal@feature/autodoc-integration` |
+| U10.5 — Cleanup cron | C | ✅ Shipped | `domino-field/MRM-Portal@feature/autodoc-integration` |
+| U11 — Portal soft lock | C | ✅ Shipped | `domino-field/MRM-Portal@feature/autodoc-integration` |
+| U12 — Model detail UI | C | ✅ Shipped | `domino-field/MRM-Portal@feature/autodoc-integration` |
+| U13 — Playwright E2E | C | ✅ Shipped | `domino-field/MRM-Portal@feature/autodoc-integration` |
 | U14 — `MRM-Portal/DESIGN.md` | D | ⏸️ Not started | — |
 | U15 — Studio retirement | D | ⏸️ Not started (post-MVP soak) | — |
 | U16 — F4.1 inline spec editor | D | ⏸️ Not started (flagged) | — |
@@ -65,6 +65,7 @@ A validator opens a model page in the MRM Portal, clicks **Generate documentatio
 | B3 — autodoc wheel packaging + env-image deployment guide | ✅ Shipped | PR #13 (`14b433f`) |
 | Governance boundary contract tests (403/409/429/401) | ✅ Shipped | PR #14 (`61a1773`) |
 | Phase-2 provenance fields (generator_version, template_version, run_environment) | ✅ Shipped | PR #15 (`de37554`) |
+| `--canonical-spec` CLI flag + "Derive from policy" ungreyed in modal | ✅ Shipped | `a8a9789` (autodoc) + `95159d1` (Portal) |
 
 **Infra shipped:**
 - `.github/workflows/ci.yml` — pytest on PRs/pushes to `feature/mrm-portal-integration`.
@@ -72,7 +73,7 @@ A validator opens a model page in the MRM Portal, clicks **Generate documentatio
 - Both workflows now live on `master` (PR #18 / `03cdc49`). Required because GitHub's `workflow_run` trigger only fires when the listener workflow is on the default branch; during the U17/U18 wave the 5 PRs had green CI but Auto-merge never fired (squash-merged by hand). Fixed going forward.
 - Target branch stays `feature/mrm-portal-integration`; master stays human-review-only.
 
-**Next unblock:** Write access to `domino-field/MRM-Portal` (pinged Nick Goble, no reply yet). Once granted, create `feature/autodoc-integration` on Portal and start Phase C. Nothing autodoc-side is blocked.
+**Next step:** Deploy the autodoc wheel (`auto_model_docs/dist/auto_model_docs-0.1.0-py3-none-any.whl`) to the Domino compute environment image per `docs/deployment/autodoc-env-image.md`, then run an end-to-end smoke test in Domino.
 
 ## The sequence
 
